@@ -1,6 +1,8 @@
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import type {
   AgentProfile,
@@ -64,6 +66,26 @@ export interface AgentRunOptions {
   onProgress?: (message: string) => void;
 }
 
+/**
+ * Resolve the Pi executable the same way Pi's bundled subagent extension does.
+ * This keeps packaged/runtime-launched extensions on the same CLI version and
+ * uses PATH only when the extension is running under a generic node/bun host.
+ */
+export function getPiInvocation(args: string[]): {
+  command: string;
+  args: string[];
+} {
+  const currentScript = process.argv[1];
+  const isBunVirtualScript = currentScript?.startsWith('/$bunfs/root/');
+  if (currentScript && !isBunVirtualScript && existsSync(currentScript))
+    return { command: process.execPath, args: [currentScript, ...args] };
+
+  const execName = path.basename(process.execPath).toLowerCase();
+  const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(execName);
+  if (!isGenericRuntime) return { command: process.execPath, args };
+  return { command: 'pi', args };
+}
+
 async function readPrompt(root: string, relativePath: string): Promise<string> {
   const candidates = [
     path.isAbsolute(relativePath)
@@ -123,12 +145,18 @@ export async function runAgent(
   if (profile.provider) args.push('--provider', profile.provider);
   if (profile.model) args.push('--model', profile.model);
   if (profile.thinking) args.push('--thinking', profile.thinking);
-  args.push('--append-system-prompt', prompt, task);
+  const promptDir = await fs.mkdtemp(path.join(tmpdir(), 'pi-workflow-'));
+  const promptPath = path.join(promptDir, `${role}.md`);
+  await fs.writeFile(promptPath, prompt, { encoding: 'utf8', mode: 0o600 });
+  args.push('--append-system-prompt', promptPath, task);
   const config = (await readConfig(root)) as WorkflowConfig;
   const timeoutMs = profile.timeoutMs ?? config.agentTimeoutMs ?? 300_000;
+  const invocation = getPiInvocation(args);
   return new Promise((resolve, reject) => {
-    const child = spawn('pi', args, {
+    const child = spawn(invocation.command, invocation.args, {
       cwd: root,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, PI_WORKFLOW_ROLE: role },
       signal: options.signal,
     });
@@ -145,6 +173,7 @@ export async function runAgent(
     const cleanup = () => {
       clearTimeout(timer);
       clearInterval(heartbeat);
+      void fs.rm(promptDir, { recursive: true, force: true });
     };
     const fail = (error: Error) => {
       if (settled) return;
@@ -169,7 +198,15 @@ export async function runAgent(
         );
       }
     });
+    child.on('spawn', () => {
+      options.onProgress?.(
+        `${role} child started (pid ${child.pid ?? 'unknown'}, cwd ${root}).`,
+      );
+    });
     timer = setTimeout(() => {
+      options.onProgress?.(
+        `${role} exceeded its ${timeoutMs}ms timeout; terminating child.`,
+      );
       child.kill('SIGTERM');
       fail(new Error(`${role} agent timed out after ${timeoutMs}ms`));
     }, timeoutMs);

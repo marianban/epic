@@ -59,6 +59,16 @@ test("R comments preserve line numbers and support Windows line endings", () => 
   assert.deepEqual(instructions.map((item) => [item.lineNumber, item.text]), [[2, "first request"], [4, "second request"]]);
 });
 
+test("R comments can be appended to plan lines", () => {
+  const instructions = extractReviewInstructions(
+    "- Support keyboard controls. R: remove pointer controls.\n- Use three lives. R: keep the default lives count.",
+  );
+  assert.deepEqual(instructions.map((item) => [item.lineNumber, item.text]), [
+    [1, "remove pointer controls."],
+    [2, "keep the default lives count."],
+  ]);
+});
+
 test("plan validation and approval hash are deterministic", () => {
   assert.deepEqual(validatePlanCompleteness(validPlan).valid, true);
   assert.equal(hashPlan(validPlan), hashPlan(validPlan));

@@ -20,7 +20,7 @@ The initial Scout is not necessarily the only discovery pass. A Planner may retu
 - `/workflow-status` shows persisted state and the pending human action.
 - `/workflow-resume` resumes safe in-progress work or retries a failed pre-plan run as a new audited run.
 - `/workflow-cancel` cancels without reverting repository changes.
-- `/plan-review` extracts lines matching `^\s*R:\s*(.+?)\s*$` and asks the Planner to revise.
+- `/plan-review` extracts standalone or trailing inline `R:` comments and asks the Planner to revise.
 - `/plan-revise` forces a Planner revision.
 - `/plan-approve` validates the plan, hashes it, and completes the planning phase. Unresolved `R:` lines are rejected.
 

@@ -18,7 +18,8 @@ export const REQUIRED_PLAN_SECTIONS = [
 
 export function extractReviewInstructions(markdown: string): PlanReviewInstruction[] {
   return markdown.split(/\r?\n/).flatMap((line, index) => {
-    const match = line.match(/^\s*R:\s*(.+?)\s*$/);
+    // Accept both dedicated comment lines and comments appended to a plan line.
+    const match = line.match(/(?:^|\s)R:\s*(.+?)\s*$/);
     return match ? [{ lineNumber: index + 1, text: match[1], rawLine: line }] : [];
   });
 }
