@@ -1,0 +1,16 @@
+{
+  "maxScoutRounds": 3,
+  "commandTimeoutMs": 120000,
+  "agentTimeoutMs": 300000,
+  "maxOutputBytes": 20000,
+  "checks": {
+    "fast": ["git diff --check", "npm run typecheck", "npm run lint"],
+    "full": ["npm test -- --run", "npm run build", "fallow check --format json"],
+    "focusedTests": "npm test -- --run",
+    "fallow": "fallow check --format json"
+  },
+  "agents": {
+    "scout": { "provider": "ollama", "model": "qwen3.6-35b-a3b", "thinking": "low" },
+    "planner": { "provider": "openai-codex", "model": "codex-model", "thinking": "high" }
+  }
+}
