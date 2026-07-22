@@ -33,6 +33,11 @@
       "model": "gpt-5.6-luna",
       "thinking": "low"
     },
+    "task-reviewer": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "thinking": "low"
+    },
     "reviewer": {
       "provider": "openai-codex",
       "model": "gpt-5.6-luna",

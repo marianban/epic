@@ -7,6 +7,7 @@ export type WorkflowStage =
   | "revising_plan"
   | "awaiting_plan_approval"
   | "decomposing_tasks"
+  | "awaiting_task_approval"
   | "awaiting_task_review"
   | "revising_task"
   | "checking_prerequisites"
@@ -26,7 +27,7 @@ export type WorkflowStage =
   | "cancelled";
 
 export type TaskComplexity = "simple" | "moderate" | "complex";
-export type AgentRole = "orchestrator" | "scout" | "planner" | "plan-reviewer" | "implementer" | "reviewer";
+export type AgentRole = "orchestrator" | "scout" | "planner" | "plan-reviewer" | "task-reviewer" | "implementer" | "reviewer";
 export type PendingHumanAction = "review_plan" | "approve_plan" | "approve_prerequisites" | "review_task" | "approve_task" | "resolve_escalation" | "none";
 export type CheckSuiteName = "fast" | "full" | "final";
 export type Severity = "error" | "warning" | "info";

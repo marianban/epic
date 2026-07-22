@@ -70,6 +70,10 @@ test("approved plans can enter implementation and follow every mandatory gate", 
   assert.equal(state.stage, "completed");
   assert.equal(canTransition("awaiting_plan_approval", "implementing"), false);
   assert.equal(canTransition("awaiting_plan_approval", "checking_prerequisites"), true);
+  assert.equal(canTransition("decomposing_tasks", "awaiting_task_approval"), true);
+  assert.equal(canTransition("awaiting_task_approval", "implementing"), true);
+  assert.equal(canTransition("awaiting_task_review", "awaiting_task_approval"), true);
+  assert.equal(canTransition("awaiting_task_approval", "running_fast_checks"), false);
   assert.equal(canTransition("checking_prerequisites", "awaiting_prerequisite_approval"), true);
   assert.equal(canTransition("preparing_prerequisites", "implementing"), true);
   assert.equal(canTransition("implementing", "checking_prerequisites"), true);

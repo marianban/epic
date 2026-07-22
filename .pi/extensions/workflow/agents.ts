@@ -44,6 +44,14 @@ export const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
     temperature: 0.1,
     thinking: 'low',
   },
+  'task-reviewer': {
+    role: 'task-reviewer',
+    systemPromptPath: '.pi/agents/task-reviewer.md',
+    tools: ['read', 'grep', 'find', 'ls'],
+    readOnly: true,
+    temperature: 0.1,
+    thinking: 'low',
+  },
   implementer: {
     role: 'implementer',
     systemPromptPath: '.pi/agents/implementer.md',

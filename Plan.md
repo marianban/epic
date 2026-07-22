@@ -52,7 +52,12 @@ Human reviews plan.md
     ↓
 Planner revises plan.md until approved
     ↓
-Implementer modifies repository
+Human reviews each decomposed task
+    ├── adds R: comments
+    ├── task-reviewer revises task artifact
+    └── approves task
+    ↓
+Implementer modifies repository for approved task
     ↓
 Deterministic verification
     ├── git diff --check
@@ -67,6 +72,7 @@ Reviewer performs semantic review
 Repair loop
     ├── deterministic failure → Implementer
     ├── semantic issue → Implementer
+    └── human task R: finding → Implementer
     └── repeated failure → escalation
     ↓
 Final verification

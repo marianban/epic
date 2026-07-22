@@ -5,7 +5,7 @@ import { parseJsonResponse, parseMarkdownResponse, parsePlannerResponse, parseTa
 import { appendEvent, loadActiveWorkflow, markTerminal, persistJsonArtifact, persistScoutReport, persistTask, persistWorkflowTasks, saveState, transition, writePlanRevision } from "./persistence.ts";
 import { extractReviewInstructions, hashPlan, validatePlanCompleteness, validatePlanRevision } from "./plan-review.ts";
 import { assertApprovedPlan, assertStage, classifyTask, createWorkflowState } from "./state.ts";
-import { implementerTask, plannerTask, reviewerTask, scoutTask, taskDecompositionTask } from "./prompts.ts";
+import { implementerTask, plannerTask, reviewerTask, scoutTask, taskDecompositionTask, taskReviewTask } from "./prompts.ts";
 import type { CheckSuiteResult, ReviewResult, ScoutReport, WorkflowConfig, WorkflowState } from "./types.ts";
 import { logWorkflow } from "./logger.ts";
 import { getCurrentDiff } from "./diff.ts";
@@ -86,8 +86,7 @@ export async function approvePlan(ctx: ExtensionCommandContext): Promise<void> {
   await appendEvent(state, "tasks_decomposed", { count: state.tasks.length, path: state.taskPlanPath });
   await transition(state, "checking_prerequisites", { phase: "prerequisites" });
   if (await checkAndGatePrerequisites(state, ctx)) return;
-  await transition(state, "implementing", { phase: "implementation" });
-  await executeImplementation(state, ctx);
+  await pauseForTaskApproval(state, ctx);
 }
 
 export async function approvePrerequisites(ctx: ExtensionCommandContext): Promise<void> {
@@ -101,8 +100,12 @@ export async function approvePrerequisites(ctx: ExtensionCommandContext): Promis
     state.pendingHumanAction = "none";
     await saveState(state);
     await appendEvent(state, "prerequisites_applied", { commands: (state.prerequisites ?? []).map((item) => item.command) });
-    await transition(state, "implementing", { phase: "implementation" });
-    await executeImplementation(state, ctx, state.implementationAttempt > 0);
+    if (state.implementationAttempt > 0) {
+      await transition(state, "implementing", { phase: "implementation_after_prerequisites" });
+      await executeImplementation(state, ctx, true);
+    } else {
+      await pauseForTaskApproval(state, ctx);
+    }
   } catch (error) {
     await failSafely(state, error);
     notify(ctx, `Workflow ${state.workflowId} failed while preparing prerequisites: ${String(error)}`, "error");
@@ -113,7 +116,7 @@ export async function approvePrerequisites(ctx: ExtensionCommandContext): Promis
 export async function resumeWorkflow(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd);
   if (["completed", "cancelled"].includes(state.stage)) { notify(ctx, `Workflow ${state.workflowId} is already ${state.stage}.`); return; }
-  if (["awaiting_plan_review", "awaiting_plan_approval", "awaiting_task_review"].includes(state.stage)) { notify(ctx, `Workflow ${state.workflowId} is paused at ${state.stage}. Pending action: ${state.pendingHumanAction ?? "none"}.`); return; }
+  if (["awaiting_plan_review", "awaiting_plan_approval", "awaiting_task_approval", "awaiting_task_review"].includes(state.stage)) { notify(ctx, `Workflow ${state.workflowId} is paused at ${state.stage}. Pending action: ${state.pendingHumanAction ?? "none"}.`); return; }
   if (state.stage === "awaiting_prerequisite_approval") { notify(ctx, `Workflow ${state.workflowId} is paused for prerequisite approval. Run /workflow-approve-prerequisites to continue, or /workflow-cancel.`); return; }
   if (state.stage === "escalating") { state.pendingHumanAction = "none"; await saveState(state); await transition(state, "implementing", { reason: "escalation resolved by resume" }); await executeImplementation(state, ctx); return; }
   if (state.stage === "scouting") { await discoverAndPlan(state, ctx, true); return; }
@@ -136,7 +139,7 @@ export async function workflowStatus(ctx: ExtensionCommandContext): Promise<void
 
 export async function approveTask(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd);
-  assertStage(state, ["awaiting_task_review"]);
+  assertStage(state, ["awaiting_task_approval", "awaiting_task_review"]);
   const task = assertTaskManifest(state);
   const taskPath = path.join(state.repositoryRoot, ".pi", "workflows", "runs", state.workflowId, "tasks", `task-${String(state.currentTaskIndex + 1).padStart(3, "0")}.md`);
   const markdown = await fs.readFile(taskPath, "utf8");
@@ -145,6 +148,12 @@ export async function approveTask(ctx: ExtensionCommandContext): Promise<void> {
   state.taskApprovedAt = new Date().toISOString();
   state.pendingHumanAction = "none";
   await appendEvent(state, "task_approved", { taskId: task.id, index: state.currentTaskIndex });
+  if (state.stage === "awaiting_task_approval") {
+    await saveState(state);
+    await transition(state, "implementing", { taskId: task.id, phase: "implementation" });
+    await executeImplementation(state, ctx);
+    return;
+  }
   if (state.currentTaskIndex + 1 >= (state.tasks?.length ?? 0)) {
     await transition(state, "final_verification", { phase: "all_tasks_approved" });
     const final = await runSuite(state, ctx, "final", "final_verification");
@@ -162,19 +171,31 @@ export async function approveTask(ctx: ExtensionCommandContext): Promise<void> {
   state.fastRepairAttempt = 0;
   state.fullRepairAttempt = 0;
   state.semanticRepairAttempt = 0;
-  await saveState(state);
-  await transition(state, "implementing", { taskId: state.tasks?.[state.currentTaskIndex]?.id });
-  await executeImplementation(state, ctx);
+  await pauseForTaskApproval(state, ctx);
 }
 
 export async function reviseTask(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd);
-  assertStage(state, ["awaiting_task_review"]);
+  const preImplementationReview = state.stage === "awaiting_task_approval";
+  assertStage(state, ["awaiting_task_approval", "awaiting_task_review"]);
   const task = assertTaskManifest(state);
   const taskPath = path.join(state.repositoryRoot, ".pi", "workflows", "runs", state.workflowId, "tasks", `task-${String(state.currentTaskIndex + 1).padStart(3, "0")}.md`);
   const instructions = extractReviewInstructions(await fs.readFile(taskPath, "utf8"));
   if (instructions.length === 0) throw new Error("Add R: findings to the current task artifact before running /task-review.");
   await transition(state, "revising_task", { taskId: task.id });
+  if (preImplementationReview) {
+    const currentTask = await fs.readFile(taskPath, "utf8");
+    const run = await runRole(ctx, state, "task-reviewer", taskReviewTask(state, currentTask, instructions), "pre-implementation task revision");
+    if (run.exitCode !== 0) throw new Error(`Task reviewer revision failed: ${run.stderr || run.output.slice(-2_000)}`);
+    const revised = parseMarkdownResponse(run.output, "task-reviewer");
+    if (extractReviewInstructions(revised).length > 0) throw new Error("Task reviewer left unresolved R: findings in the task artifact.");
+    await fs.writeFile(taskPath, `${revised}\n`, "utf8");
+    state.pendingHumanAction = "review_task";
+    await saveState(state);
+    await transition(state, "awaiting_task_approval", { taskId: task.id, reason: "task artifact revised" });
+    notify(ctx, `Task ${task.id} was revised. Review it again, then run /task-approve or add more R: findings and run /task-review.`);
+    return;
+  }
   const feedback = instructions.map((item) => `line ${item.lineNumber}: ${item.text}`).join("\n");
   await runImplementer(state, ctx, await fs.readFile(state.planPath, "utf8"), `Human task review findings:\n${feedback}`);
   const taskMarkdown = await fs.readFile(taskPath, "utf8");
@@ -342,8 +363,18 @@ async function checkAndGatePrerequisites(state: WorkflowState, ctx: ExtensionCom
   return true;
 }
 
+async function pauseForTaskApproval(state: WorkflowState, ctx: ExtensionCommandContext): Promise<void> {
+  state.taskApproved = false;
+  state.taskApprovedAt = undefined;
+  state.pendingHumanAction = "review_task";
+  await saveState(state);
+  await transition(state, "awaiting_task_approval", { taskId: state.tasks?.[state.currentTaskIndex]?.id, phase: "pre_implementation_review" });
+  notify(ctx, `Task ${state.currentTaskIndex + 1}/${state.tasks?.length ?? 0} is ready for human review. Review its task artifact, add R: comments if needed, then run /task-review or /task-approve.`);
+}
+
 async function runImplementer(state: WorkflowState, ctx: ExtensionCommandContext, plan: string, feedback = ""): Promise<void> {
-  const run = await runRole(ctx, state, "implementer", implementerTask(state, plan, feedback), feedback ? "bounded repair" : "implementation");
+  const taskArtifact = await readCurrentTaskArtifact(state);
+  const run = await runRole(ctx, state, "implementer", implementerTask(state, plan, feedback, taskArtifact), feedback ? "bounded repair" : "implementation");
   if (run.exitCode !== 0) throw new Error(`Implementer failed: ${run.stderr || run.output.slice(-2_000)}`);
   await appendEvent(state, "implementation_result", { attempt: state.implementationAttempt, output: run.output.slice(-4_000) });
 }
@@ -367,7 +398,8 @@ async function runSuite(state: WorkflowState, ctx: ExtensionCommandContext, suit
 async function runSemanticReview(state: WorkflowState, ctx: ExtensionCommandContext, plan: string, checks: CheckSuiteResult): Promise<ReviewResult> {
   await transition(state, "reviewing", { reason: "deterministic checks passed" });
   const diff = await getCurrentDiff(state.repositoryRoot);
-  const run = await runRole(ctx, state, "reviewer", reviewerTask(state, plan, diff, JSON.stringify(checks)), "semantic review");
+  const taskArtifact = await readCurrentTaskArtifact(state);
+  const run = await runRole(ctx, state, "reviewer", reviewerTask(state, plan, diff, JSON.stringify(checks), taskArtifact), "semantic review");
   if (run.exitCode !== 0) throw new Error(`Reviewer failed: ${run.stderr || run.output.slice(-2_000)}`);
   const review = parseJsonResponse<ReviewResult>(run.output, "reviewer");
   if (typeof review.passed !== "boolean" || !Array.isArray(review.findings)) throw new Error("Reviewer returned an invalid review result.");
@@ -376,6 +408,11 @@ async function runSemanticReview(state: WorkflowState, ctx: ExtensionCommandCont
   await saveState(state);
   notify(ctx, `Semantic review ${review.passed ? "passed" : "found issues"}.`);
   return review;
+}
+
+async function readCurrentTaskArtifact(state: WorkflowState): Promise<string> {
+  const taskPath = path.join(state.repositoryRoot, ".pi", "workflows", "runs", state.workflowId, "tasks", `task-${String(state.currentTaskIndex + 1).padStart(3, "0")}.md`);
+  return fs.readFile(taskPath, "utf8");
 }
 
 async function pauseForEscalation(state: WorkflowState, ctx: ExtensionCommandContext, reason: string): Promise<void> {
@@ -393,7 +430,7 @@ function formatReviewFeedback(review: ReviewResult): string {
   return JSON.stringify({ summary: review.summary, findings: review.findings.filter((finding) => ["blocker", "major"].includes(finding.severity)) });
 }
 
-async function runRole(ctx: ExtensionCommandContext, state: WorkflowState, role: "scout" | "planner" | "plan-reviewer" | "implementer" | "reviewer", task: string, action: string): Promise<Awaited<ReturnType<typeof runAgent>>> {
+async function runRole(ctx: ExtensionCommandContext, state: WorkflowState, role: "scout" | "planner" | "plan-reviewer" | "task-reviewer" | "implementer" | "reviewer", task: string, action: string): Promise<Awaited<ReturnType<typeof runAgent>>> {
   await appendEvent(state, "agent_started", { role, action });
   await logWorkflow(state, "info", "Agent started", { role, action, task });
   notify(ctx, `${role} started: ${action}.`);
@@ -437,7 +474,7 @@ function mergeScoutReports(base: ScoutReport, next: ScoutReport): ScoutReport {
 async function ensureNoActiveWorkflow(root: string): Promise<void> {
   try { const state = await loadActiveWorkflow(root); if (!["completed", "failed", "cancelled"].includes(state.stage)) throw new Error(`Workflow ${state.workflowId} is already active at stage ${state.stage}.`); } catch (error) { if (error instanceof Error && !/ENOENT|no such file/i.test(error.message)) throw error; }
 }
-function activeAgent(stage: WorkflowState["stage"]): string { return stage === "scouting" ? "scout" : ["planning", "decomposing_tasks"].includes(stage) ? "planner" : stage === "revising_plan" ? "plan-reviewer" : ["implementing", "repairing_fast_checks", "repairing_full_checks", "repairing_review", "revising_task"].includes(stage) ? "implementer" : stage === "reviewing" ? "reviewer" : "orchestrator"; }
+function activeAgent(stage: WorkflowState["stage"]): string { return stage === "scouting" ? "scout" : ["planning", "decomposing_tasks"].includes(stage) ? "planner" : stage === "revising_plan" ? "plan-reviewer" : stage === "revising_task" ? "task-reviewer" : ["implementing", "repairing_fast_checks", "repairing_full_checks", "repairing_review"].includes(stage) ? "implementer" : stage === "reviewing" ? "reviewer" : "orchestrator"; }
 function notify(ctx: ExtensionCommandContext, message: string, level: "info" | "warning" | "error" = "info"): void { ctx.ui.notify(message, level); }
 function assertTaskManifest(state: WorkflowState): NonNullable<WorkflowState["tasks"]>[number] {
   if (!state.tasks || state.tasks.length === 0 || !Number.isInteger(state.currentTaskIndex) || !state.tasks[state.currentTaskIndex]) {
