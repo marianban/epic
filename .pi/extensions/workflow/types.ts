@@ -26,7 +26,7 @@ export type WorkflowStage =
   | "cancelled";
 
 export type TaskComplexity = "simple" | "moderate" | "complex";
-export type AgentRole = "orchestrator" | "scout" | "planner" | "implementer" | "reviewer";
+export type AgentRole = "orchestrator" | "scout" | "planner" | "plan-reviewer" | "implementer" | "reviewer";
 export type PendingHumanAction = "review_plan" | "approve_plan" | "approve_prerequisites" | "review_task" | "approve_task" | "resolve_escalation" | "none";
 export type CheckSuiteName = "fast" | "full" | "final";
 export type Severity = "error" | "warning" | "info";

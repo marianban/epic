@@ -48,9 +48,9 @@ export async function reviewPlan(ctx: ExtensionCommandContext, force = false): P
   }
   await transition(state, "revising_plan");
   const report = await readScoutReport(state);
-  const run = await runRole(ctx, state, "planner", plannerTask(state, report, current, instructions), "plan revision");
-  if (run.exitCode !== 0) throw new Error(`Planner revision failed: ${run.stderr || run.output.slice(-2_000)}`);
-  const revised = parseMarkdownResponse(run.output, "planner");
+  const run = await runRole(ctx, state, "plan-reviewer", plannerTask(state, report, current, instructions), "plan revision");
+  if (run.exitCode !== 0) throw new Error(`Plan reviewer revision failed: ${run.stderr || run.output.slice(-2_000)}`);
+  const revised = parseMarkdownResponse(run.output, "plan-reviewer");
   validatePlanRevision(current, revised, instructions);
   await writePlanRevision(state, revised);
   await fs.writeFile(state.planPath, `${revised}\n`, "utf8");
@@ -393,7 +393,7 @@ function formatReviewFeedback(review: ReviewResult): string {
   return JSON.stringify({ summary: review.summary, findings: review.findings.filter((finding) => ["blocker", "major"].includes(finding.severity)) });
 }
 
-async function runRole(ctx: ExtensionCommandContext, state: WorkflowState, role: "scout" | "planner" | "implementer" | "reviewer", task: string, action: string): Promise<Awaited<ReturnType<typeof runAgent>>> {
+async function runRole(ctx: ExtensionCommandContext, state: WorkflowState, role: "scout" | "planner" | "plan-reviewer" | "implementer" | "reviewer", task: string, action: string): Promise<Awaited<ReturnType<typeof runAgent>>> {
   await appendEvent(state, "agent_started", { role, action });
   await logWorkflow(state, "info", "Agent started", { role, action, task });
   notify(ctx, `${role} started: ${action}.`);
@@ -437,7 +437,7 @@ function mergeScoutReports(base: ScoutReport, next: ScoutReport): ScoutReport {
 async function ensureNoActiveWorkflow(root: string): Promise<void> {
   try { const state = await loadActiveWorkflow(root); if (!["completed", "failed", "cancelled"].includes(state.stage)) throw new Error(`Workflow ${state.workflowId} is already active at stage ${state.stage}.`); } catch (error) { if (error instanceof Error && !/ENOENT|no such file/i.test(error.message)) throw error; }
 }
-function activeAgent(stage: WorkflowState["stage"]): string { return stage === "scouting" ? "scout" : ["planning", "revising_plan", "decomposing_tasks"].includes(stage) ? "planner" : ["implementing", "repairing_fast_checks", "repairing_full_checks", "repairing_review", "revising_task"].includes(stage) ? "implementer" : stage === "reviewing" ? "reviewer" : "orchestrator"; }
+function activeAgent(stage: WorkflowState["stage"]): string { return stage === "scouting" ? "scout" : ["planning", "decomposing_tasks"].includes(stage) ? "planner" : stage === "revising_plan" ? "plan-reviewer" : ["implementing", "repairing_fast_checks", "repairing_full_checks", "repairing_review", "revising_task"].includes(stage) ? "implementer" : stage === "reviewing" ? "reviewer" : "orchestrator"; }
 function notify(ctx: ExtensionCommandContext, message: string, level: "info" | "warning" | "error" = "info"): void { ctx.ui.notify(message, level); }
 function assertTaskManifest(state: WorkflowState): NonNullable<WorkflowState["tasks"]>[number] {
   if (!state.tasks || state.tasks.length === 0 || !Number.isInteger(state.currentTaskIndex) || !state.tasks[state.currentTaskIndex]) {

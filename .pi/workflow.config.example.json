@@ -13,9 +13,30 @@
     "fallow": "fallow check --format json"
   },
   "agents": {
-    "scout": { "provider": "ollama", "model": "qwen3.6-35b-a3b", "thinking": "low" },
-    "planner": { "provider": "openai-codex", "model": "codex-model", "thinking": "high" },
-    "implementer": { "provider": "openai-codex", "model": "codex-model", "thinking": "high" },
-    "reviewer": { "provider": "openai-codex", "model": "codex-model", "thinking": "high" }
+    "scout": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "thinking": "low"
+    },
+    "planner": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "thinking": "high"
+    },
+    "plan-reviewer": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "thinking": "low"
+    },
+    "implementer": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "thinking": "low"
+    },
+    "reviewer": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "thinking": "medium"
+    }
   }
 }
