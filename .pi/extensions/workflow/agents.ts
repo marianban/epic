@@ -9,6 +9,7 @@ import type {
   AgentRole,
   PlannerContextRequest,
   WorkflowConfig,
+  WorkflowTask,
 } from './types.ts';
 import { readConfig, redactSecrets } from './tools.ts';
 
@@ -325,4 +326,14 @@ export function parsePlannerResponse(
     // A normal planner response is Markdown, not JSON.
   }
   return parseMarkdownResponse(trimmed, 'planner');
+}
+
+export function parseTaskDecomposition(output: string): WorkflowTask[] {
+  const parsed = parseJsonResponse<{ tasks?: WorkflowTask[] }>(output, "planner");
+  if (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0) throw new Error("Planner returned no implementation tasks.");
+  for (const task of parsed.tasks) {
+    if (!task || typeof task.id !== "string" || typeof task.title !== "string" || typeof task.objective !== "string" || !Array.isArray(task.implementation) || !Array.isArray(task.acceptanceCriteria) || !Array.isArray(task.verification) || !Array.isArray(task.manualReviewSteps)) throw new Error("Planner returned an invalid task.");
+    if (task.acceptanceCriteria.length === 0 || task.manualReviewSteps.length === 0) throw new Error(`Task ${task.id} must include acceptance criteria and manual review steps.`);
+  }
+  return parsed.tasks;
 }

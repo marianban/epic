@@ -6,6 +6,9 @@ export type WorkflowStage =
   | "awaiting_plan_review"
   | "revising_plan"
   | "awaiting_plan_approval"
+  | "decomposing_tasks"
+  | "awaiting_task_review"
+  | "revising_task"
   | "checking_prerequisites"
   | "awaiting_prerequisite_approval"
   | "preparing_prerequisites"
@@ -24,7 +27,7 @@ export type WorkflowStage =
 
 export type TaskComplexity = "simple" | "moderate" | "complex";
 export type AgentRole = "orchestrator" | "scout" | "planner" | "implementer" | "reviewer";
-export type PendingHumanAction = "review_plan" | "approve_plan" | "approve_prerequisites" | "resolve_escalation" | "none";
+export type PendingHumanAction = "review_plan" | "approve_plan" | "approve_prerequisites" | "review_task" | "approve_task" | "resolve_escalation" | "none";
 export type CheckSuiteName = "fast" | "full" | "final";
 export type Severity = "error" | "warning" | "info";
 
@@ -44,6 +47,11 @@ export interface WorkflowState {
   planApproved: boolean;
   planApprovedAt?: string;
   approvedPlanHash?: string;
+  taskPlanPath?: string;
+  tasks?: WorkflowTask[];
+  currentTaskIndex: number;
+  taskApproved: boolean;
+  taskApprovedAt?: string;
   pendingHumanAction?: PendingHumanAction;
   prerequisites?: Prerequisite[];
   prerequisitesApprovedAt?: string;
@@ -58,6 +66,18 @@ export interface WorkflowState {
   lastReviewResultPath?: string;
   lastDiffPath?: string;
   failureReason?: string;
+}
+
+export interface WorkflowTask {
+  id: string;
+  title: string;
+  objective: string;
+  scope: { read: string[]; modify: string[]; create: string[]; delete: string[] };
+  implementation: string[];
+  acceptanceCriteria: string[];
+  verification: string[];
+  manualReviewSteps: string[];
+  risks: string[];
 }
 
 export interface Prerequisite {

@@ -16,21 +16,34 @@ export function plannerTask(state: WorkflowState, report: ScoutReport, currentPl
 }
 
 export function implementerTask(state: WorkflowState, plan: string, feedback = ""): string {
+  const task = state.tasks?.[state.currentTaskIndex];
   return [
-    "Implement the approved plan in the repository. Make the smallest complete change, preserve existing APIs unless the plan says otherwise, and do not modify plan.md or .pi/workflows.",
+    "Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify plan.md, task artifacts, or .pi/workflows.",
     `Task:\n${state.task}`,
     `Approved plan:\n${plan}`,
+    task ? `Current task:\n${JSON.stringify(task)}` : "No task manifest is available.",
     feedback ? `Repair feedback:\n${feedback}` : "This is the initial implementation attempt.",
     "Run only safe, relevant local checks if useful. Return a concise summary of changes and checks; the workflow engine owns all stage transitions.",
   ].join("\n\n");
 }
 
 export function reviewerTask(state: WorkflowState, plan: string, diff: string, checks: string): string {
+  const task = state.tasks?.[state.currentTaskIndex];
   return [
-    "Review the implementation semantically against the approved plan and acceptance criteria. Do not modify files. Return valid JSON matching the ReviewResult contract from your role prompt.",
+    "Review only the current task semantically against its acceptance criteria and manual review steps. Do not modify files. Return valid JSON matching the ReviewResult contract from your role prompt.",
     `Task:\n${state.task}`,
     `Approved plan:\n${plan}`,
+    task ? `Current task:\n${JSON.stringify(task)}` : "No task manifest is available.",
     `Implementation diff:\n${diff}`,
     `Deterministic check summary:\n${checks}`,
+  ].join("\n\n");
+}
+
+export function taskDecompositionTask(state: WorkflowState, plan: string): string {
+  return [
+    "Break the approved implementation plan into the smallest independently implementable and reviewable tasks, preserving dependency order. Return JSON only with shape {tasks:[{id,title,objective,scope:{read,modify,create,delete},implementation,acceptanceCriteria,verification,manualReviewSteps,risks}]}.",
+    `Task:\n${state.task}`,
+    `Approved plan:\n${plan}`,
+    "Every task must have observable acceptance criteria and concrete manual review steps. Avoid mixing unrelated concerns.",
   ].join("\n\n");
 }

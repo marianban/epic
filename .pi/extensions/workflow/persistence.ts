@@ -1,7 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ScoutReport, WorkflowEvent, WorkflowState } from "./types.ts";
+import type { ScoutReport, WorkflowEvent, WorkflowState, WorkflowTask } from "./types.ts";
 import { assertTransition } from "./state.ts";
 import { logWorkflow } from "./logger.ts";
 
@@ -14,6 +14,7 @@ export async function ensureWorkflowDirectories(root: string, id: string): Promi
   await fs.mkdir(path.join(dir, "checks"), { recursive: true });
   await fs.mkdir(path.join(dir, "reviews"), { recursive: true });
   await fs.mkdir(path.join(dir, "diffs"), { recursive: true });
+  await fs.mkdir(path.join(dir, "tasks"), { recursive: true });
   return dir;
 }
 
@@ -88,6 +89,16 @@ export async function persistTask(state: WorkflowState): Promise<string> {
   const filePath = path.join(runDirectory(state.repositoryRoot, state.workflowId), "task.md");
   await atomicWrite(filePath, `# Workflow Task\n\n${state.task}\n`);
   return filePath;
+}
+
+export async function persistWorkflowTasks(state: WorkflowState, tasks: WorkflowTask[]): Promise<string> {
+  const manifest = await persistJsonArtifact(state, "tasks/tasks.json", tasks);
+  for (const [index, task] of tasks.entries()) {
+    const list = (items: string[]) => items.map((item) => `- ${item}`).join("\n") || "- None.";
+    const markdown = [`# Task ${index + 1}: ${task.title}`, "", `## Objective\n${task.objective}`, "", "## Scope", `### Read\n${list(task.scope.read)}`, `### Modify\n${list(task.scope.modify)}`, `### Create\n${list(task.scope.create)}`, `### Delete\n${list(task.scope.delete)}`, "", `## Implementation\n${list(task.implementation)}`, "", `## Acceptance Criteria\n${task.acceptanceCriteria.map((item) => `- [ ] ${item}`).join("\n")}`, "", `## Verification\n${list(task.verification)}`, "", `## Manual Review Steps\n${task.manualReviewSteps.map((item, i) => `${i + 1}. ${item}`).join("\n")}`, "", `## Risks\n${list(task.risks)}`, "", "## Human Review Instructions", ""].join("\n");
+    await atomicWrite(path.join(runDirectory(state.repositoryRoot, state.workflowId), "tasks", `task-${String(index + 1).padStart(3, "0")}.md`), `${markdown}\n`);
+  }
+  return manifest;
 }
 
 export async function writePlanRevision(state: WorkflowState, markdown: string): Promise<string> {

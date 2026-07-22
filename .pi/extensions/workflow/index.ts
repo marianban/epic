@@ -7,6 +7,8 @@ import {
   startWorkflow,
   workflowStatus,
   approvePrerequisites,
+  approveTask,
+  reviseTask,
 } from './workflow.ts';
 
 export default function workflowExtension(pi: ExtensionAPI): void {
@@ -29,6 +31,14 @@ export default function workflowExtension(pi: ExtensionAPI): void {
   pi.registerCommand('workflow-cancel', {
     description: 'Cancel without reverting repository changes',
     handler: async (_args, ctx) => cancelWorkflow(ctx),
+  });
+  pi.registerCommand('task-approve', {
+    description: 'Approve the current task after manual review',
+    handler: async (_args, ctx) => approveTask(ctx),
+  });
+  pi.registerCommand('task-review', {
+    description: 'Fix R: findings from the current task review',
+    handler: async (_args, ctx) => reviseTask(ctx),
   });
   pi.registerCommand('plan-review', {
     description: 'Revise plan.md from R: comments',

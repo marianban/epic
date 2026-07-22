@@ -2,7 +2,7 @@
 
 This project-local extension provides one sequential, human-gated workflow:
 
-`/workflow` → Scout → Planner → `plan.md` review → approval → prerequisite check/approval → Implementer → deterministic checks → Reviewer → final verification.
+`/workflow` → Scout → Planner → `plan.md` review → approval → task decomposition → prerequisite check/approval → (Implementer → deterministic checks → Reviewer → human task review) for each task → final verification.
 
 ## Installation
 
@@ -21,9 +21,13 @@ The initial Scout is not necessarily the only discovery pass. A Planner may retu
 - `/workflow-cancel` cancels without reverting repository changes.
 - `/plan-review` extracts standalone or trailing inline `R:` comments and asks the Planner to revise.
 - `/plan-revise` forces a Planner revision.
+- `/task-approve` approves the current task after following its manual review steps and advances to the next task.
+- `/task-review` applies `R:` findings written into the current task artifact, then reruns the current task’s implementation and gates.
 - `/plan-approve` validates the plan, hashes it, and completes the planning phase. Unresolved `R:` lines are rejected.
 
 Plan approval records a hash, then starts implementation. The approved plan hash remains in persisted state so implementation cannot be entered through an unapproved path.
+
+After approval, the Planner writes a persisted task manifest and one artifact per task under `.pi/workflows/runs/<workflow-id>/tasks/`. Every task contains a narrow scope, implementation steps, acceptance criteria, automated verification, and manual review steps. The workflow pauses after semantic review for human approval; it cannot advance to the next task until `/task-approve` is run. Human findings are added as `R:` lines to that task artifact and fixed through `/task-review`.
 
 ## Persistence and checks
 

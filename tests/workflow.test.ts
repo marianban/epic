@@ -7,7 +7,7 @@ import { appendEvent, loadActiveWorkflow, saveState, transition } from "../.pi/e
 import { logWorkflow, workflowLogPath } from "../.pi/extensions/workflow/logger.ts";
 import { extractReviewInstructions, hashPlan, validatePlanCompleteness } from "../.pi/extensions/workflow/plan-review.ts";
 import { normalizeFallowDelta } from "../.pi/extensions/workflow/checks.ts";
-import { parsePlannerResponse } from "../.pi/extensions/workflow/agents.ts";
+import { parsePlannerResponse, parseTaskDecomposition } from "../.pi/extensions/workflow/agents.ts";
 import { assertTransition, canTransition, createWorkflowState } from "../.pi/extensions/workflow/state.ts";
 import { assertRepositoryPath, isSafeReadOnlyCommand } from "../.pi/extensions/workflow/tools.ts";
 import { discoverPrerequisites } from "../.pi/extensions/workflow/prerequisites.ts";
@@ -119,6 +119,15 @@ test("Planner can request bounded focused Scout context", () => {
   }));
   assert.equal(typeof response, "object");
   assert.equal((response as { status: string }).status, "needs_more_context");
+});
+
+test("task decomposition requires independently reviewable task fields", () => {
+  const tasks = parseTaskDecomposition(JSON.stringify({ tasks: [{
+    id: "task-001", title: "Add behavior", objective: "Add it", scope: { read: [], modify: ["src/a.ts"], create: [], delete: [] },
+    implementation: ["Update the handler."], acceptanceCriteria: ["The handler returns the expected value."], verification: ["npm test"], manualReviewSteps: ["Run the feature and observe the result."], risks: [],
+  }] }));
+  assert.equal(tasks[0].manualReviewSteps.length, 1);
+  assert.throws(() => parseTaskDecomposition(JSON.stringify({ tasks: [{ id: "task-001", title: "incomplete", objective: "x", implementation: [], acceptanceCriteria: [], verification: [], manualReviewSteps: [] }] })), /acceptance criteria/);
 });
 
 test("persistence writes an active state and append-only event journal", async () => {
