@@ -11,6 +11,9 @@ export function workflowStatePath(root: string, id: string): string { return pat
 export async function ensureWorkflowDirectories(root: string, id: string): Promise<string> {
   const dir = runDirectory(root, id);
   await fs.mkdir(path.join(dir, "plan-revisions"), { recursive: true });
+  await fs.mkdir(path.join(dir, "checks"), { recursive: true });
+  await fs.mkdir(path.join(dir, "reviews"), { recursive: true });
+  await fs.mkdir(path.join(dir, "diffs"), { recursive: true });
   return dir;
 }
 
@@ -34,7 +37,18 @@ export async function loadState(root: string, workflowId: string): Promise<Workf
   try {
     const state = JSON.parse(raw) as WorkflowState;
     // Migrate runs created before focused Scout rounds were persisted.
-    return { ...state, scoutRound: state.scoutRound ?? 0, maxScoutRounds: state.maxScoutRounds ?? 3 };
+    return {
+      ...state,
+      scoutRound: state.scoutRound ?? 0,
+      maxScoutRounds: state.maxScoutRounds ?? 3,
+      implementationAttempt: state.implementationAttempt ?? 0,
+      fastRepairAttempt: state.fastRepairAttempt ?? 0,
+      fullRepairAttempt: state.fullRepairAttempt ?? 0,
+      semanticRepairAttempt: state.semanticRepairAttempt ?? 0,
+      maxFastRepairs: state.maxFastRepairs ?? 2,
+      maxFullRepairs: state.maxFullRepairs ?? 1,
+      maxSemanticRepairs: state.maxSemanticRepairs ?? 2,
+    };
   } catch (error) { throw new Error(`Corrupt workflow state at ${workflowStatePath(root, workflowId)}: ${String(error)}`); }
 }
 

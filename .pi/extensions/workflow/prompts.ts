@@ -14,3 +14,23 @@ export function plannerTask(state: WorkflowState, report: ScoutReport, currentPl
     "Return only the required plan Markdown. Do not mark it approved.",
   ].join("\n\n");
 }
+
+export function implementerTask(state: WorkflowState, plan: string, feedback = ""): string {
+  return [
+    "Implement the approved plan in the repository. Make the smallest complete change, preserve existing APIs unless the plan says otherwise, and do not modify plan.md or .pi/workflows.",
+    `Task:\n${state.task}`,
+    `Approved plan:\n${plan}`,
+    feedback ? `Repair feedback:\n${feedback}` : "This is the initial implementation attempt.",
+    "Run only safe, relevant local checks if useful. Return a concise summary of changes and checks; the workflow engine owns all stage transitions.",
+  ].join("\n\n");
+}
+
+export function reviewerTask(state: WorkflowState, plan: string, diff: string, checks: string): string {
+  return [
+    "Review the implementation semantically against the approved plan and acceptance criteria. Do not modify files. Return valid JSON matching the ReviewResult contract from your role prompt.",
+    `Task:\n${state.task}`,
+    `Approved plan:\n${plan}`,
+    `Implementation diff:\n${diff}`,
+    `Deterministic check summary:\n${checks}`,
+  ].join("\n\n");
+}

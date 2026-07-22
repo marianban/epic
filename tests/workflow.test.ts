@@ -54,6 +54,25 @@ test("state machine accepts valid transitions and rejects invalid ones", () => {
   assert.throws(() => assertTransition(state, "implementing"), /Invalid workflow transition/);
 });
 
+test("approved plans can enter implementation and follow every mandatory gate", () => {
+  const state = createWorkflowState("/repo", "task", "2026-01-01T00:00:00.000Z");
+  const stages = [
+    "classifying", "scouting", "planning", "awaiting_plan_review",
+    "awaiting_plan_approval", "implementing", "running_fast_checks",
+    "running_full_checks", "reviewing", "final_verification", "completed",
+  ] as const;
+  for (const stage of stages) {
+    const previous = state.stage;
+    assert.equal(canTransition(previous, stage), true, `${previous} -> ${stage}`);
+    state.stage = stage;
+  }
+  assert.equal(state.stage, "completed");
+  assert.equal(canTransition("awaiting_plan_approval", "implementing"), true);
+  assert.equal(canTransition("implementing", "completed"), false);
+  assert.equal(canTransition("repairing_review", "running_fast_checks"), true);
+  assert.equal(canTransition("reviewing", "final_verification"), true);
+});
+
 test("R comments preserve line numbers and support Windows line endings", () => {
   const instructions = extractReviewInstructions("one\r\n R: first request \r\nno\r\nR: second request\r\n");
   assert.deepEqual(instructions.map((item) => [item.lineNumber, item.text]), [[2, "first request"], [4, "second request"]]);

@@ -3,6 +3,9 @@
   "commandTimeoutMs": 120000,
   "agentTimeoutMs": 300000,
   "maxOutputBytes": 20000,
+  "maxFastRepairs": 2,
+  "maxFullRepairs": 1,
+  "maxSemanticRepairs": 2,
   "checks": {
     "fast": ["git diff --check", "npm run typecheck", "npm run lint"],
     "full": ["npm test -- --run", "npm run build", "fallow check --format json"],
@@ -11,6 +14,8 @@
   },
   "agents": {
     "scout": { "provider": "ollama", "model": "qwen3.6-35b-a3b", "thinking": "low" },
-    "planner": { "provider": "openai-codex", "model": "codex-model", "thinking": "high" }
+    "planner": { "provider": "openai-codex", "model": "codex-model", "thinking": "high" },
+    "implementer": { "provider": "openai-codex", "model": "codex-model", "thinking": "high" },
+    "reviewer": { "provider": "openai-codex", "model": "codex-model", "thinking": "high" }
   }
 }

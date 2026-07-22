@@ -6,13 +6,22 @@ export type WorkflowStage =
   | "awaiting_plan_review"
   | "revising_plan"
   | "awaiting_plan_approval"
+  | "implementing"
+  | "running_fast_checks"
+  | "repairing_fast_checks"
+  | "running_full_checks"
+  | "repairing_full_checks"
+  | "reviewing"
+  | "repairing_review"
+  | "escalating"
+  | "final_verification"
   | "completed"
   | "failed"
   | "cancelled";
 
 export type TaskComplexity = "simple" | "moderate" | "complex";
-export type AgentRole = "orchestrator" | "scout" | "planner";
-export type PendingHumanAction = "review_plan" | "approve_plan" | "none";
+export type AgentRole = "orchestrator" | "scout" | "planner" | "implementer" | "reviewer";
+export type PendingHumanAction = "review_plan" | "approve_plan" | "resolve_escalation" | "none";
 export type CheckSuiteName = "fast" | "full" | "final";
 export type Severity = "error" | "warning" | "info";
 
@@ -33,6 +42,16 @@ export interface WorkflowState {
   planApprovedAt?: string;
   approvedPlanHash?: string;
   pendingHumanAction?: PendingHumanAction;
+  implementationAttempt: number;
+  fastRepairAttempt: number;
+  fullRepairAttempt: number;
+  semanticRepairAttempt: number;
+  maxFastRepairs: number;
+  maxFullRepairs: number;
+  maxSemanticRepairs: number;
+  lastCheckResultPath?: string;
+  lastReviewResultPath?: string;
+  lastDiffPath?: string;
   failureReason?: string;
 }
 
@@ -155,6 +174,9 @@ export interface WorkflowConfig {
   commandTimeoutMs?: number;
   agentTimeoutMs?: number;
   maxOutputBytes?: number;
+  maxFastRepairs?: number;
+  maxFullRepairs?: number;
+  maxSemanticRepairs?: number;
   checks?: { fast?: string[]; full?: string[]; final?: string[]; focusedTests?: string; fallow?: string; fallowBaseline?: string };
   agents?: Partial<Record<AgentRole, Partial<AgentProfile>>>;
 }

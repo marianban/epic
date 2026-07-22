@@ -50,7 +50,7 @@ export default function workflowToolGuard(pi: ExtensionAPI): void {
       if (candidate && isSecretPath(candidate)) return { block: true, reason: "Workflow guard: sensitive paths are blocked." };
     }
     if (event.toolName === "edit" || event.toolName === "write") {
-      return { block: true, reason: `${role} is read-only.` };
+      if (role !== "implementer") return { block: true, reason: `${role} is read-only.` };
       if (candidate) {
         try { assertRepositoryPath(root, candidate); } catch (error) { return { block: true, reason: String(error) }; }
       }

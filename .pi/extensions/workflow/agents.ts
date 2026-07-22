@@ -35,6 +35,22 @@ export const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
     temperature: 0.1,
     thinking: 'high',
   },
+  implementer: {
+    role: 'implementer',
+    systemPromptPath: '.pi/agents/implementer.md',
+    tools: ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write'],
+    readOnly: false,
+    temperature: 0.1,
+    thinking: 'high',
+  },
+  reviewer: {
+    role: 'reviewer',
+    systemPromptPath: '.pi/agents/reviewer.md',
+    tools: ['read', 'grep', 'find', 'ls', 'bash'],
+    readOnly: true,
+    temperature: 0.1,
+    thinking: 'high',
+  },
 };
 
 export async function getAgentProfile(
