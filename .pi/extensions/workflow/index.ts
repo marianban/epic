@@ -6,6 +6,7 @@ import {
   reviewPlan,
   startWorkflow,
   workflowStatus,
+  approvePrerequisites,
 } from './workflow.ts';
 
 export default function workflowExtension(pi: ExtensionAPI): void {
@@ -20,6 +21,10 @@ export default function workflowExtension(pi: ExtensionAPI): void {
   pi.registerCommand('workflow-resume', {
     description: 'Resume the persisted workflow',
     handler: async (_args, ctx) => resumeWorkflow(ctx),
+  });
+  pi.registerCommand('workflow-approve-prerequisites', {
+    description: 'Approve and apply detected repository prerequisites',
+    handler: async (_args, ctx) => approvePrerequisites(ctx),
   });
   pi.registerCommand('workflow-cancel', {
     description: 'Cancel without reverting repository changes',

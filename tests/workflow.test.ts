@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -10,6 +10,7 @@ import { normalizeFallowDelta } from "../.pi/extensions/workflow/checks.ts";
 import { parsePlannerResponse } from "../.pi/extensions/workflow/agents.ts";
 import { assertTransition, canTransition, createWorkflowState } from "../.pi/extensions/workflow/state.ts";
 import { assertRepositoryPath, isSafeReadOnlyCommand } from "../.pi/extensions/workflow/tools.ts";
+import { discoverPrerequisites } from "../.pi/extensions/workflow/prerequisites.ts";
 
 const validPlan = `# Implementation Plan
 
@@ -58,7 +59,7 @@ test("approved plans can enter implementation and follow every mandatory gate", 
   const state = createWorkflowState("/repo", "task", "2026-01-01T00:00:00.000Z");
   const stages = [
     "classifying", "scouting", "planning", "awaiting_plan_review",
-    "awaiting_plan_approval", "implementing", "running_fast_checks",
+    "awaiting_plan_approval", "checking_prerequisites", "implementing", "running_fast_checks",
     "running_full_checks", "reviewing", "final_verification", "completed",
   ] as const;
   for (const stage of stages) {
@@ -67,8 +68,13 @@ test("approved plans can enter implementation and follow every mandatory gate", 
     state.stage = stage;
   }
   assert.equal(state.stage, "completed");
-  assert.equal(canTransition("awaiting_plan_approval", "implementing"), true);
+  assert.equal(canTransition("awaiting_plan_approval", "implementing"), false);
+  assert.equal(canTransition("awaiting_plan_approval", "checking_prerequisites"), true);
+  assert.equal(canTransition("checking_prerequisites", "awaiting_prerequisite_approval"), true);
+  assert.equal(canTransition("preparing_prerequisites", "implementing"), true);
+  assert.equal(canTransition("implementing", "checking_prerequisites"), true);
   assert.equal(canTransition("implementing", "completed"), false);
+  assert.equal(canTransition("running_fast_checks", "escalating"), true);
   assert.equal(canTransition("repairing_review", "running_fast_checks"), true);
   assert.equal(canTransition("reviewing", "final_verification"), true);
 });
@@ -143,4 +149,27 @@ test("path and read-only command guards block unsafe operations", () => {
   assert.equal(isSafeReadOnlyCommand("git commit -am bad"), false);
   assert.throws(() => assertRepositoryPath("/repo", "../secret.txt"), /outside repository/);
   assert.throws(() => assertRepositoryPath("/repo", ".env"), /sensitive path/);
+});
+
+test("prerequisite discovery proposes git initialization and dependency installation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-prerequisites-"));
+  try {
+    await writeFile(join(root, "package.json"), JSON.stringify({ dependencies: { vite: "latest" } }));
+    const prerequisites = await discoverPrerequisites(root);
+    assert.deepEqual(prerequisites.map((item) => item.command), ["git init", "npm install"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("prerequisite discovery catches an incomplete node_modules directory", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-prerequisites-partial-"));
+  try {
+    await writeFile(join(root, "package.json"), JSON.stringify({ devDependencies: { vitest: "latest" } }));
+    await mkdir(join(root, "node_modules"));
+    const prerequisites = await discoverPrerequisites(root);
+    assert.equal(prerequisites.some((item) => item.kind === "node_dependencies"), true);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
 });

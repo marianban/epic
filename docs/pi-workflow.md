@@ -2,7 +2,7 @@
 
 This project-local extension provides one sequential, human-gated workflow:
 
-`/workflow` → Scout → Planner → `plan.md` review → approval → Implementer → deterministic checks → Reviewer → final verification.
+`/workflow` → Scout → Planner → `plan.md` review → approval → prerequisite check/approval → Implementer → deterministic checks → Reviewer → final verification.
 
 ## Installation
 
@@ -17,6 +17,7 @@ The initial Scout is not necessarily the only discovery pass. A Planner may retu
 - `/workflow <task>` starts one workflow and always pauses after writing `plan.md`.
 - `/workflow-status` shows persisted state and the pending human action.
 - `/workflow-resume` resumes safe in-progress work or retries a failed pre-plan run as a new audited run.
+- `/workflow-approve-prerequisites` applies the exact prerequisite commands discovered for the repository after human approval.
 - `/workflow-cancel` cancels without reverting repository changes.
 - `/plan-review` extracts standalone or trailing inline `R:` comments and asks the Planner to revise.
 - `/plan-revise` forces a Planner revision.
@@ -30,8 +31,10 @@ Runs are stored under `.pi/workflows/runs/<workflow-id>/`, with atomic `state.js
 
 Fast checks include `git diff --check` and configured/discovered typecheck, lint, and focused tests. Full checks include configured/discovered tests and build, plus Fallow when configured. Every command has a timeout and bounded output. Missing package scripts are not invented as failures; configure repository-specific commands explicitly when they are required gates.
 
+After plan approval, the workflow checks for a Git repository and declared Node dependencies. In a new or non-Git directory it proposes `git init`; when `package.json` dependencies are missing it proposes the appropriate lockfile-aware install command (`npm ci`, `npm install`, `pnpm install`, or `yarn install`). These commands are persisted in the run artifacts and never execute until `/workflow-approve-prerequisites` is run.
+
 Fast, full, semantic-repair, and final-verification stages are persisted independently. Each repair class is bounded by configuration; exhausting a limit pauses in `escalating` and requires `/workflow-resume` or `/workflow-cancel`.
 
 ## Security boundaries
 
-The extension rejects paths outside the repository and sensitive paths such as `.env`, SSH keys, credentials, and token files. Scout, Planner, and Reviewer cannot write; the Implementer may write repository files but cannot write `plan.md` or workflow state. Commands never commit, push, install dependencies, or change git history automatically. Review the configured commands and role models before trusting a project-local workflow.
+The extension rejects paths outside the repository and sensitive paths such as `.env`, SSH keys, credentials, and token files. Scout, Planner, and Reviewer cannot write; the Implementer may write repository files but cannot write `plan.md` or workflow state. Commands never commit, push, or change git history automatically; `git init` and dependency installation require the dedicated human approval command. Review the configured commands and role models before trusting a project-local workflow.

@@ -6,6 +6,9 @@ export type WorkflowStage =
   | "awaiting_plan_review"
   | "revising_plan"
   | "awaiting_plan_approval"
+  | "checking_prerequisites"
+  | "awaiting_prerequisite_approval"
+  | "preparing_prerequisites"
   | "implementing"
   | "running_fast_checks"
   | "repairing_fast_checks"
@@ -21,7 +24,7 @@ export type WorkflowStage =
 
 export type TaskComplexity = "simple" | "moderate" | "complex";
 export type AgentRole = "orchestrator" | "scout" | "planner" | "implementer" | "reviewer";
-export type PendingHumanAction = "review_plan" | "approve_plan" | "resolve_escalation" | "none";
+export type PendingHumanAction = "review_plan" | "approve_plan" | "approve_prerequisites" | "resolve_escalation" | "none";
 export type CheckSuiteName = "fast" | "full" | "final";
 export type Severity = "error" | "warning" | "info";
 
@@ -42,6 +45,8 @@ export interface WorkflowState {
   planApprovedAt?: string;
   approvedPlanHash?: string;
   pendingHumanAction?: PendingHumanAction;
+  prerequisites?: Prerequisite[];
+  prerequisitesApprovedAt?: string;
   implementationAttempt: number;
   fastRepairAttempt: number;
   fullRepairAttempt: number;
@@ -53,6 +58,12 @@ export interface WorkflowState {
   lastReviewResultPath?: string;
   lastDiffPath?: string;
   failureReason?: string;
+}
+
+export interface Prerequisite {
+  kind: "git" | "node_dependencies";
+  command: "git init" | "npm ci" | "npm install" | "pnpm install" | "yarn install";
+  reason: string;
 }
 
 export interface PlanReviewInstruction {

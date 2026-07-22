@@ -10,6 +10,7 @@ import type { CheckSuiteResult, ReviewResult, ScoutReport, WorkflowConfig, Workf
 import { logWorkflow } from "./logger.ts";
 import { getCurrentDiff } from "./diff.ts";
 import { runCheckSuite } from "./checks.ts";
+import { applyPrerequisites, discoverPrerequisites } from "./prerequisites.ts";
 
 export async function startWorkflow(task: string, ctx: ExtensionCommandContext): Promise<void> {
   const root = path.resolve(ctx.cwd);
@@ -75,14 +76,37 @@ export async function approvePlan(ctx: ExtensionCommandContext): Promise<void> {
   await saveState(state);
   await appendEvent(state, "plan_approved", { revision: state.planRevision, hash: state.approvedPlanHash });
   if (state.stage === "awaiting_plan_review") await transition(state, "awaiting_plan_approval");
+  await transition(state, "checking_prerequisites", { phase: "prerequisites" });
+  if (await checkAndGatePrerequisites(state, ctx)) return;
   await transition(state, "implementing", { phase: "implementation" });
   await executeImplementation(state, ctx);
+}
+
+export async function approvePrerequisites(ctx: ExtensionCommandContext): Promise<void> {
+  const state = await loadActiveWorkflow(ctx.cwd);
+  assertStage(state, ["awaiting_prerequisite_approval"]);
+  const config = await readConfigValue(state.repositoryRoot);
+  try {
+    await transition(state, "preparing_prerequisites");
+    await applyPrerequisites(state.repositoryRoot, state.prerequisites ?? [], config.commandTimeoutMs ?? 120_000);
+    state.prerequisitesApprovedAt = new Date().toISOString();
+    state.pendingHumanAction = "none";
+    await saveState(state);
+    await appendEvent(state, "prerequisites_applied", { commands: (state.prerequisites ?? []).map((item) => item.command) });
+    await transition(state, "implementing", { phase: "implementation" });
+    await executeImplementation(state, ctx, state.implementationAttempt > 0);
+  } catch (error) {
+    await failSafely(state, error);
+    notify(ctx, `Workflow ${state.workflowId} failed while preparing prerequisites: ${String(error)}`, "error");
+    throw error;
+  }
 }
 
 export async function resumeWorkflow(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd);
   if (["completed", "cancelled"].includes(state.stage)) { notify(ctx, `Workflow ${state.workflowId} is already ${state.stage}.`); return; }
   if (["awaiting_plan_review", "awaiting_plan_approval"].includes(state.stage)) { notify(ctx, `Workflow ${state.workflowId} is paused at ${state.stage}. Pending action: ${state.pendingHumanAction ?? "none"}.`); return; }
+  if (state.stage === "awaiting_prerequisite_approval") { notify(ctx, `Workflow ${state.workflowId} is paused for prerequisite approval. Run /workflow-approve-prerequisites to continue, or /workflow-cancel.`); return; }
   if (state.stage === "escalating") { state.pendingHumanAction = "none"; await saveState(state); await transition(state, "implementing", { reason: "escalation resolved by resume" }); await executeImplementation(state, ctx); return; }
   if (state.stage === "scouting") { await discoverAndPlan(state, ctx, true); return; }
   if (state.stage === "planning") { await discoverAndPlan(state, ctx, false); return; }
@@ -139,7 +163,7 @@ async function discoverAndPlan(state: WorkflowState, ctx: ExtensionCommandContex
   }
 }
 
-async function executeImplementation(state: WorkflowState, ctx: ExtensionCommandContext): Promise<void> {
+async function executeImplementation(state: WorkflowState, ctx: ExtensionCommandContext, implementationComplete = false): Promise<void> {
   try {
     assertApprovedPlan(state);
     const config = await readConfigValue(state.repositoryRoot);
@@ -148,10 +172,16 @@ async function executeImplementation(state: WorkflowState, ctx: ExtensionCommand
     state.maxSemanticRepairs = config.maxSemanticRepairs ?? state.maxSemanticRepairs;
     await saveState(state);
     const plan = await fs.readFile(state.planPath, "utf8");
-    state.implementationAttempt += 1;
-    await saveState(state);
-    await runImplementer(state, ctx, plan);
-    await persistDiff(state);
+    if (!implementationComplete) {
+      state.implementationAttempt += 1;
+      await saveState(state);
+      await runImplementer(state, ctx, plan);
+      await persistDiff(state);
+
+      await transition(state, "checking_prerequisites", { phase: "post_implementation_prerequisites" });
+      if (await checkAndGatePrerequisites(state, ctx)) return;
+      await transition(state, "implementing", { phase: "checks" });
+    }
 
     let fast = await runSuite(state, ctx, "fast", "running_fast_checks");
     while (!fast.passed) {
@@ -231,6 +261,24 @@ async function executeImplementation(state: WorkflowState, ctx: ExtensionCommand
     notify(ctx, `Workflow ${state.workflowId} failed: ${String(error)}`, "error");
     throw error;
   }
+}
+
+async function checkAndGatePrerequisites(state: WorkflowState, ctx: ExtensionCommandContext): Promise<boolean> {
+  const prerequisites = await discoverPrerequisites(state.repositoryRoot);
+  state.prerequisites = prerequisites;
+  if (prerequisites.length === 0) {
+    state.pendingHumanAction = "none";
+    await saveState(state);
+    await appendEvent(state, "prerequisites_checked", { required: false });
+    notify(ctx, "Prerequisite checks passed.");
+    return false;
+  }
+  state.pendingHumanAction = "approve_prerequisites";
+  await saveState(state);
+  await appendEvent(state, "prerequisites_checked", { required: true, commands: prerequisites.map((item) => item.command) });
+  await transition(state, "awaiting_prerequisite_approval");
+  notify(ctx, `Prerequisites require approval:\n${prerequisites.map((item) => `- ${item.command}: ${item.reason}`).join("\n")}\nRun /workflow-approve-prerequisites to apply them, or /workflow-cancel.`, "warning");
+  return true;
 }
 
 async function runImplementer(state: WorkflowState, ctx: ExtensionCommandContext, plan: string, feedback = ""): Promise<void> {
