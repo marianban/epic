@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { appendEvent, loadActiveWorkflow, saveState, transition } from "../.pi/extensions/workflow/persistence.ts";
+import { logWorkflow, workflowLogPath } from "../.pi/extensions/workflow/logger.ts";
 import { extractReviewInstructions, hashPlan, validatePlanCompleteness } from "../.pi/extensions/workflow/plan-review.ts";
 import { normalizeFallowDelta } from "../.pi/extensions/workflow/checks.ts";
 import { parsePlannerResponse } from "../.pi/extensions/workflow/agents.ts";
@@ -95,6 +96,14 @@ test("persistence writes an active state and append-only event journal", async (
     assert.equal(loaded.workflowId, state.workflowId);
     const journal = await readFile(join(root, ".pi", "workflows", "runs", state.workflowId, "events.jsonl"), "utf8");
     assert.equal(journal.trim().split("\n").length, 1);
+    const log = await readFile(workflowLogPath(root, state.workflowId), "utf8");
+    assert.match(log, /DEBUG Workflow state saved/);
+    assert.match(log, /INFO workflow_created/);
+    assert.match(log, /"test":true/);
+    await logWorkflow(state, "info", "credentials captured", { token: "do-not-write" });
+    const redactedLog = await readFile(workflowLogPath(root, state.workflowId), "utf8");
+    assert.match(redactedLog, /"token":"\[REDACTED\]"/);
+    assert.doesNotMatch(redactedLog, /do-not-write/);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -178,7 +178,8 @@ The extension should use the following files.
 │           ├── diffs/
 │           │   ├── implementation-001.patch
 │           │   └── ...
-│           └── events.jsonl
+│           ├── events.jsonl
+│           └── workflow.log
 │
 └── agents/
     ├── scout.md

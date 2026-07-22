@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ScoutReport, WorkflowEvent, WorkflowState } from "./types.ts";
 import { assertTransition } from "./state.ts";
+import { logWorkflow } from "./logger.ts";
 
 export function runDirectory(root: string, workflowId: string): string { return path.join(root, ".pi", "workflows", "runs", workflowId); }
 export function workflowStatePath(root: string, id: string): string { return path.join(runDirectory(root, id), "state.json"); }
@@ -25,6 +26,7 @@ export async function saveState(state: WorkflowState): Promise<void> {
   state.updatedAt = new Date().toISOString();
   await atomicWrite(workflowStatePath(state.repositoryRoot, state.workflowId), `${JSON.stringify(state, null, 2)}\n`);
   await atomicWrite(path.join(state.repositoryRoot, ".pi", "workflows", "active.json"), `${JSON.stringify({ workflowId: state.workflowId }, null, 2)}\n`);
+  await logWorkflow(state, "debug", "Workflow state saved", { stage: state.stage });
 }
 
 export async function loadState(root: string, workflowId: string): Promise<WorkflowState> {
@@ -45,6 +47,7 @@ export async function loadActiveWorkflow(root: string): Promise<WorkflowState> {
 export async function appendEvent(state: WorkflowState, type: string, payload: Record<string, unknown> = {}): Promise<void> {
   const event: WorkflowEvent = { id: randomUUID(), workflowId: state.workflowId, timestamp: new Date().toISOString(), type, stage: state.stage, payload };
   await fs.appendFile(path.join(runDirectory(state.repositoryRoot, state.workflowId), "events.jsonl"), `${JSON.stringify(event)}\n`, "utf8");
+  await logWorkflow(state, "info", type, { stage: state.stage, ...payload });
 }
 
 export async function transition(state: WorkflowState, next: WorkflowState["stage"], payload: Record<string, unknown> = {}): Promise<void> {

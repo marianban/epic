@@ -28,7 +28,7 @@ Plan approval records a hash and completes the planning phase. No repository imp
 
 ## Persistence and checks
 
-Runs are stored under `.pi/workflows/runs/<workflow-id>/`, with atomic `state.json`, append-only `events.jsonl`, Scout report, task, and plan revisions. `.pi/workflows/` is ignored; `plan.md` is intentionally not ignored.
+Runs are stored under `.pi/workflows/runs/<workflow-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `workflow.log`, Scout report, task, and plan revisions. `workflow.log` contains timestamped structured records for state changes, agent lifecycle/output, progress, and verification commands; secrets are redacted before writing. `.pi/workflows/` is ignored; `plan.md` is intentionally not ignored.
 
 Fast checks include `git diff --check` and configured/discovered typecheck, lint, and focused tests. Full checks include configured/discovered tests and build, plus Fallow when configured. Every command has a timeout and bounded output. Missing package scripts are not invented as failures; configure repository-specific commands explicitly when they are required gates.
 

@@ -7,6 +7,7 @@ import { extractReviewInstructions, hashPlan, validatePlanCompleteness, validate
 import { assertStage, classifyTask, createWorkflowState } from "./state.ts";
 import { plannerTask, scoutTask } from "./prompts.ts";
 import type { ScoutReport, WorkflowConfig, WorkflowState } from "./types.ts";
+import { logWorkflow } from "./logger.ts";
 
 /** Phase one deliberately ends after an explicitly approved plan. */
 export async function startWorkflow(task: string, ctx: ExtensionCommandContext): Promise<void> {
@@ -139,8 +140,29 @@ async function discoverAndPlan(state: WorkflowState, ctx: ExtensionCommandContex
 
 async function runRole(ctx: ExtensionCommandContext, state: WorkflowState, role: "scout" | "planner", task: string, action: string): Promise<Awaited<ReturnType<typeof runAgent>>> {
   await appendEvent(state, "agent_started", { role, action });
+  await logWorkflow(state, "info", "Agent started", { role, action, task });
   notify(ctx, `${role} started: ${action}.`);
-  return runAgent(state.repositoryRoot, role, task, { signal: ctx.signal, onProgress: (message) => ctx.ui.setStatus("workflow", `${state.workflowId}: ${message}`) });
+  try {
+    const result = await runAgent(state.repositoryRoot, role, task, {
+      signal: ctx.signal,
+      onProgress: (message) => {
+        void logWorkflow(state, "debug", message, { role, action });
+        ctx.ui.setStatus("workflow", `${state.workflowId}: ${message}`);
+      },
+    });
+    await logWorkflow(state, result.exitCode === 0 ? "info" : "error", "Agent finished", {
+      role,
+      action,
+      exitCode: result.exitCode,
+      usage: result.usage,
+      output: result.output,
+      stderr: result.stderr,
+    });
+    return result;
+  } catch (error) {
+    await logWorkflow(state, "error", "Agent failed to run", { role, action, error: String(error) });
+    throw error;
+  }
 }
 
 async function readScoutReport(state: WorkflowState): Promise<ScoutReport> {

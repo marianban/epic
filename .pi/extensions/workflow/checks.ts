@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import type { CheckDefinition, CheckResult, CheckSuiteName, CheckSuiteResult, FallowDelta, Finding, WorkflowConfig, WorkflowState } from "./types.ts";
 import { assertRepositoryPath, readConfig, redactSecrets } from "./tools.ts";
+import { logWorkflow } from "./logger.ts";
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000;
@@ -111,6 +112,7 @@ export async function runCheckSuite(suite: CheckSuiteName, state: WorkflowState)
   const maxOutputBytes = config.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
   const checks: CheckResult[] = [];
   for (const definition of definitions) {
+    await logWorkflow(state, "info", "Check started", { suite, name: definition.name, command: definition.command });
     const result = await runShell(definition.command, state.repositoryRoot, definition.timeoutMs ?? timeoutMs, maxOutputBytes);
     const baseline: Finding[] = [];
     if (definition.name === "fallow" && config.checks?.fallowBaseline) {
@@ -121,7 +123,9 @@ export async function runCheckSuite(suite: CheckSuiteName, state: WorkflowState)
     }
     const fallow = definition.name === "fallow" ? normalizeFallowDelta(result.stdout, baseline) : undefined;
     const findings = fallow ? [...fallow.introduced, ...fallow.preExisting] : normalizeFindings(definition.name, result.stdout, result.stderr, result.exitCode);
-    checks.push({ name: definition.name, command: definition.command, passed: result.exitCode === 0 && (!fallow || fallow.introduced.length === 0), required: definition.required, exitCode: result.exitCode, durationMs: result.durationMs, stdoutPreview: redactSecrets(result.stdout), stderrPreview: redactSecrets(result.stderr), findings, outputTruncated: result.timedOut });
+    const check = { name: definition.name, command: definition.command, passed: result.exitCode === 0 && (!fallow || fallow.introduced.length === 0), required: definition.required, exitCode: result.exitCode, durationMs: result.durationMs, stdoutPreview: redactSecrets(result.stdout), stderrPreview: redactSecrets(result.stderr), findings, outputTruncated: result.timedOut };
+    checks.push(check);
+    await logWorkflow(state, check.passed ? "info" : "error", "Check finished", { suite, ...check });
   }
   const allFindings = checks.flatMap((check) => check.findings);
   const requiredChecks = checks.filter((check) => check.required);
