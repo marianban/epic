@@ -10,6 +10,8 @@ Load the extension from this repository with Pi, or install the project as a Pi 
 
 Each enabled role runs in a separate `pi --mode json --no-session` process. Model/provider profiles are configured independently in the workflow config. The Orchestrator, Scout, and Planner are read-only. When loaded from another directory with `pi -e`, bundled role prompts are used automatically; project-local `.pi/agents/*.md` files override them.
 
+The workflow lifecycle is represented by a typed XState v5 actor. The root machine owns planning, prerequisites, sequential task execution, escalation, final verification, and terminal states. Task execution is an invoked child actor with explicit approval, implementation, checks, semantic review, repair, and human-review states. Commands send domain events through the workflow runtime adapter; they cannot bypass machine guards.
+
 The initial Scout is not necessarily the only discovery pass. A Planner may return a focused `needs_more_context` request; the engine sends only those questions to another read-only Scout and gives the merged evidence back to the Planner. This loop is bounded by `maxScoutRounds` (default: 3).
 
 ## Commands
@@ -32,6 +34,8 @@ After approval, the Planner writes a persisted task manifest and one artifact pe
 ## Persistence and checks
 
 Runs are stored under `.pi/workflows/runs/<workflow-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `workflow.log`, Scout report, task, and plan revisions. `workflow.log` contains timestamped structured records for state changes, agent lifecycle/output, progress, and verification commands; secrets are redacted before writing. `.pi/workflows/` is ignored; `plan.md` is intentionally not ignored.
+
+`state.json` contains a versioned hierarchical XState persisted snapshot together with durable workflow context and artifact references. The current schema/machine version is `2/3`. Older or malformed snapshots, including partial-migration snapshots, are reported as incompatible and are not silently migrated; start a new workflow unless an explicit migration is added later.
 
 Fast checks include `git diff --check` and configured/discovered typecheck, lint, and focused tests. Full checks include configured/discovered tests and build, plus Fallow when configured. Every command has a timeout and bounded output. Missing package scripts are not invented as failures; configure repository-specific commands explicitly when they are required gates.
 

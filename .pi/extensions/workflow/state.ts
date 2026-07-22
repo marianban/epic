@@ -1,39 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { TaskComplexity, WorkflowStage, WorkflowState } from "./types.ts";
-
-export const ALLOWED_TRANSITIONS: Record<WorkflowStage, WorkflowStage[]> = {
-  idle: ["classifying"],
-  classifying: ["scouting", "failed", "cancelled"],
-  scouting: ["planning", "failed", "cancelled"],
-  planning: ["scouting", "awaiting_plan_review", "failed", "cancelled"],
-  awaiting_plan_review: ["revising_plan", "awaiting_plan_approval", "cancelled"],
-  revising_plan: ["awaiting_plan_review", "failed", "cancelled"],
-  awaiting_plan_approval: ["revising_plan", "decomposing_tasks", "checking_prerequisites", "cancelled"],
-  decomposing_tasks: ["checking_prerequisites", "awaiting_task_approval", "failed", "cancelled"],
-  awaiting_task_approval: ["revising_task", "implementing", "cancelled"],
-  awaiting_task_review: ["revising_task", "awaiting_task_approval", "final_verification", "implementing", "cancelled"],
-  revising_task: ["awaiting_task_approval", "awaiting_task_review", "failed", "cancelled"],
-  checking_prerequisites: ["awaiting_prerequisite_approval", "implementing", "failed", "cancelled"],
-  awaiting_prerequisite_approval: ["preparing_prerequisites", "cancelled"],
-  preparing_prerequisites: ["implementing", "awaiting_task_approval", "failed", "cancelled"],
-  implementing: ["checking_prerequisites", "running_fast_checks", "failed", "cancelled"],
-  running_fast_checks: ["repairing_fast_checks", "running_full_checks", "escalating", "failed"],
-  repairing_fast_checks: ["running_fast_checks", "escalating", "failed"],
-  running_full_checks: ["repairing_full_checks", "reviewing", "failed"],
-  repairing_full_checks: ["running_full_checks", "escalating", "failed"],
-  reviewing: ["repairing_review", "awaiting_task_review", "final_verification", "failed"],
-  repairing_review: ["running_fast_checks", "escalating", "failed"],
-  escalating: ["implementing", "awaiting_plan_review", "failed", "cancelled"],
-  final_verification: ["completed", "failed"],
-  completed: [],
-  failed: [],
-  cancelled: [],
-};
+import type { TaskComplexity, WorkflowState } from "./types.ts";
+import { WORKFLOW_MACHINE_VERSION, WORKFLOW_SCHEMA_VERSION } from "./machines/workflow-machine.ts";
 
 export function createWorkflowState(repositoryRoot: string, task: string, now = new Date().toISOString()): WorkflowState {
   const workflowId = `${now.replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
   return {
     workflowId,
+    schemaVersion: WORKFLOW_SCHEMA_VERSION,
+    machineVersion: WORKFLOW_MACHINE_VERSION,
     task,
     repositoryRoot,
     stage: "idle",
@@ -56,28 +30,6 @@ export function createWorkflowState(repositoryRoot: string, task: string, now = 
     maxFullRepairs: 1,
     maxSemanticRepairs: 2,
   };
-}
-
-export function canTransition(from: WorkflowStage, to: WorkflowStage): boolean {
-  return ALLOWED_TRANSITIONS[from]?.includes(to) ?? false;
-}
-
-export function assertTransition(state: WorkflowState, next: WorkflowStage): void {
-  if (!canTransition(state.stage, next)) {
-    throw new Error(`Invalid workflow transition: ${state.stage} -> ${next}`);
-  }
-}
-
-export function assertStage(state: WorkflowState, stages: WorkflowStage[]): void {
-  if (!stages.includes(state.stage)) {
-    throw new Error(`Command is not available in stage ${state.stage}; expected ${stages.join(", ")}`);
-  }
-}
-
-export function assertApprovedPlan(state: WorkflowState): void {
-  if (!state.planApproved || !state.approvedPlanHash) {
-    throw new Error("Implementation is blocked until plan.md is explicitly approved.");
-  }
 }
 
 export function classifyTask(task: string): TaskComplexity {

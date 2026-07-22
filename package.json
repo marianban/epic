@@ -2,7 +2,11 @@
   "name": "pi-deterministic-workflow",
   "private": true,
   "type": "module",
-  "pi": { "extensions": ["./.pi/extensions/workflow/index.ts"] },
+  "pi": {
+    "extensions": [
+      "./.pi/extensions/workflow/index.ts"
+    ]
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.ts",
@@ -14,5 +18,8 @@
   },
   "devDependencies": {
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "xstate": "^5.32.5"
   }
 }

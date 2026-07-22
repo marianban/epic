@@ -87,7 +87,7 @@ export async function getAgentProfile(
   };
 }
 
-interface AgentRunResult {
+export interface AgentRunResult {
   role: AgentRole;
   exitCode: number;
   output: string;

@@ -34,6 +34,8 @@ export type Severity = "error" | "warning" | "info";
 
 export interface WorkflowState {
   workflowId: string;
+  schemaVersion: number;
+  machineVersion: number;
   task: string;
   repositoryRoot: string;
   stage: WorkflowStage;
@@ -67,6 +69,7 @@ export interface WorkflowState {
   lastReviewResultPath?: string;
   lastDiffPath?: string;
   failureReason?: string;
+  machineSnapshot?: unknown;
 }
 
 export interface WorkflowTask {

@@ -3,12 +3,15 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { appendEvent, loadActiveWorkflow, saveState, transition } from "../.pi/extensions/workflow/persistence.ts";
+import { appendEvent, loadActiveWorkflow, saveState } from "../.pi/extensions/workflow/persistence.ts";
+import { createWorkflowRuntime } from "../.pi/extensions/workflow/runtime.ts";
+import { createActor } from "xstate";
 import { logWorkflow, workflowLogPath } from "../.pi/extensions/workflow/logger.ts";
 import { extractReviewInstructions, hashPlan, validatePlanCompleteness } from "../.pi/extensions/workflow/plan-review.ts";
 import { normalizeFallowDelta } from "../.pi/extensions/workflow/checks.ts";
 import { parsePlannerResponse, parseTaskDecomposition } from "../.pi/extensions/workflow/agents.ts";
-import { assertTransition, canTransition, createWorkflowState } from "../.pi/extensions/workflow/state.ts";
+import { createWorkflowState } from "../.pi/extensions/workflow/state.ts";
+import { workflowMachine } from "../.pi/extensions/workflow/machines/workflow-machine.ts";
 import { assertRepositoryPath, isSafeReadOnlyCommand } from "../.pi/extensions/workflow/tools.ts";
 import { discoverPrerequisites } from "../.pi/extensions/workflow/prerequisites.ts";
 
@@ -46,41 +49,15 @@ Extend the existing implementation.
 - Initial plan.
 `;
 
-test("state machine accepts valid transitions and rejects invalid ones", () => {
+test("root actor accepts domain events only in valid states", () => {
   const state = createWorkflowState("/repo", "task", "2026-01-01T00:00:00.000Z");
-  assert.equal(canTransition("idle", "classifying"), true);
-  assert.equal(canTransition("idle", "implementing"), false);
-  assertTransition(state, "classifying");
-  state.stage = "completed";
-  assert.throws(() => assertTransition(state, "implementing"), /Invalid workflow transition/);
-});
-
-test("approved plans can enter implementation and follow every mandatory gate", () => {
-  const state = createWorkflowState("/repo", "task", "2026-01-01T00:00:00.000Z");
-  const stages = [
-    "classifying", "scouting", "planning", "awaiting_plan_review",
-    "awaiting_plan_approval", "checking_prerequisites", "implementing", "running_fast_checks",
-    "running_full_checks", "reviewing", "final_verification", "completed",
-  ] as const;
-  for (const stage of stages) {
-    const previous = state.stage;
-    assert.equal(canTransition(previous, stage), true, `${previous} -> ${stage}`);
-    state.stage = stage;
-  }
-  assert.equal(state.stage, "completed");
-  assert.equal(canTransition("awaiting_plan_approval", "implementing"), false);
-  assert.equal(canTransition("awaiting_plan_approval", "checking_prerequisites"), true);
-  assert.equal(canTransition("decomposing_tasks", "awaiting_task_approval"), true);
-  assert.equal(canTransition("awaiting_task_approval", "implementing"), true);
-  assert.equal(canTransition("awaiting_task_review", "awaiting_task_approval"), true);
-  assert.equal(canTransition("awaiting_task_approval", "running_fast_checks"), false);
-  assert.equal(canTransition("checking_prerequisites", "awaiting_prerequisite_approval"), true);
-  assert.equal(canTransition("preparing_prerequisites", "implementing"), true);
-  assert.equal(canTransition("implementing", "checking_prerequisites"), true);
-  assert.equal(canTransition("implementing", "completed"), false);
-  assert.equal(canTransition("running_fast_checks", "escalating"), true);
-  assert.equal(canTransition("repairing_review", "running_fast_checks"), true);
-  assert.equal(canTransition("reviewing", "final_verification"), true);
+  const actor = createActor(workflowMachine, { input: { state } });
+  actor.start();
+  assert.equal(actor.getSnapshot().can({ type: "WORKFLOW.START" }), true);
+  assert.equal(actor.getSnapshot().can({ type: "TASK.APPROVE" }), false);
+  actor.send({ type: "WORKFLOW.START" });
+  assert.equal(actor.getSnapshot().value, "classifying");
+  actor.stop();
 });
 
 test("R comments preserve line numbers and support Windows line endings", () => {
@@ -155,6 +132,32 @@ test("persistence writes an active state and append-only event journal", async (
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("XState snapshots round-trip and expose machine capabilities", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-xstate-snapshot-"));
+  try {
+    const state = createWorkflowState(root, "task");
+    await saveState(state);
+    const loaded = await loadActiveWorkflow(root);
+    const runtime = createWorkflowRuntime(loaded);
+    assert.equal(runtime.matches("idle"), true);
+    assert.equal(runtime.tags().size, 0);
+    runtime.stop();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test("unsupported persisted workflow versions are rejected without migration", async () => {
+  const root = await mkdtemp(join(tmpdir(), "pi-xstate-incompatible-"));
+  try {
+    const state = createWorkflowState(root, "task");
+    await saveState(state);
+    const statePath = join(root, ".pi", "workflows", "runs", state.workflowId, "state.json");
+    const persisted = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
+    persisted.schemaVersion = 1;
+    await writeFile(statePath, `${JSON.stringify(persisted)}\n`);
+    await assert.rejects(() => loadActiveWorkflow(root), /incompatible.*unsupported persistence version/);
+  } finally { await rm(root, { recursive: true, force: true }); }
 });
 
 test("path and read-only command guards block unsafe operations", () => {
