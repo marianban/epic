@@ -10,10 +10,10 @@ const SECRET_PATHS = [
 const DESTRUCTIVE_COMMANDS =
   /\b(rm|mv|cp|mkdir|touch|chmod|chown|git\s+(add|commit|push|reset|checkout|branch|stash|merge|rebase)|npm\s+(install|publish)|pnpm\s+(add|install)|yarn\s+(add|install)|sudo|kill|shutdown)\b/i
 
-export function isSecretPath(filePath: string): boolean {
+function isSecretPath(filePath: string): boolean {
   return SECRET_PATHS.some((pattern) => pattern.test(filePath))
 }
-export function isInside(root: string, candidate: string): boolean {
+function isInside(root: string, candidate: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(candidate))
   return (
     relative === '' ||

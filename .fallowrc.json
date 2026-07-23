@@ -1,7 +1,14 @@
 {
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
-  "entry": ["pi/extensions/workflow/index.ts"],
+  "entry": [
+    "pi/extensions/workflow/index.ts",
+    "pi/extensions/workflow/tools.ts"
+  ],
   "ignorePatterns":[],
+  "health": {
+    "maxCognitive": 22,
+    "maxCrap": 343
+  },
   "duplicates": {
     "minOccurrences": 3
   },

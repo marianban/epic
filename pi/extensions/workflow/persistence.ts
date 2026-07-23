@@ -16,14 +16,14 @@ import {
   WORKFLOW_SCHEMA_VERSION,
 } from './machines/workflow-machine.ts'
 
-export function runDirectory(root: string, workflowId: string): string {
+function runDirectory(root: string, workflowId: string): string {
   return path.join(root, '.pi', 'workflows', 'runs', workflowId)
 }
-export function workflowStatePath(root: string, id: string): string {
+function workflowStatePath(root: string, id: string): string {
   return path.join(runDirectory(root, id), 'state.json')
 }
 
-export async function ensureWorkflowDirectories(
+async function ensureWorkflowDirectories(
   root: string,
   id: string
 ): Promise<string> {
@@ -76,7 +76,7 @@ export async function saveState(state: WorkflowState): Promise<void> {
   })
 }
 
-export async function loadState(
+async function loadState(
   root: string,
   workflowId: string
 ): Promise<WorkflowState> {

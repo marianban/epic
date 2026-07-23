@@ -11,6 +11,7 @@ import {
   type TaskExecutionEvent,
   type TaskExecutionResult,
 } from './task-execution-machine.ts'
+// fallow-ignore-next-line circular-dependency -- canonical machine bootstrap is required for persisted snapshots
 import { createWorkflowServices, type WorkflowServices } from '../services.ts'
 
 export const WORKFLOW_SCHEMA_VERSION = 2
@@ -437,7 +438,6 @@ export function createWorkflowMachine(services: WorkflowServices) {
   })
 }
 
-export type WorkflowMachine = ReturnType<typeof createWorkflowMachine>
 export function machineStage(snapshot: {
   value?: unknown
   context: WorkflowMachineContext

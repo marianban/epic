@@ -2,7 +2,7 @@ import { assign, fromPromise, setup } from 'xstate'
 import type { CheckSuiteResult, ReviewResult, WorkflowState } from '../types.ts'
 import type { WorkflowServices } from '../services.ts'
 
-export interface TaskExecutionContext {
+interface TaskExecutionContext {
   state: WorkflowState
   fast?: CheckSuiteResult
   full?: CheckSuiteResult
@@ -11,7 +11,7 @@ export interface TaskExecutionContext {
   fullRepairAttempt: number
   semanticRepairAttempt: number
 }
-export interface TaskExecutionInput {
+interface TaskExecutionInput {
   state: WorkflowState
 }
 export type TaskExecutionEvent =

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { TaskComplexity, WorkflowState } from './types.ts'
+import type { WorkflowState } from './types.ts'
 import {
   WORKFLOW_MACHINE_VERSION,
   WORKFLOW_SCHEMA_VERSION,
@@ -37,15 +37,4 @@ export function createWorkflowState(
     maxFullRepairs: 1,
     maxSemanticRepairs: 2,
   }
-}
-
-export function classifyTask(task: string): TaskComplexity {
-  const normalized = task.toLowerCase()
-  const complexSignals =
-    /(architect|migration|concurren|security|public api|cross[- ]module|distributed|persist|workflow)/
-  const simpleSignals =
-    /\b(rename|typo|comment|small|one helper|single function)\b/
-  if (complexSignals.test(normalized)) return 'complex'
-  if (simpleSignals.test(normalized) && task.length < 140) return 'simple'
-  return 'moderate'
 }

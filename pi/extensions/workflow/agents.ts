@@ -13,7 +13,7 @@ import type {
 } from './types.ts'
 import { readConfig, redactSecrets } from './tools.ts'
 
-export const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
+const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
   orchestrator: {
     role: 'orchestrator',
     systemPromptPath: '.pi/agents/orchestrator.md',
@@ -70,7 +70,7 @@ export const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
   },
 }
 
-export async function getAgentProfile(
+async function getAgentProfile(
   root: string,
   role: AgentRole
 ): Promise<AgentProfile> {
@@ -104,7 +104,7 @@ export interface AgentRunOptions {
  * This keeps packaged/runtime-launched extensions on the same CLI version and
  * uses PATH only when the extension is running under a generic node/bun host.
  */
-export function getPiInvocation(args: string[]): {
+function getPiInvocation(args: string[]): {
   command: string
   args: string[]
 } {

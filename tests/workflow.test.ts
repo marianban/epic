@@ -7,30 +7,30 @@ import {
   appendEvent,
   loadActiveWorkflow,
   saveState,
-} from '../.pi/extensions/workflow/persistence.ts'
-import { createWorkflowRuntime } from '../.pi/extensions/workflow/runtime.ts'
+} from '../pi/extensions/workflow/persistence.ts'
+import { createWorkflowRuntime } from '../pi/extensions/workflow/runtime.ts'
 import { createActor } from 'xstate'
 import {
   logWorkflow,
   workflowLogPath,
-} from '../.pi/extensions/workflow/logger.ts'
+} from '../pi/extensions/workflow/logger.ts'
 import {
   extractReviewInstructions,
   hashPlan,
   validatePlanCompleteness,
-} from '../.pi/extensions/workflow/plan-review.ts'
-import { normalizeFallowDelta } from '../.pi/extensions/workflow/checks.ts'
+} from '../pi/extensions/workflow/plan-review.ts'
+import { normalizeFallowDelta } from '../pi/extensions/workflow/checks.ts'
 import {
   parsePlannerResponse,
   parseTaskDecomposition,
-} from '../.pi/extensions/workflow/agents.ts'
-import { createWorkflowState } from '../.pi/extensions/workflow/state.ts'
-import { workflowMachine } from '../.pi/extensions/workflow/machines/workflow-machine.ts'
+} from '../pi/extensions/workflow/agents.ts'
+import { createWorkflowState } from '../pi/extensions/workflow/state.ts'
+import { workflowMachine } from '../pi/extensions/workflow/machines/workflow-machine.ts'
 import {
   assertRepositoryPath,
   isSafeReadOnlyCommand,
-} from '../.pi/extensions/workflow/tools.ts'
-import { discoverPrerequisites } from '../.pi/extensions/workflow/prerequisites.ts'
+} from '../pi/extensions/workflow/tools.ts'
+import { discoverPrerequisites } from '../pi/extensions/workflow/prerequisites.ts'
 
 const validPlan = `# Implementation Plan
 

@@ -43,7 +43,7 @@ function commandForScript(
   return scripts[name] ? `npm run ${name}${suffix}` : undefined
 }
 
-export async function resolveCheckDefinitions(
+async function resolveCheckDefinitions(
   root: string,
   suite: CheckSuiteName
 ): Promise<CheckDefinition[]> {
@@ -100,7 +100,7 @@ export async function resolveCheckDefinitions(
   return definitions
 }
 
-export function normalizeFindings(
+function normalizeFindings(
   source: string,
   stdout: string,
   stderr: string,
@@ -136,7 +136,7 @@ function findingKey(finding: Finding): string {
     .toLowerCase()
 }
 
-export function splitFindingsByBaseline(
+function splitFindingsByBaseline(
   findings: Finding[],
   baseline: Finding[]
 ): { introduced: Finding[]; preExisting: Finding[] } {

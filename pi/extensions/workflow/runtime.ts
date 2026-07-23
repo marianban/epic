@@ -9,7 +9,7 @@ import {
 } from './machines/workflow-machine.ts'
 import type { WorkflowStage, WorkflowState } from './types.ts'
 
-export type WorkflowActor = Actor<ReturnType<typeof createWorkflowMachine>>
+type WorkflowActor = Actor<ReturnType<typeof createWorkflowMachine>>
 
 export function createWorkflowRuntime(
   state: WorkflowState,
@@ -28,7 +28,7 @@ export function createWorkflowRuntime(
   return new WorkflowRuntime(state, actor)
 }
 
-export class WorkflowRuntime {
+class WorkflowRuntime {
   private readonly actor: WorkflowActor
   private readonly state: WorkflowState
   constructor(state: WorkflowState, actor: WorkflowActor) {

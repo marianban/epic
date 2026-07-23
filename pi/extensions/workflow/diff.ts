@@ -20,21 +20,3 @@ export async function getCurrentDiff(repositoryRoot: string): Promise<string> {
     )
   }
 }
-
-export async function getDiffCheck(
-  repositoryRoot: string
-): Promise<{ passed: boolean; output: string }> {
-  try {
-    const result = await execFileAsync('git', ['diff', '--check'], {
-      cwd: repositoryRoot,
-      maxBuffer: 30_000,
-    })
-    return { passed: true, output: String(result.stdout) }
-  } catch (error) {
-    const result = error as { stdout?: string; stderr?: string }
-    return {
-      passed: false,
-      output: redactSecrets(`${result.stdout ?? ''}\n${result.stderr ?? ''}`),
-    }
-  }
-}

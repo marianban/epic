@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { PlanReviewInstruction } from './types.ts'
 
-export const REQUIRED_PLAN_SECTIONS = [
+const REQUIRED_PLAN_SECTIONS = [
   '# Implementation Plan',
   '## Status',
   '## Objective',
