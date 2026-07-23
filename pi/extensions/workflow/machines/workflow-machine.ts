@@ -445,7 +445,30 @@ export function machineStage(snapshot: {
   const value = snapshot.value
   if (value === 'classifying') return 'classifying'
   if (value === 'decomposingTasks') return 'decomposing_tasks'
-  if (value === 'taskExecution') return 'awaiting_task_approval'
+  if (value === 'taskExecution') {
+    // `taskExecution` is a parent state whose invoked child owns the actual
+    // task lifecycle. The child reports its stage into durable context via
+    // `onSnapshot`; returning a hard-coded approval stage here makes settle()
+    // stop immediately after every task event and persists/stops the child
+    // while implementation or checks are still running.
+    const childStage = snapshot.context.state.stage
+    if (
+      [
+        'awaiting_task_approval',
+        'awaiting_task_review',
+        'revising_task',
+        'implementing',
+        'running_fast_checks',
+        'repairing_fast_checks',
+        'running_full_checks',
+        'repairing_full_checks',
+        'reviewing',
+        'repairing_review',
+      ].includes(childStage)
+    )
+      return childStage
+    return 'awaiting_task_approval'
+  }
   if (value === 'escalating') return 'escalating'
   if (value === 'finalVerification') return 'final_verification'
   if (value && typeof value === 'object') {

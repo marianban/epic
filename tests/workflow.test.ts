@@ -83,6 +83,24 @@ test('root actor accepts domain events only in valid states', () => {
   actor.stop()
 })
 
+test('task execution stage follows the invoked child actor', () => {
+  const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const context = {
+    state: { ...state, stage: 'reviewing' as const },
+  } as WorkflowMachineContext
+
+  assert.equal(machineStage({ value: 'taskExecution', context }), 'reviewing')
+  assert.equal(
+    machineStage({
+      value: 'taskExecution',
+      context: {
+        state: { ...state, stage: 'awaiting_task_review' },
+      } as WorkflowMachineContext,
+    }),
+    'awaiting_task_review'
+  )
+})
+
 test('post-plan machine state is visible as the plan review stage', async () => {
   const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
   const services: WorkflowServices = {
