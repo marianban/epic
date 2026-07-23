@@ -48,7 +48,16 @@ export async function startWorkflow(
   } finally {
     runtime.stop()
   }
-  ctx.ui.notify(`Workflow ${state.workflowId} started.`, 'info')
+  const nextAction =
+    state.stage === 'awaiting_plan_review'
+      ? 'Plan is ready for review. Use /plan-review or /plan-approve.'
+      : state.stage === 'awaiting_plan_approval'
+        ? 'Plan is ready for approval. Use /plan-approve.'
+        : undefined
+  ctx.ui.notify(
+    [`Workflow ${state.workflowId} started.`, nextAction].filter(Boolean).join(' '),
+    'info'
+  )
 }
 
 export async function reviewPlan(

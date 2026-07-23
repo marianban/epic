@@ -31,6 +31,12 @@ import {
   isSafeReadOnlyCommand,
 } from '../pi/extensions/workflow/tools.ts'
 import { discoverPrerequisites } from '../pi/extensions/workflow/prerequisites.ts'
+import {
+  createWorkflowMachine,
+  machineStage,
+} from '../pi/extensions/workflow/machines/workflow-machine.ts'
+import type { WorkflowMachineContext } from '../pi/extensions/workflow/machines/workflow-machine.ts'
+import type { WorkflowServices } from '../pi/extensions/workflow/services.ts'
 
 const validPlan = `# Implementation Plan
 
@@ -74,6 +80,45 @@ test('root actor accepts domain events only in valid states', () => {
   assert.equal(actor.getSnapshot().can({ type: 'TASK.APPROVE' }), false)
   actor.send({ type: 'WORKFLOW.START' })
   assert.equal(actor.getSnapshot().value, 'classifying')
+  actor.stop()
+})
+
+test('post-plan machine state is visible as the plan review stage', async () => {
+  const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const services: WorkflowServices = {
+    ctx: undefined as never,
+    notify: () => undefined,
+    classify: (value) => value,
+    scout: async (value) => ({ state: value, report: {} as never }),
+    plan: async (value) => ({ state: value, result: '# Plan' }),
+    approvePlan: async (value) => value,
+    reviewPlan: async (value) => ({ state: value, revised: false }),
+    decompose: async (value) => value,
+    prerequisites: async (value) => value,
+    preparePrerequisites: async (value) => value,
+    implement: async (value) => value,
+    checks: async (value) => ({
+      state: value,
+      result: {} as never,
+    }),
+    review: async (value) => ({ state: value, result: {} as never }),
+    reviseTask: async (value) => value,
+  }
+  const actor = createActor(createWorkflowMachine(services), { input: { state } })
+  actor.start()
+  actor.send({ type: 'WORKFLOW.START' })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const snapshot = actor.getSnapshot()
+  assert.deepEqual(snapshot.value, { planning: 'awaitingReview' })
+  assert.equal(
+    machineStage(
+      snapshot as unknown as { value: unknown; context: WorkflowMachineContext }
+    ),
+    'awaiting_plan_review'
+  )
   actor.stop()
 })
 

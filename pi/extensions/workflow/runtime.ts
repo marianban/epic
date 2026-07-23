@@ -59,7 +59,10 @@ class WorkflowRuntime {
       const snapshot = this.actor.getSnapshot() as unknown as {
         context: WorkflowMachineContext
       }
-      if (waiting.has(snapshot.context.state.stage)) {
+      // The machine owns the live stage. `context.state.stage` is only
+      // synchronized after settle() returns, so reading it here can leave
+      // every in-flight workflow looking permanently idle.
+      if (waiting.has(machineStage(snapshot))) {
         await this.sync()
         return
       }
