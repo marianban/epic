@@ -265,7 +265,7 @@ export async function runAgent(
       const content =
         (
           message?.message as
-            { content?: Array<{ type: string; text?: string }> } | undefined
+            { content?: { type: string; text?: string }[] } | undefined
         )?.content ?? []
       const output = content
         .filter((part) => part.type === 'text')

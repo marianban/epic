@@ -20,7 +20,7 @@ export type TaskExecutionEvent =
   | { type: 'TASK.REVISE' }
   | { type: 'WORKFLOW.RESUME' }
   | { type: 'WORKFLOW.CANCEL' }
-export type TaskExecutionResult = {
+export interface TaskExecutionResult {
   kind: 'completed' | 'escalated' | 'cancelled'
   state: WorkflowState
   reason?: string

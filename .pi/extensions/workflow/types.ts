@@ -180,43 +180,43 @@ export interface AgentProfile {
 
 export interface ScoutReport {
   taskSummary: string
-  relevantFiles: Array<{
+  relevantFiles: {
     path: string
     purpose: string
     symbols: string[]
     reason: string
-  }>
-  codeExcerpts: Array<{
+  }[]
+  codeExcerpts: {
     path: string
     startLine: number
     endLine: number
     reason: string
     content: string
-  }>
+  }[]
   callPaths: string[]
   dataFlow: string[]
   existingPatterns: string[]
-  tests: Array<{ path: string; relevance: string }>
+  tests: { path: string; relevance: string }[]
   verificationCommands: string[]
   architectureConstraints: string[]
   risks: string[]
-  uncertainties: Array<{ question: string; importance: string }>
+  uncertainties: { question: string; importance: string }[]
 }
 
 export interface PlannerContextRequest {
   status: 'needs_more_context'
-  questions: Array<{ question: string; reason: string }>
+  questions: { question: string; reason: string }[]
 }
 
 export interface ReviewResult {
   passed: boolean
   summary: string
-  acceptanceCriteria: Array<{
+  acceptanceCriteria: {
     criterion: string
     status: 'met' | 'partially_met' | 'not_met'
     evidence: string
-  }>
-  findings: Array<{
+  }[]
+  findings: {
     severity: 'blocker' | 'major' | 'minor' | 'suggestion'
     category: string
     file?: string
@@ -226,7 +226,7 @@ export interface ReviewResult {
     message: string
     failureScenario: string
     requiredFix: string
-  }>
+  }[]
   requiresPlanRevision: boolean
 }
 
