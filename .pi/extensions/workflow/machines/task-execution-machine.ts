@@ -38,7 +38,10 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
   const review = fromPromise<
     { state: WorkflowState; result: ReviewResult },
     { context: TaskExecutionContext }
-  >(({ input }) => services.review(input.context.state, input.context.full!))
+  >(({ input }) => {
+    if (!input.context.full) throw new Error('Full check result is missing.')
+    return services.review(input.context.state, input.context.full)
+  })
   const revise = fromPromise<WorkflowState, { context: TaskExecutionContext }>(
     ({ input }) => services.reviseTask(input.context.state)
   )

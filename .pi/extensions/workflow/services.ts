@@ -40,7 +40,6 @@ import type {
   ScoutReport,
   WorkflowConfig,
   WorkflowState,
-  WorkflowTask,
 } from './types.ts'
 
 export interface WorkflowServices {
@@ -128,36 +127,6 @@ export function createWorkflowServices(
       return {}
     }
   }
-  const merge = (a: ScoutReport, b: ScoutReport): ScoutReport => ({
-    ...a,
-    ...b,
-    relevantFiles: [
-      ...new Map(
-        [...a.relevantFiles, ...b.relevantFiles].map((x) => [x.path, x])
-      ).values(),
-    ],
-    codeExcerpts: [...a.codeExcerpts, ...b.codeExcerpts],
-    callPaths: [...new Set([...a.callPaths, ...b.callPaths])],
-    dataFlow: [...new Set([...a.dataFlow, ...b.dataFlow])],
-    existingPatterns: [
-      ...new Set([...a.existingPatterns, ...b.existingPatterns]),
-    ],
-    tests: [
-      ...new Map([...a.tests, ...b.tests].map((x) => [x.path, x])).values(),
-    ],
-    verificationCommands: [
-      ...new Set([...a.verificationCommands, ...b.verificationCommands]),
-    ],
-    architectureConstraints: [
-      ...new Set([...a.architectureConstraints, ...b.architectureConstraints]),
-    ],
-    risks: [...new Set([...a.risks, ...b.risks])],
-    uncertainties: [
-      ...new Map(
-        [...a.uncertainties, ...b.uncertainties].map((x) => [x.question, x])
-      ).values(),
-    ],
-  })
   return {
     ctx,
     notify,

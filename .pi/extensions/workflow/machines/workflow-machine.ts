@@ -32,28 +32,6 @@ export type WorkflowMachineEvent =
   | { type: 'TASK.REVIEW' }
   | { type: 'TASK.REVISE' }
 
-const stageTags: Partial<Record<WorkflowStage, string[]>> = {
-  awaiting_plan_review: ['awaiting-human', 'awaiting-plan-review'],
-  awaiting_plan_approval: ['awaiting-human', 'awaiting-plan-approval'],
-  awaiting_prerequisite_approval: [
-    'awaiting-human',
-    'awaiting-prerequisite-approval',
-  ],
-  awaiting_task_approval: ['awaiting-human', 'awaiting-task-approval'],
-  awaiting_task_review: ['awaiting-human', 'awaiting-task-review'],
-  escalating: ['awaiting-human', 'escalated'],
-  implementing: ['active', 'implementation'],
-}
-const project = (stage: WorkflowStage) =>
-  assign({
-    state: ({ context }) => ({
-      ...context.state,
-      stage,
-      pendingHumanAction: stage.includes('awaiting')
-        ? context.state.pendingHumanAction
-        : context.state.pendingHumanAction,
-    }),
-  })
 const taskStage = (value: unknown): WorkflowStage =>
   (
     ({
@@ -182,10 +160,10 @@ export function createWorkflowMachine(services: WorkflowServices) {
             tags: ['active', 'planning'],
             invoke: {
               src: 'plan',
-              input: ({ context }) => ({
-                state: context.state,
-                report: context.report!,
-              }),
+              input: ({ context }) => {
+                if (!context.report) throw new Error('Scout report is missing.')
+                return { state: context.state, report: context.report }
+              },
               onDone: [
                 {
                   guard: ({ event }) => typeof event.output.result === 'string',
@@ -510,7 +488,7 @@ const unavailable = async (): Promise<never> => {
 }
 export const workflowMachine = createWorkflowMachine({
   ctx: undefined as never,
-  notify() {},
+  notify: () => undefined,
   classify: (state) => state,
   scout: unavailable,
   plan: unavailable,

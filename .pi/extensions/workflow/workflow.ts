@@ -1,4 +1,3 @@
-import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import {

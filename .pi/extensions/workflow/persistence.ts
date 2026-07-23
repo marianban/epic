@@ -105,7 +105,8 @@ export async function loadState(
     return state
   } catch (error) {
     throw new Error(
-      `Corrupt workflow state at ${workflowStatePath(root, workflowId)}: ${String(error)}`
+      `Corrupt workflow state at ${workflowStatePath(root, workflowId)}: ${String(error)}`,
+      { cause: error }
     )
   }
 }

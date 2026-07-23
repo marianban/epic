@@ -198,7 +198,6 @@ export async function runAgent(
     let settled = false
     let progressNotified = false
     let stderrNotified = false
-    let timer: ReturnType<typeof setTimeout>
     const heartbeat = setInterval(
       () => options.onProgress?.(`${role} is still running...`),
       15_000
@@ -236,7 +235,7 @@ export async function runAgent(
         `${role} child started (pid ${child.pid ?? 'unknown'}, cwd ${root}).`
       )
     })
-    timer = setTimeout(() => {
+    const timer = setTimeout(() => {
       options.onProgress?.(
         `${role} exceeded its ${timeoutMs}ms timeout; terminating child.`
       )
@@ -295,7 +294,8 @@ export function parseJsonResponse<T>(output: string, role: AgentRole): T {
     return JSON.parse(trimmed) as T
   } catch (error) {
     throw new Error(
-      `${role} returned invalid JSON: ${String(error)}\n${trimmed.slice(0, 2_000)}`
+      `${role} returned invalid JSON: ${String(error)}\n${trimmed.slice(0, 2_000)}`,
+      { cause: error }
     )
   }
 }
