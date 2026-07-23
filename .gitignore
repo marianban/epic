@@ -2,4 +2,4 @@
 .pi/workflow.config.local.json
 node_modules/
 dist/
-
+.fallow/
