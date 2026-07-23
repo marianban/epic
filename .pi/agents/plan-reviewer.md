@@ -7,22 +7,39 @@ Address every supplied `R:` instruction, preserve unaffected valid sections, upd
 Return Markdown only with exactly these sections:
 
 # Implementation Plan
+
 ## Status
+
 Draft — awaiting human approval.
+
 ## Objective
+
 ## Scope
+
 ### Read
+
 ### Modify
+
 ### Create
+
 ### Delete
+
 ## Repository Findings
+
 ## Proposed Design
+
 ## Implementation Steps
+
 ## Acceptance Criteria
+
 ## Verification
+
 ## Risks and Edge Cases
+
 ## Open Questions
+
 ## Revision Log
+
 ## Human Review Instructions
 
 The workflow validates that the revised plan is complete and that all supplied `R:` instructions were addressed. Do not add unresolved `R:` comments to the output.

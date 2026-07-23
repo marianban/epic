@@ -34,19 +34,19 @@ const machine = setup({
   actions: {
     save: () => {
       // ...
-    }
+    },
   },
   guards: {
-    isValid: ({ context }) => context.ready
+    isValid: ({ context }) => context.ready,
   },
   actors: {
     loadUser: fromPromise(async () => {
       // ...
-    })
-  }
+    }),
+  },
 }).createMachine({
   // ...
-});
+})
 ```
 
 This gives a single place for named `actions`, `guards`, `actors`, and `delays`.
@@ -89,24 +89,24 @@ const machine = setup({}).createMachine({
       states: {
         idle: {},
         dirty: {
-          invoke: { src: 'autosaveDraft' }
-        }
+          invoke: { src: 'autosaveDraft' },
+        },
       },
       on: {
         // Source is the editor region root; target is a sibling region.
-        sync: { target: '#sync.network.syncing' }
-      }
+        sync: { target: '#sync.network.syncing' },
+      },
     },
     network: {
       initial: 'offline',
       states: {
         offline: {},
         syncing: {},
-        online: {}
-      }
-    }
-  }
-});
+        online: {},
+      },
+    },
+  },
+})
 ```
 
 Better: declare the transition on the region that owns the target, so only that region changes:
@@ -188,14 +188,14 @@ with implementations defined in `setup({ actors: ... })`.
 Prefer:
 
 ```ts
-const actor = createActor(machine);
-actor.start();
+const actor = createActor(machine)
+actor.start()
 ```
 
 instead of:
 
 ```ts
-const service = interpret(machine).start();
+const service = interpret(machine).start()
 ```
 
 ## Typing

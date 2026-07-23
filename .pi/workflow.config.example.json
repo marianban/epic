@@ -8,7 +8,11 @@
   "maxSemanticRepairs": 2,
   "checks": {
     "fast": ["git diff --check", "npm run typecheck", "npm run lint"],
-    "full": ["npm test -- --run", "npm run build", "fallow check --format json"],
+    "full": [
+      "npm test -- --run",
+      "npm run build",
+      "fallow check --format json"
+    ],
     "focusedTests": "npm test -- --run",
     "fallow": "fallow check --format json"
   },

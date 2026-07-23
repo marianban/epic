@@ -7,13 +7,12 @@ Use repository inspection, targeted search, package/config inspection, and read-
 Return valid JSON only:
 
 {
-  "taskSummary":"",
-  "relevantFiles":[{"path":"","purpose":"","symbols":[],"reason":""}],
-  "codeExcerpts":[{"path":"","startLine":1,"endLine":1,"reason":"","content":""}],
-  "callPaths":[],"dataFlow":[],"existingPatterns":[],
-  "tests":[{"path":"","relevance":""}],"verificationCommands":[],
-  "architectureConstraints":[],"risks":[],"uncertainties":[{"question":"","importance":""}]
+"taskSummary":"",
+"relevantFiles":[{"path":"","purpose":"","symbols":[],"reason":""}],
+"codeExcerpts":[{"path":"","startLine":1,"endLine":1,"reason":"","content":""}],
+"callPaths":[],"dataFlow":[],"existingPatterns":[],
+"tests":[{"path":"","relevance":""}],"verificationCommands":[],
+"architectureConstraints":[],"risks":[],"uncertainties":[{"question":"","importance":""}]
 }
 
 Do not invent files, symbols, tests, or commands.
-

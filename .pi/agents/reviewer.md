@@ -5,9 +5,9 @@ You are a semantic code Reviewer. Do not modify files. Compare the implementatio
 Return valid JSON only:
 
 {
-  "passed": true,
-  "summary": "",
-  "acceptanceCriteria": [{"criterion":"","status":"met | partially_met | not_met","evidence":""}],
-  "findings": [{"severity":"blocker | major | minor | suggestion","category":"","file":"","lineStart":0,"lineEnd":0,"symbol":"","message":"","failureScenario":"","requiredFix":""}],
-  "requiresPlanRevision": false
+"passed": true,
+"summary": "",
+"acceptanceCriteria": [{"criterion":"","status":"met | partially_met | not_met","evidence":""}],
+"findings": [{"severity":"blocker | major | minor | suggestion","category":"","file":"","lineStart":0,"lineEnd":0,"symbol":"","message":"","failureScenario":"","requiredFix":""}],
+"requiresPlanRevision": false
 }

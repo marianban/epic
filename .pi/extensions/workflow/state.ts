@@ -1,19 +1,26 @@
-import { randomUUID } from "node:crypto";
-import type { TaskComplexity, WorkflowState } from "./types.ts";
-import { WORKFLOW_MACHINE_VERSION, WORKFLOW_SCHEMA_VERSION } from "./machines/workflow-machine.ts";
+import { randomUUID } from 'node:crypto'
+import type { TaskComplexity, WorkflowState } from './types.ts'
+import {
+  WORKFLOW_MACHINE_VERSION,
+  WORKFLOW_SCHEMA_VERSION,
+} from './machines/workflow-machine.ts'
 
-export function createWorkflowState(repositoryRoot: string, task: string, now = new Date().toISOString()): WorkflowState {
-  const workflowId = `${now.replace(/[-:.TZ]/g, "").slice(0, 14)}-${randomUUID().slice(0, 8)}`;
+export function createWorkflowState(
+  repositoryRoot: string,
+  task: string,
+  now = new Date().toISOString()
+): WorkflowState {
+  const workflowId = `${now.replace(/[-:.TZ]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`
   return {
     workflowId,
     schemaVersion: WORKFLOW_SCHEMA_VERSION,
     machineVersion: WORKFLOW_MACHINE_VERSION,
     task,
     repositoryRoot,
-    stage: "idle",
+    stage: 'idle',
     createdAt: now,
     updatedAt: now,
-    taskComplexity: "moderate",
+    taskComplexity: 'moderate',
     scoutRound: 0,
     maxScoutRounds: 3,
     planPath: `${repositoryRoot}/plan.md`,
@@ -21,7 +28,7 @@ export function createWorkflowState(repositoryRoot: string, task: string, now = 
     planApproved: false,
     currentTaskIndex: 0,
     taskApproved: false,
-    pendingHumanAction: "none",
+    pendingHumanAction: 'none',
     implementationAttempt: 0,
     fastRepairAttempt: 0,
     fullRepairAttempt: 0,
@@ -29,14 +36,16 @@ export function createWorkflowState(repositoryRoot: string, task: string, now = 
     maxFastRepairs: 2,
     maxFullRepairs: 1,
     maxSemanticRepairs: 2,
-  };
+  }
 }
 
 export function classifyTask(task: string): TaskComplexity {
-  const normalized = task.toLowerCase();
-  const complexSignals = /(architect|migration|concurren|security|public api|cross[- ]module|distributed|persist|workflow)/;
-  const simpleSignals = /\b(rename|typo|comment|small|one helper|single function)\b/;
-  if (complexSignals.test(normalized)) return "complex";
-  if (simpleSignals.test(normalized) && task.length < 140) return "simple";
-  return "moderate";
+  const normalized = task.toLowerCase()
+  const complexSignals =
+    /(architect|migration|concurren|security|public api|cross[- ]module|distributed|persist|workflow)/
+  const simpleSignals =
+    /\b(rename|typo|comment|small|one helper|single function)\b/
+  if (complexSignals.test(normalized)) return 'complex'
+  if (simpleSignals.test(normalized) && task.length < 140) return 'simple'
+  return 'moderate'
 }

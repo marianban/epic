@@ -17,6 +17,7 @@
     "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
+    "prettier": "3.9.6",
     "typescript": "^5.7.0"
   },
   "dependencies": {

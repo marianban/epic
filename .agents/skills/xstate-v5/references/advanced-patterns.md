@@ -22,33 +22,36 @@ For typed reusable action logic, prefer setup-scoped helpers from a `const machi
 Minimal pattern:
 
 ```ts
-import { setup } from 'xstate';
+import { setup } from 'xstate'
 
 const machineSetup = setup({
   types: {} as {
-    context: { count: number };
-    events: { type: 'count.incremented'; value: number } | { type: 'count.flushed' };
-    emitted: { type: 'count.changed'; count: number };
-  }
-});
+    context: { count: number }
+    events:
+      { type: 'count.incremented'; value: number } | { type: 'count.flushed' }
+    emitted: { type: 'count.changed'; count: number }
+  },
+})
 
 const increment = machineSetup.assign({
   count: ({ context, event }) =>
-    event.type === 'count.incremented' ? context.count + event.value : context.count
-});
+    event.type === 'count.incremented'
+      ? context.count + event.value
+      : context.count,
+})
 
-const raiseFlush = machineSetup.raise({ type: 'count.flushed' });
+const raiseFlush = machineSetup.raise({ type: 'count.flushed' })
 
 const emitChanged = machineSetup.emit(({ context }) => ({
   type: 'count.changed',
-  count: context.count
-}));
+  count: context.count,
+}))
 
 const flushIfNeeded = machineSetup.enqueueActions(({ context, enqueue }) => {
   if (context.count > 10) {
-    enqueue(raiseFlush);
+    enqueue(raiseFlush)
   }
-});
+})
 ```
 
 Reference anchors:
@@ -104,34 +107,34 @@ Reference anchors:
 Minimal upload-style callback pattern:
 
 ```ts
-import { assign, fromCallback, setup } from 'xstate';
+import { assign, fromCallback, setup } from 'xstate'
 
 type UploadMessage =
   | { type: 'progress'; loaded: number; total: number }
   | { type: 'complete' }
-  | { type: 'error'; error: unknown };
+  | { type: 'error'; error: unknown }
 
 declare function startUploadAndListen(
   uploadId: string,
   onMessage: (message: UploadMessage) => void
-): () => void;
+): () => void
 
 const machineSetup = setup({
   types: {} as {
     context: {
-      uploadId: string | null;
-      progress: number;
-      error: string | null;
-    };
+      uploadId: string | null
+      progress: number
+      error: string | null
+    }
     events:
       | { type: 'upload.started'; uploadId: string }
       | { type: 'upload.progress'; loaded: number; total: number }
       | { type: 'upload.completed' }
-      | { type: 'upload.failed'; error: string };
+      | { type: 'upload.failed'; error: string }
   },
   actors: {
     upload: fromCallback<
-      { type: 'upload.progress'; loaded: number; total: number }
+      | { type: 'upload.progress'; loaded: number; total: number }
       | { type: 'upload.completed' }
       | { type: 'upload.failed'; error: string },
       { uploadId: string }
@@ -141,25 +144,25 @@ const machineSetup = setup({
           sendBack({
             type: 'upload.progress',
             loaded: message.loaded,
-            total: message.total
-          });
-          return;
+            total: message.total,
+          })
+          return
         }
         if (message.type === 'complete') {
-          sendBack({ type: 'upload.completed' });
-          return;
+          sendBack({ type: 'upload.completed' })
+          return
         }
-        sendBack({ type: 'upload.failed', error: String(message.error) });
-      });
-    })
-  }
-});
+        sendBack({ type: 'upload.failed', error: String(message.error) })
+      })
+    }),
+  },
+})
 
 export const uploadMachine = machineSetup.createMachine({
   context: {
     uploadId: null,
     progress: 0,
-    error: null
+    error: null,
   },
   initial: 'idle',
   states: {
@@ -167,33 +170,33 @@ export const uploadMachine = machineSetup.createMachine({
       on: {
         'upload.started': {
           target: 'uploading',
-          actions: assign({ uploadId: ({ event }) => event.uploadId })
-        }
-      }
+          actions: assign({ uploadId: ({ event }) => event.uploadId }),
+        },
+      },
     },
     uploading: {
       invoke: {
         src: 'upload',
-        input: ({ context }) => ({ uploadId: context.uploadId! })
+        input: ({ context }) => ({ uploadId: context.uploadId! }),
       },
       on: {
         'upload.progress': {
           actions: assign({
             progress: ({ event }) =>
-              Math.round((event.loaded / event.total) * 100)
-          })
+              Math.round((event.loaded / event.total) * 100),
+          }),
         },
         'upload.completed': { target: 'done' },
         'upload.failed': {
           target: 'failed',
-          actions: assign({ error: ({ event }) => event.error })
-        }
-      }
+          actions: assign({ error: ({ event }) => event.error }),
+        },
+      },
     },
     done: {},
-    failed: {}
-  }
-});
+    failed: {},
+  },
+})
 ```
 
 ## Emitted events
@@ -231,18 +234,18 @@ Prefer snapshot persistence over hand-rolled state reconstruction.
 Canonical pattern:
 
 ```ts
-import { createActor } from 'xstate';
-import { authMachine } from './authMachine';
+import { createActor } from 'xstate'
+import { authMachine } from './authMachine'
 
-const persisted = loadPersistedSnapshot();
+const persisted = loadPersistedSnapshot()
 
 const actor = createActor(authMachine, {
-  snapshot: persisted
-});
+  snapshot: persisted,
+})
 
 actor.subscribe(() => {
-  savePersistedSnapshot(actor.getPersistedSnapshot());
-});
+  savePersistedSnapshot(actor.getPersistedSnapshot())
+})
 ```
 
 In UI adapters, prefer provider or hook options that accept a persisted snapshot when available rather than rebuilding state manually.

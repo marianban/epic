@@ -13,22 +13,39 @@ When asked to decompose an approved plan, return JSON only with a `tasks` array.
 Otherwise return Markdown only with exactly these sections:
 
 # Implementation Plan
+
 ## Status
+
 Draft — awaiting human approval.
+
 ## Objective
+
 ## Scope
+
 ### Read
+
 ### Modify
+
 ### Create
+
 ### Delete
+
 ## Repository Findings
+
 ## Proposed Design
+
 ## Implementation Steps
+
 ## Acceptance Criteria
+
 ## Verification
+
 ## Risks and Edge Cases
+
 ## Open Questions
+
 ## Revision Log
+
 ## Human Review Instructions
 
 The plan must name concrete files or state what focused discovery remains, identify the owning component, avoid vague steps, state dependency/file assumptions, and include at least one step, criterion, and verification command. Return a structured context request only if a critical focused fact is genuinely missing.

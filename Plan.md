@@ -12,19 +12,19 @@ Implementer and Reviewer are deferred until the Orchestrator → Scout → Plann
 
 The workflow must:
 
-* use separate agent contexts for each role;
-* support different models or providers per role;
-* write the implementation plan into `plan.md` in the repository root;
-* pause for human review of `plan.md`;
-* allow the user to add review comments directly into `plan.md`;
-* recognize user review instructions prefixed with `R:`;
-* repeatedly revise `plan.md` until the user explicitly approves it;
-* prevent implementation before plan approval;
-* run deterministic static-analysis and verification gates;
-* run semantic review after deterministic checks pass;
-* support bounded repair loops;
-* preserve an audit trail of workflow stages and results;
-* avoid unnecessary paid-model token usage by using a local Scout for repository discovery.
+- use separate agent contexts for each role;
+- support different models or providers per role;
+- write the implementation plan into `plan.md` in the repository root;
+- pause for human review of `plan.md`;
+- allow the user to add review comments directly into `plan.md`;
+- recognize user review instructions prefixed with `R:`;
+- repeatedly revise `plan.md` until the user explicitly approves it;
+- prevent implementation before plan approval;
+- run deterministic static-analysis and verification gates;
+- run semantic review after deterministic checks pass;
+- support bounded repair loops;
+- preserve an audit trail of workflow stages and results;
+- avoid unnecessary paid-model token usage by using a local Scout for repository discovery.
 
 The first implementation should prioritize clarity, deterministic control flow, testability, and extensibility over UI polish.
 
@@ -114,13 +114,13 @@ Example:
 
 Display:
 
-* workflow ID;
-* current stage;
-* active agent;
-* repair attempt count;
-* plan approval status;
-* last verification result;
-* pending human action.
+- workflow ID;
+- current stage;
+- active agent;
+- repair attempt count;
+- plan approval status;
+- last verification result;
+- pending human action.
 
 ## `/workflow-resume`
 
@@ -210,70 +210,67 @@ Use an explicit state machine.
 
 ```ts
 type WorkflowStage =
-  | "idle"
-  | "classifying"
-  | "scouting"
-  | "planning"
-  | "awaiting_plan_review"
-  | "revising_plan"
-  | "awaiting_plan_approval"
-  | "implementing"
-  | "running_fast_checks"
-  | "repairing_fast_checks"
-  | "running_full_checks"
-  | "repairing_full_checks"
-  | "reviewing"
-  | "repairing_review"
-  | "escalating"
-  | "final_verification"
-  | "completed"
-  | "failed"
-  | "cancelled";
+  | 'idle'
+  | 'classifying'
+  | 'scouting'
+  | 'planning'
+  | 'awaiting_plan_review'
+  | 'revising_plan'
+  | 'awaiting_plan_approval'
+  | 'implementing'
+  | 'running_fast_checks'
+  | 'repairing_fast_checks'
+  | 'running_full_checks'
+  | 'repairing_full_checks'
+  | 'reviewing'
+  | 'repairing_review'
+  | 'escalating'
+  | 'final_verification'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
 ```
 
 Define persisted workflow state:
 
 ```ts
 interface WorkflowState {
-  workflowId: string;
-  task: string;
-  repositoryRoot: string;
+  workflowId: string
+  task: string
+  repositoryRoot: string
 
-  stage: WorkflowStage;
+  stage: WorkflowStage
 
-  createdAt: string;
-  updatedAt: string;
+  createdAt: string
+  updatedAt: string
 
-  taskComplexity: "simple" | "moderate" | "complex";
+  taskComplexity: 'simple' | 'moderate' | 'complex'
 
-  scoutReportPath?: string;
+  scoutReportPath?: string
 
-  planPath: string;
-  planRevision: number;
-  planApproved: boolean;
-  planApprovedAt?: string;
-  approvedPlanHash?: string;
+  planPath: string
+  planRevision: number
+  planApproved: boolean
+  planApprovedAt?: string
+  approvedPlanHash?: string
 
-  implementationAttempt: number;
-  fastRepairAttempt: number;
-  fullRepairAttempt: number;
-  semanticRepairAttempt: number;
+  implementationAttempt: number
+  fastRepairAttempt: number
+  fullRepairAttempt: number
+  semanticRepairAttempt: number
 
-  maxFastRepairs: number;
-  maxFullRepairs: number;
-  maxSemanticRepairs: number;
+  maxFastRepairs: number
+  maxFullRepairs: number
+  maxSemanticRepairs: number
 
-  lastCheckResultPath?: string;
-  lastReviewResultPath?: string;
-  lastDiffPath?: string;
+  lastCheckResultPath?: string
+  lastReviewResultPath?: string
+  lastDiffPath?: string
 
   pendingHumanAction?:
-    | "review_plan"
-    | "approve_plan"
-    | "resolve_escalation"
-    | "none";
+    'review_plan' | 'approve_plan' | 'resolve_escalation' | 'none'
 
-  failureReason?: string;
+  failureReason?: string
 }
 ```
 
@@ -289,67 +286,34 @@ Example transition validator:
 
 ```ts
 const ALLOWED_TRANSITIONS: Record<WorkflowStage, WorkflowStage[]> = {
-  idle: ["classifying"],
-  classifying: ["scouting", "failed", "cancelled"],
-  scouting: ["planning", "failed", "cancelled"],
-  planning: ["awaiting_plan_review", "failed", "cancelled"],
+  idle: ['classifying'],
+  classifying: ['scouting', 'failed', 'cancelled'],
+  scouting: ['planning', 'failed', 'cancelled'],
+  planning: ['awaiting_plan_review', 'failed', 'cancelled'],
   awaiting_plan_review: [
-    "revising_plan",
-    "awaiting_plan_approval",
-    "cancelled",
+    'revising_plan',
+    'awaiting_plan_approval',
+    'cancelled',
   ],
-  revising_plan: ["awaiting_plan_review", "failed", "cancelled"],
-  awaiting_plan_approval: [
-    "implementing",
-    "revising_plan",
-    "cancelled",
-  ],
-  implementing: [
-    "running_fast_checks",
-    "failed",
-    "cancelled",
-  ],
+  revising_plan: ['awaiting_plan_review', 'failed', 'cancelled'],
+  awaiting_plan_approval: ['implementing', 'revising_plan', 'cancelled'],
+  implementing: ['running_fast_checks', 'failed', 'cancelled'],
   running_fast_checks: [
-    "repairing_fast_checks",
-    "running_full_checks",
-    "failed",
+    'repairing_fast_checks',
+    'running_full_checks',
+    'failed',
   ],
-  repairing_fast_checks: [
-    "running_fast_checks",
-    "escalating",
-    "failed",
-  ],
-  running_full_checks: [
-    "repairing_full_checks",
-    "reviewing",
-    "failed",
-  ],
-  repairing_full_checks: [
-    "running_full_checks",
-    "escalating",
-    "failed",
-  ],
-  reviewing: [
-    "repairing_review",
-    "final_verification",
-    "failed",
-  ],
-  repairing_review: [
-    "running_fast_checks",
-    "escalating",
-    "failed",
-  ],
-  escalating: [
-    "implementing",
-    "awaiting_plan_review",
-    "failed",
-    "cancelled",
-  ],
-  final_verification: ["completed", "failed"],
+  repairing_fast_checks: ['running_fast_checks', 'escalating', 'failed'],
+  running_full_checks: ['repairing_full_checks', 'reviewing', 'failed'],
+  repairing_full_checks: ['running_full_checks', 'escalating', 'failed'],
+  reviewing: ['repairing_review', 'final_verification', 'failed'],
+  repairing_review: ['running_fast_checks', 'escalating', 'failed'],
+  escalating: ['implementing', 'awaiting_plan_review', 'failed', 'cancelled'],
+  final_verification: ['completed', 'failed'],
   completed: [],
   failed: [],
   cancelled: [],
-};
+}
 ```
 
 ---
@@ -359,17 +323,17 @@ const ALLOWED_TRANSITIONS: Record<WorkflowStage, WorkflowStage[]> = {
 ```ts
 async function runWorkflow(
   task: string,
-  context: ExtensionContext,
+  context: ExtensionContext
 ): Promise<WorkflowResult> {
-  const state = await createWorkflowState(task, context.cwd);
+  const state = await createWorkflowState(task, context.cwd)
 
   try {
-    await transition(state, "classifying");
+    await transition(state, 'classifying')
 
-    state.taskComplexity = classifyTask(task);
-    await saveState(state);
+    state.taskComplexity = classifyTask(task)
+    await saveState(state)
 
-    await transition(state, "scouting");
+    await transition(state, 'scouting')
 
     const scoutReport = await runScout({
       task,
@@ -380,46 +344,46 @@ async function runWorkflow(
         maxLinesPerExcerpt: 140,
         maxApproxTokens: 24_000,
       },
-    });
+    })
 
-    state.scoutReportPath = await persistScoutReport(state, scoutReport);
-    await saveState(state);
+    state.scoutReportPath = await persistScoutReport(state, scoutReport)
+    await saveState(state)
 
-    await transition(state, "planning");
+    await transition(state, 'planning')
 
     const initialPlan = await runPlanner({
-      mode: "create",
+      mode: 'create',
       task,
       scoutReport,
       currentPlan: null,
       reviewInstructions: [],
-    });
+    })
 
-    await writePlanRevision(state, initialPlan);
-    await writeActivePlan(state.planPath, initialPlan);
+    await writePlanRevision(state, initialPlan)
+    await writeActivePlan(state.planPath, initialPlan)
 
-    await transition(state, "awaiting_plan_review");
+    await transition(state, 'awaiting_plan_review')
 
-    state.pendingHumanAction = "review_plan";
-    await saveState(state);
+    state.pendingHumanAction = 'review_plan'
+    await saveState(state)
 
     notifyUser(
       [
-        "The proposed plan has been written to plan.md.",
-        "Review it and add comments beginning with `R:`.",
-        "Run `/plan-review` when ready.",
-        "Run `/plan-approve` only when satisfied.",
-      ].join("\n"),
-    );
+        'The proposed plan has been written to plan.md.',
+        'Review it and add comments beginning with `R:`.',
+        'Run `/plan-review` when ready.',
+        'Run `/plan-approve` only when satisfied.',
+      ].join('\n')
+    )
 
     return {
-      status: "paused",
-      reason: "awaiting_plan_review",
+      status: 'paused',
+      reason: 'awaiting_plan_review',
       workflowId: state.workflowId,
-    };
+    }
   } catch (error) {
-    await markFailed(state, error);
-    throw error;
+    await markFailed(state, error)
+    throw error
   }
 }
 ```
@@ -527,29 +491,29 @@ Parser:
 
 ```ts
 interface PlanReviewInstruction {
-  lineNumber: number;
-  text: string;
-  rawLine: string;
+  lineNumber: number
+  text: string
+  rawLine: string
 }
 
 function extractReviewInstructions(markdown: string): PlanReviewInstruction[] {
-  const instructions: PlanReviewInstruction[] = [];
+  const instructions: PlanReviewInstruction[] = []
 
   for (const [index, line] of markdown.split(/\r?\n/).entries()) {
-    const match = line.match(/^\s*R:\s*(.+?)\s*$/);
+    const match = line.match(/^\s*R:\s*(.+?)\s*$/)
 
     if (!match) {
-      continue;
+      continue
     }
 
     instructions.push({
       lineNumber: index + 1,
       text: match[1],
       rawLine: line,
-    });
+    })
   }
 
-  return instructions;
+  return instructions
 }
 ```
 
@@ -557,60 +521,57 @@ function extractReviewInstructions(markdown: string): PlanReviewInstruction[] {
 
 ```ts
 async function reviewPlanCommand(ctx: ExtensionContext): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd);
+  const state = await loadActiveWorkflow(ctx.cwd)
 
-  assertStage(state, [
-    "awaiting_plan_review",
-    "awaiting_plan_approval",
-  ]);
+  assertStage(state, ['awaiting_plan_review', 'awaiting_plan_approval'])
 
-  const currentPlan = await fs.readFile(state.planPath, "utf8");
-  const instructions = extractReviewInstructions(currentPlan);
+  const currentPlan = await fs.readFile(state.planPath, 'utf8')
+  const instructions = extractReviewInstructions(currentPlan)
 
   if (instructions.length === 0) {
-    state.pendingHumanAction = "approve_plan";
-    await transition(state, "awaiting_plan_approval");
+    state.pendingHumanAction = 'approve_plan'
+    await transition(state, 'awaiting_plan_approval')
 
     ctx.ui.notify(
-      "No R: comments were found. Review the plan and run /plan-approve, or add R: comments and run /plan-review.",
-      "info",
-    );
+      'No R: comments were found. Review the plan and run /plan-approve, or add R: comments and run /plan-review.',
+      'info'
+    )
 
-    return;
+    return
   }
 
-  await transition(state, "revising_plan");
+  await transition(state, 'revising_plan')
 
-  const scoutReport = await readScoutReport(state);
+  const scoutReport = await readScoutReport(state)
 
   const revisedPlan = await runPlanner({
-    mode: "revise",
+    mode: 'revise',
     task: state.task,
     scoutReport,
     currentPlan,
     reviewInstructions: instructions,
-  });
+  })
 
   validatePlanRevision({
     previousPlan: currentPlan,
     revisedPlan,
     reviewInstructions: instructions,
-  });
+  })
 
-  await writePlanRevision(state, revisedPlan);
-  await writeActivePlan(state.planPath, revisedPlan);
+  await writePlanRevision(state, revisedPlan)
+  await writeActivePlan(state.planPath, revisedPlan)
 
-  state.planRevision += 1;
-  state.planApproved = false;
-  state.pendingHumanAction = "review_plan";
-  await saveState(state);
+  state.planRevision += 1
+  state.planApproved = false
+  state.pendingHumanAction = 'review_plan'
+  await saveState(state)
 
-  await transition(state, "awaiting_plan_review");
+  await transition(state, 'awaiting_plan_review')
 
   ctx.ui.notify(
     `plan.md was revised to revision ${state.planRevision}. Review it again and add new R: comments if needed.`,
-    "info",
-  );
+    'info'
+  )
 }
 ```
 
@@ -618,12 +579,12 @@ async function reviewPlanCommand(ctx: ExtensionContext): Promise<void> {
 
 When revising a plan, the Planner must:
 
-* address every `R:` instruction;
-* preserve valid unaffected sections;
-* avoid silently discarding constraints;
-* update scope, steps, acceptance criteria, risks, and verification where necessary;
-* remove handled `R:` lines from the clean output;
-* append a revision log.
+- address every `R:` instruction;
+- preserve valid unaffected sections;
+- avoid silently discarding constraints;
+- update scope, steps, acceptance criteria, risks, and verification where necessary;
+- remove handled `R:` lines from the clean output;
+- append a revision log.
 
 Example:
 
@@ -643,40 +604,37 @@ Addressed:
 
 ```ts
 async function approvePlanCommand(ctx: ExtensionContext): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd);
+  const state = await loadActiveWorkflow(ctx.cwd)
 
-  assertStage(state, [
-    "awaiting_plan_review",
-    "awaiting_plan_approval",
-  ]);
+  assertStage(state, ['awaiting_plan_review', 'awaiting_plan_approval'])
 
-  const plan = await fs.readFile(state.planPath, "utf8");
-  const unresolvedInstructions = extractReviewInstructions(plan);
+  const plan = await fs.readFile(state.planPath, 'utf8')
+  const unresolvedInstructions = extractReviewInstructions(plan)
 
   if (unresolvedInstructions.length > 0) {
     throw new Error(
-      "plan.md still contains unresolved R: comments. Run /plan-review first.",
-    );
+      'plan.md still contains unresolved R: comments. Run /plan-review first.'
+    )
   }
 
-  validatePlanCompleteness(plan);
+  validatePlanCompleteness(plan)
 
-  state.planApproved = true;
-  state.planApprovedAt = new Date().toISOString();
-  state.approvedPlanHash = sha256(plan);
-  state.pendingHumanAction = "none";
+  state.planApproved = true
+  state.planApprovedAt = new Date().toISOString()
+  state.approvedPlanHash = sha256(plan)
+  state.pendingHumanAction = 'none'
 
-  await saveState(state);
-  await transition(state, "implementing");
+  await saveState(state)
+  await transition(state, 'implementing')
 
-  await continueApprovedWorkflow(state, ctx);
+  await continueApprovedWorkflow(state, ctx)
 }
 ```
 
 Before every implementation or repair stage, verify that:
 
 ```ts
-sha256(await fs.readFile("plan.md", "utf8")) === state.approvedPlanHash
+sha256(await fs.readFile('plan.md', 'utf8')) === state.approvedPlanHash
 ```
 
 When the approved plan changes afterward, stop implementation and require approval again.
@@ -688,28 +646,28 @@ When the approved plan changes afterward, stop implementation and require approv
 ```ts
 async function continueApprovedWorkflow(
   state: WorkflowState,
-  ctx: ExtensionContext,
+  ctx: ExtensionContext
 ): Promise<void> {
-  assertApprovedPlanUnchanged(state);
+  assertApprovedPlanUnchanged(state)
 
-  const approvedPlan = await fs.readFile(state.planPath, "utf8");
-  const scoutReport = await readScoutReport(state);
+  const approvedPlan = await fs.readFile(state.planPath, 'utf8')
+  const scoutReport = await readScoutReport(state)
 
-  state.implementationAttempt += 1;
-  await saveState(state);
+  state.implementationAttempt += 1
+  await saveState(state)
 
   await runImplementer({
-    mode: "implement",
+    mode: 'implement',
     task: state.task,
     plan: approvedPlan,
     scoutReport,
     findings: [],
     repositoryRoot: state.repositoryRoot,
-  });
+  })
 
-  await persistCurrentDiff(state);
+  await persistCurrentDiff(state)
 
-  await runVerificationAndReviewLoop(state, ctx);
+  await runVerificationAndReviewLoop(state, ctx)
 }
 ```
 
@@ -735,26 +693,26 @@ Example configuration:
 ```ts
 const FAST_CHECKS: CheckDefinition[] = [
   {
-    name: "diff-check",
-    command: "git diff --check",
+    name: 'diff-check',
+    command: 'git diff --check',
     required: true,
   },
   {
-    name: "typecheck",
-    command: "npm run typecheck",
+    name: 'typecheck',
+    command: 'npm run typecheck',
     required: true,
   },
   {
-    name: "lint",
-    command: "npm run lint",
+    name: 'lint',
+    command: 'npm run lint',
     required: true,
   },
   {
-    name: "focused-tests",
+    name: 'focused-tests',
     command: resolveFocusedTestCommand(),
     required: true,
   },
-];
+]
 ```
 
 ## Full checks
@@ -773,21 +731,21 @@ Example:
 ```ts
 const FULL_CHECKS: CheckDefinition[] = [
   {
-    name: "tests",
-    command: "npm test -- --run",
+    name: 'tests',
+    command: 'npm test -- --run',
     required: true,
   },
   {
-    name: "build",
-    command: "npm run build",
+    name: 'build',
+    command: 'npm run build',
     required: true,
   },
   {
-    name: "fallow",
+    name: 'fallow',
     command: resolveFallowCommand(),
     required: true,
   },
-];
+]
 ```
 
 Repository-specific commands should be discovered during project initialization or read from a workflow configuration file.
@@ -797,16 +755,8 @@ Suggested config:
 ```json
 {
   "checks": {
-    "fast": [
-      "git diff --check",
-      "npm run typecheck",
-      "npm run lint"
-    ],
-    "full": [
-      "npm test -- --run",
-      "npm run build",
-      "fallow check --format json"
-    ]
+    "fast": ["git diff --check", "npm run typecheck", "npm run lint"],
+    "full": ["npm test -- --run", "npm run build", "fallow check --format json"]
   }
 }
 ```
@@ -818,40 +768,40 @@ Suggested config:
 Normalize every shell result.
 
 ```ts
-type Severity = "error" | "warning" | "info";
+type Severity = 'error' | 'warning' | 'info'
 
 interface Finding {
-  source: string;
-  category?: string;
-  severity: Severity;
-  rule?: string;
-  file?: string;
-  line?: number;
-  column?: number;
-  message: string;
-  raw?: string;
-  introduced?: boolean;
+  source: string
+  category?: string
+  severity: Severity
+  rule?: string
+  file?: string
+  line?: number
+  column?: number
+  message: string
+  raw?: string
+  introduced?: boolean
 }
 
 interface CheckResult {
-  name: string;
-  command: string;
-  passed: boolean;
-  required: boolean;
-  exitCode: number;
-  durationMs: number;
-  stdoutPreview: string;
-  stderrPreview: string;
-  findings: Finding[];
-  outputTruncated: boolean;
+  name: string
+  command: string
+  passed: boolean
+  required: boolean
+  exitCode: number
+  durationMs: number
+  stdoutPreview: string
+  stderrPreview: string
+  findings: Finding[]
+  outputTruncated: boolean
 }
 
 interface CheckSuiteResult {
-  suite: "fast" | "full" | "final";
-  passed: boolean;
-  checks: CheckResult[];
-  introducedFindings: Finding[];
-  preExistingFindings: Finding[];
+  suite: 'fast' | 'full' | 'final'
+  passed: boolean
+  checks: CheckResult[]
+  introducedFindings: Finding[]
+  preExistingFindings: Finding[]
 }
 ```
 
@@ -859,20 +809,20 @@ Do not send unlimited raw output to agents.
 
 Apply:
 
-* line limits;
-* character limits;
-* duplicate suppression;
-* grouping by file and rule;
-* baseline comparison where supported;
-* extraction of only actionable failures.
+- line limits;
+- character limits;
+- duplicate suppression;
+- grouping by file and rule;
+- baseline comparison where supported;
+- extraction of only actionable failures.
 
 For Fallow, distinguish:
 
 ```ts
 interface FallowDelta {
-  introduced: Finding[];
-  resolved: Finding[];
-  preExisting: Finding[];
+  introduced: Finding[]
+  resolved: Finding[]
+  preExisting: Finding[]
 }
 ```
 
@@ -885,74 +835,74 @@ Normal task gates should primarily block on findings introduced by the current c
 ```ts
 async function runVerificationAndReviewLoop(
   state: WorkflowState,
-  ctx: ExtensionContext,
+  ctx: ExtensionContext
 ): Promise<void> {
-  const approvedPlan = await readApprovedPlan(state);
+  const approvedPlan = await readApprovedPlan(state)
 
   while (true) {
-    await transition(state, "running_fast_checks");
+    await transition(state, 'running_fast_checks')
 
-    const fast = await runCheckSuite("fast", state.repositoryRoot);
-    await persistCheckSuite(state, fast);
+    const fast = await runCheckSuite('fast', state.repositoryRoot)
+    await persistCheckSuite(state, fast)
 
     if (!fast.passed) {
       if (state.fastRepairAttempt >= state.maxFastRepairs) {
         await escalateWorkflow(state, {
-          reason: "fast_checks_exhausted",
+          reason: 'fast_checks_exhausted',
           evidence: fast,
-        });
-        return;
+        })
+        return
       }
 
-      state.fastRepairAttempt += 1;
-      await saveState(state);
-      await transition(state, "repairing_fast_checks");
+      state.fastRepairAttempt += 1
+      await saveState(state)
+      await transition(state, 'repairing_fast_checks')
 
       await runImplementer({
-        mode: "repair",
+        mode: 'repair',
         task: state.task,
         plan: approvedPlan,
         scoutReport: await readScoutReport(state),
         findings: fast.introducedFindings,
         repositoryRoot: state.repositoryRoot,
-      });
+      })
 
-      await persistCurrentDiff(state);
-      continue;
+      await persistCurrentDiff(state)
+      continue
     }
 
-    await transition(state, "running_full_checks");
+    await transition(state, 'running_full_checks')
 
-    const full = await runCheckSuite("full", state.repositoryRoot);
-    await persistCheckSuite(state, full);
+    const full = await runCheckSuite('full', state.repositoryRoot)
+    await persistCheckSuite(state, full)
 
     if (!full.passed) {
       if (state.fullRepairAttempt >= state.maxFullRepairs) {
         await escalateWorkflow(state, {
-          reason: "full_checks_exhausted",
+          reason: 'full_checks_exhausted',
           evidence: full,
-        });
-        return;
+        })
+        return
       }
 
-      state.fullRepairAttempt += 1;
-      await saveState(state);
-      await transition(state, "repairing_full_checks");
+      state.fullRepairAttempt += 1
+      await saveState(state)
+      await transition(state, 'repairing_full_checks')
 
       await runImplementer({
-        mode: "repair",
+        mode: 'repair',
         task: state.task,
         plan: approvedPlan,
         scoutReport: await readScoutReport(state),
         findings: full.introducedFindings,
         repositoryRoot: state.repositoryRoot,
-      });
+      })
 
-      await persistCurrentDiff(state);
-      continue;
+      await persistCurrentDiff(state)
+      continue
     }
 
-    await transition(state, "reviewing");
+    await transition(state, 'reviewing')
 
     const review = await runReviewer({
       task: state.task,
@@ -963,54 +913,51 @@ async function runVerificationAndReviewLoop(
         fast,
         full,
       },
-    });
+    })
 
-    await persistReview(state, review);
+    await persistReview(state, review)
 
     if (!review.passed) {
       if (state.semanticRepairAttempt >= state.maxSemanticRepairs) {
         await escalateWorkflow(state, {
-          reason: "semantic_review_exhausted",
+          reason: 'semantic_review_exhausted',
           evidence: review,
-        });
-        return;
+        })
+        return
       }
 
-      state.semanticRepairAttempt += 1;
-      await saveState(state);
-      await transition(state, "repairing_review");
+      state.semanticRepairAttempt += 1
+      await saveState(state)
+      await transition(state, 'repairing_review')
 
       await runImplementer({
-        mode: "repair",
+        mode: 'repair',
         task: state.task,
         plan: approvedPlan,
         scoutReport: await readScoutReport(state),
         findings: review.findings,
         repositoryRoot: state.repositoryRoot,
-      });
+      })
 
-      await persistCurrentDiff(state);
-      continue;
+      await persistCurrentDiff(state)
+      continue
     }
 
-    await transition(state, "final_verification");
+    await transition(state, 'final_verification')
 
-    const finalResult = await runCheckSuite(
-      "final",
-      state.repositoryRoot,
-    );
+    const finalResult = await runCheckSuite('final', state.repositoryRoot)
 
-    await persistCheckSuite(state, finalResult);
+    await persistCheckSuite(state, finalResult)
 
     if (!finalResult.passed) {
       await markFailed(
         state,
-        new Error("Final verification failed after review approval."),
-      );
-      return;
+        new Error('Final verification failed after review approval.')
+      )
+      return
     }
 
-    await transition(state, "completed");
+    await transition(state, 'completed')
 
     ctx.ui.notify(
       buildCompletionSummary({
@@ -1018,10 +965,10 @@ async function runVerificationAndReviewLoop(
         review,
         finalResult,
       }),
-      "info",
-    );
+      'info'
+    )
 
-    return;
+    return
   }
 }
 ```
@@ -1033,7 +980,7 @@ const DEFAULT_REPAIR_LIMITS = {
   fast: 2,
   full: 2,
   semantic: 2,
-};
+}
 ```
 
 ---
@@ -1046,13 +993,13 @@ Possible escalation reasons:
 
 ```ts
 type EscalationReason =
-  | "scout_uncertain"
-  | "planner_uncertain"
-  | "fast_checks_exhausted"
-  | "full_checks_exhausted"
-  | "semantic_review_exhausted"
-  | "implementation_blocked"
-  | "approved_plan_invalidated";
+  | 'scout_uncertain'
+  | 'planner_uncertain'
+  | 'fast_checks_exhausted'
+  | 'full_checks_exhausted'
+  | 'semantic_review_exhausted'
+  | 'implementation_blocked'
+  | 'approved_plan_invalidated'
 ```
 
 Escalation options:
@@ -1067,12 +1014,12 @@ Do not silently switch to an expensive model.
 
 At escalation, pause and show:
 
-* reason;
-* attempts already made;
-* current diff;
-* failing checks;
-* reviewer findings;
-* suggested next actions.
+- reason;
+- attempts already made;
+- current diff;
+- failing checks;
+- reviewer findings;
+- suggested next actions.
 
 ---
 
@@ -1081,23 +1028,18 @@ At escalation, pause and show:
 Create a unified role configuration.
 
 ```ts
-type AgentRole =
-  | "scout"
-  | "planner"
-  | "implementer"
-  | "reviewer"
-  | "escalation";
+type AgentRole = 'scout' | 'planner' | 'implementer' | 'reviewer' | 'escalation'
 
 interface AgentProfile {
-  role: AgentRole;
-  provider: string;
-  model: string;
-  systemPromptPath: string;
-  tools: string[];
-  readOnly: boolean;
-  maxInputTokens?: number;
-  maxOutputTokens?: number;
-  temperature?: number;
+  role: AgentRole
+  provider: string
+  model: string
+  systemPromptPath: string
+  tools: string[]
+  readOnly: boolean
+  maxInputTokens?: number
+  maxOutputTokens?: number
+  temperature?: number
 }
 ```
 
@@ -1106,55 +1048,55 @@ Example:
 ```ts
 const AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
   scout: {
-    role: "scout",
-    provider: "local-llama",
-    model: "qwen3.6-35b-a3b",
-    systemPromptPath: ".pi/agents/scout.md",
-    tools: ["list", "read", "grep", "git"],
+    role: 'scout',
+    provider: 'local-llama',
+    model: 'qwen3.6-35b-a3b',
+    systemPromptPath: '.pi/agents/scout.md',
+    tools: ['list', 'read', 'grep', 'git'],
     readOnly: true,
     temperature: 0.1,
   },
 
   planner: {
-    role: "planner",
-    provider: "openai-codex",
-    model: "codex-model",
-    systemPromptPath: ".pi/agents/planner.md",
-    tools: ["request_more_scout_context"],
+    role: 'planner',
+    provider: 'openai-codex',
+    model: 'codex-model',
+    systemPromptPath: '.pi/agents/planner.md',
+    tools: ['request_more_scout_context'],
     readOnly: true,
     temperature: 0.1,
   },
 
   implementer: {
-    role: "implementer",
-    provider: "local-llama",
-    model: "qwen3.6-35b-a3b",
-    systemPromptPath: ".pi/agents/implementer.md",
-    tools: ["read", "grep", "edit", "write", "git_diff"],
+    role: 'implementer',
+    provider: 'local-llama',
+    model: 'qwen3.6-35b-a3b',
+    systemPromptPath: '.pi/agents/implementer.md',
+    tools: ['read', 'grep', 'edit', 'write', 'git_diff'],
     readOnly: false,
     temperature: 0.1,
   },
 
   reviewer: {
-    role: "reviewer",
-    provider: "local-llama",
-    model: "review-model",
-    systemPromptPath: ".pi/agents/reviewer.md",
+    role: 'reviewer',
+    provider: 'local-llama',
+    model: 'review-model',
+    systemPromptPath: '.pi/agents/reviewer.md',
     tools: [],
     readOnly: true,
     temperature: 0.1,
   },
 
   escalation: {
-    role: "escalation",
-    provider: "codex-cli",
-    model: "default",
-    systemPromptPath: ".pi/agents/escalation.md",
-    tools: ["read", "grep", "git_diff"],
+    role: 'escalation',
+    provider: 'codex-cli',
+    model: 'default',
+    systemPromptPath: '.pi/agents/escalation.md',
+    tools: ['read', 'grep', 'git_diff'],
     readOnly: true,
     temperature: 0.1,
   },
-};
+}
 ```
 
 The workflow should allow changing these profiles without modifying orchestration code.
@@ -1207,18 +1149,21 @@ The TypeScript workflow engine owns stage transitions. Your role is limited to c
 # Classification Rules
 
 Simple:
+
 - one small, well-localized change;
 - known files and symbols;
 - low architectural risk;
 - no public API or data-flow change.
 
 Moderate:
+
 - several files;
 - new behavior;
 - existing patterns must be located;
 - tests or lifecycle behavior may change.
 
 Complex:
+
 - cross-module architecture;
 - concurrency, persistence, security, or migration concerns;
 - public API changes;
@@ -1230,11 +1175,11 @@ Complex:
 Return JSON only:
 
 {
-  "classification": "simple | moderate | complex",
-  "planningRequired": true,
-  "reason": "brief explanation",
-  "recommendedNextStage": "scouting | planning | implementation | human_review | escalation",
-  "escalationTarget": "none | planner | implementer | human | codex"
+"classification": "simple | moderate | complex",
+"planningRequired": true,
+"reason": "brief explanation",
+"recommendedNextStage": "scouting | planning | implementation | human_review | escalation",
+"escalationTarget": "none | planner | implementer | human | codex"
 }
 ```
 
@@ -1318,54 +1263,54 @@ Unless explicitly expanded:
 Return valid JSON:
 
 {
-  "taskSummary": "brief normalized task",
-  "relevantFiles": [
-    {
-      "path": "path/to/file",
-      "purpose": "why it matters",
-      "symbols": ["SymbolName"],
-      "reason": "task relevance"
-    }
-  ],
-  "codeExcerpts": [
-    {
-      "path": "path/to/file",
-      "startLine": 1,
-      "endLine": 20,
-      "reason": "why this excerpt matters",
-      "content": "source excerpt"
-    }
-  ],
-  "callPaths": [
-    "Caller.method -> Service.method -> Repository.method"
-  ],
-  "dataFlow": [
-    "description of important data movement"
-  ],
-  "existingPatterns": [
-    "pattern already used in repository"
-  ],
-  "tests": [
-    {
-      "path": "test path",
-      "relevance": "what it verifies"
-    }
-  ],
-  "verificationCommands": [
-    "command"
-  ],
-  "architectureConstraints": [
-    "constraint"
-  ],
-  "risks": [
-    "risk"
-  ],
-  "uncertainties": [
-    {
-      "question": "focused missing fact",
-      "importance": "why it matters"
-    }
-  ]
+"taskSummary": "brief normalized task",
+"relevantFiles": [
+{
+"path": "path/to/file",
+"purpose": "why it matters",
+"symbols": ["SymbolName"],
+"reason": "task relevance"
+}
+],
+"codeExcerpts": [
+{
+"path": "path/to/file",
+"startLine": 1,
+"endLine": 20,
+"reason": "why this excerpt matters",
+"content": "source excerpt"
+}
+],
+"callPaths": [
+"Caller.method -> Service.method -> Repository.method"
+],
+"dataFlow": [
+"description of important data movement"
+],
+"existingPatterns": [
+"pattern already used in repository"
+],
+"tests": [
+{
+"path": "test path",
+"relevance": "what it verifies"
+}
+],
+"verificationCommands": [
+"command"
+],
+"architectureConstraints": [
+"constraint"
+],
+"risks": [
+"risk"
+],
+"uncertainties": [
+{
+"question": "focused missing fact",
+"importance": "why it matters"
+}
+]
 }
 
 # Quality Rules
@@ -1447,13 +1392,13 @@ When revising an existing plan:
 When critical evidence is missing, return a structured context request instead of guessing:
 
 {
-  "status": "needs_more_context",
-  "questions": [
-    {
-      "question": "focused repository question",
-      "reason": "why planning depends on it"
-    }
-  ]
+"status": "needs_more_context",
+"questions": [
+{
+"question": "focused repository question",
+"reason": "why planning depends on it"
+}
+]
 }
 
 Do not request broad repository scans. Request only focused missing facts.
@@ -1627,24 +1572,24 @@ When supplied deterministic or reviewer findings:
 Return JSON only:
 
 {
-  "status": "implemented | repaired | blocked",
-  "summary": "brief summary",
-  "filesChanged": [
-    {
-      "path": "path",
-      "change": "brief description"
-    }
-  ],
-  "acceptanceCriteriaAddressed": [
-    "criterion"
-  ],
-  "verificationSuggested": [
-    "command"
-  ],
-  "unresolvedIssues": [
-    "issue"
-  ],
-  "planChangeRequired": false
+"status": "implemented | repaired | blocked",
+"summary": "brief summary",
+"filesChanged": [
+{
+"path": "path",
+"change": "brief description"
+}
+],
+"acceptanceCriteriaAddressed": [
+"criterion"
+],
+"verificationSuggested": [
+"command"
+],
+"unresolvedIssues": [
+"issue"
+],
+"planChangeRequired": false
 }
 
 Set `planChangeRequired` to true when a correct solution requires changing the approved plan.
@@ -1724,29 +1669,29 @@ Only blocker, major, and explicitly configured minor findings should fail the re
 Return valid JSON:
 
 {
-  "passed": true,
-  "summary": "brief review summary",
-  "acceptanceCriteria": [
-    {
-      "criterion": "criterion text",
-      "status": "met | partially_met | not_met",
-      "evidence": "brief evidence"
-    }
-  ],
-  "findings": [
-    {
-      "severity": "blocker | major | minor | suggestion",
-      "category": "correctness | regression | lifecycle | architecture | testing | complexity | security | other",
-      "file": "path",
-      "lineStart": 1,
-      "lineEnd": 1,
-      "symbol": "optional symbol",
-      "message": "actionable issue",
-      "failureScenario": "how the issue appears",
-      "requiredFix": "specific correction"
-    }
-  ],
-  "requiresPlanRevision": false
+"passed": true,
+"summary": "brief review summary",
+"acceptanceCriteria": [
+{
+"criterion": "criterion text",
+"status": "met | partially_met | not_met",
+"evidence": "brief evidence"
+}
+],
+"findings": [
+{
+"severity": "blocker | major | minor | suggestion",
+"category": "correctness | regression | lifecycle | architecture | testing | complexity | security | other",
+"file": "path",
+"lineStart": 1,
+"lineEnd": 1,
+"symbol": "optional symbol",
+"message": "actionable issue",
+"failureScenario": "how the issue appears",
+"requiredFix": "specific correction"
+}
+],
+"requiresPlanRevision": false
 }
 
 Set `passed` to false when any blocker or major finding exists.
@@ -1762,9 +1707,9 @@ Implement deterministic validation before approval.
 
 ```ts
 interface PlanValidationResult {
-  valid: boolean;
-  errors: string[];
-  warnings: string[];
+  valid: boolean
+  errors: string[]
+  warnings: string[]
 }
 ```
 
@@ -1772,34 +1717,34 @@ Required sections:
 
 ```ts
 const REQUIRED_PLAN_SECTIONS = [
-  "# Implementation Plan",
-  "## Status",
-  "## Objective",
-  "## Scope",
-  "## Repository Findings",
-  "## Proposed Design",
-  "## Implementation Steps",
-  "## Acceptance Criteria",
-  "## Verification",
-  "## Risks and Edge Cases",
-  "## Open Questions",
-  "## Revision Log",
-];
+  '# Implementation Plan',
+  '## Status',
+  '## Objective',
+  '## Scope',
+  '## Repository Findings',
+  '## Proposed Design',
+  '## Implementation Steps',
+  '## Acceptance Criteria',
+  '## Verification',
+  '## Risks and Edge Cases',
+  '## Open Questions',
+  '## Revision Log',
+]
 ```
 
 Validation rules:
 
-* no unresolved `R:` lines;
-* at least one implementation step;
-* at least one acceptance criterion;
-* at least one verification command;
-* explicit `Create` section;
-* explicit `Delete` section;
-* no contradictory status such as `Approved` written by Planner;
-* no path traversal or absolute paths outside repository;
-* no instructions to weaken checks;
-* no unbounded language such as "refactor as needed" without scope;
-* no placeholder text such as `TODO` or `TBD` unless listed under Open Questions.
+- no unresolved `R:` lines;
+- at least one implementation step;
+- at least one acceptance criterion;
+- at least one verification command;
+- explicit `Create` section;
+- explicit `Delete` section;
+- no contradictory status such as `Approved` written by Planner;
+- no path traversal or absolute paths outside repository;
+- no instructions to weaken checks;
+- no unbounded language such as "refactor as needed" without scope;
+- no placeholder text such as `TODO` or `TBD` unless listed under Open Questions.
 
 ---
 
@@ -1809,27 +1754,27 @@ Pi extensions execute with the permissions of the Pi process.
 
 Implement these safeguards:
 
-* validate repository root;
-* reject paths outside repository;
-* restrict Scout to read-only tools;
-* restrict Planner to no repository-write tools;
-* restrict Reviewer to no tools or read-only evidence;
-* allow Implementer writes only inside repository;
-* block access to `.env`, credentials, SSH keys, browser profiles, and home-directory secrets unless explicitly authorized;
-* redact secrets from logs;
-* cap command execution time;
-* cap output size;
-* disallow destructive shell commands;
-* record every command;
-* require explicit user permission for network access;
-* do not automatically commit or push.
+- validate repository root;
+- reject paths outside repository;
+- restrict Scout to read-only tools;
+- restrict Planner to no repository-write tools;
+- restrict Reviewer to no tools or read-only evidence;
+- allow Implementer writes only inside repository;
+- block access to `.env`, credentials, SSH keys, browser profiles, and home-directory secrets unless explicitly authorized;
+- redact secrets from logs;
+- cap command execution time;
+- cap output size;
+- disallow destructive shell commands;
+- record every command;
+- require explicit user permission for network access;
+- do not automatically commit or push.
 
 Optional stronger isolation:
 
-* run local agents in a container;
-* run Scout and Reviewer with read-only repository mounts;
-* run Implementer in a dedicated Git worktree;
-* run Codex escalation in read-only mode unless explicitly chosen for implementation.
+- run local agents in a container;
+- run Scout and Reviewer with read-only repository mounts;
+- run Implementer in a dedicated Git worktree;
+- run Codex escalation in read-only mode unless explicitly chosen for implementation.
 
 ---
 
@@ -1839,29 +1784,29 @@ Append every event as one JSON line.
 
 ```ts
 interface WorkflowEvent {
-  id: string;
-  workflowId: string;
-  timestamp: string;
+  id: string
+  workflowId: string
+  timestamp: string
   type:
-    | "workflow_created"
-    | "stage_changed"
-    | "agent_started"
-    | "agent_completed"
-    | "plan_written"
-    | "plan_review_requested"
-    | "plan_revised"
-    | "plan_approved"
-    | "command_started"
-    | "command_completed"
-    | "check_failed"
-    | "repair_started"
-    | "review_completed"
-    | "escalation_requested"
-    | "workflow_completed"
-    | "workflow_failed"
-    | "workflow_cancelled";
-  stage: WorkflowStage;
-  payload: Record<string, unknown>;
+    | 'workflow_created'
+    | 'stage_changed'
+    | 'agent_started'
+    | 'agent_completed'
+    | 'plan_written'
+    | 'plan_review_requested'
+    | 'plan_revised'
+    | 'plan_approved'
+    | 'command_started'
+    | 'command_completed'
+    | 'check_failed'
+    | 'repair_started'
+    | 'review_completed'
+    | 'escalation_requested'
+    | 'workflow_completed'
+    | 'workflow_failed'
+    | 'workflow_cancelled'
+  stage: WorkflowStage
+  payload: Record<string, unknown>
 }
 ```
 
@@ -1869,15 +1814,15 @@ Never store hidden reasoning or model chain-of-thought.
 
 Store only:
 
-* prompts sent;
-* structured responses;
-* tool calls;
-* commands;
-* exit codes;
-* summaries;
-* diffs;
-* decisions;
-* token usage where available.
+- prompts sent;
+- structured responses;
+- tool calls;
+- commands;
+- exit codes;
+- summaries;
+- diffs;
+- decisions;
+- token usage where available.
 
 ---
 
@@ -1887,52 +1832,52 @@ Add tests for:
 
 ## State machine
 
-* valid transitions succeed;
-* invalid transitions fail;
-* completed and cancelled workflows cannot resume incorrectly.
+- valid transitions succeed;
+- invalid transitions fail;
+- completed and cancelled workflows cannot resume incorrectly.
 
 ## Plan review parser
 
-* extracts valid `R:` lines;
-* ignores non-`R:` text;
-* preserves line numbers;
-* handles multiple comments;
-* handles Windows and Unix line endings;
-* rejects approval while comments remain.
+- extracts valid `R:` lines;
+- ignores non-`R:` text;
+- preserves line numbers;
+- handles multiple comments;
+- handles Windows and Unix line endings;
+- rejects approval while comments remain.
 
 ## Plan approval
 
-* hashes approved plan;
-* prevents implementation when plan changes afterward;
-* allows revision and reapproval;
-* persists approval timestamp.
+- hashes approved plan;
+- prevents implementation when plan changes afterward;
+- allows revision and reapproval;
+- persists approval timestamp.
 
 ## Repair limits
 
-* retries only up to configured maximum;
-* escalates after limit;
-* does not reset counters accidentally.
+- retries only up to configured maximum;
+- escalates after limit;
+- does not reset counters accidentally.
 
 ## Verification
 
-* hard gates fail on non-zero exit;
-* output truncation works;
-* findings normalize correctly;
-* Fallow baseline separates introduced and pre-existing issues.
+- hard gates fail on non-zero exit;
+- output truncation works;
+- findings normalize correctly;
+- Fallow baseline separates introduced and pre-existing issues.
 
 ## Persistence
 
-* interrupted workflow resumes;
-* journal remains append-only;
-* state writes are atomic;
-* corrupt state produces a clear error.
+- interrupted workflow resumes;
+- journal remains append-only;
+- state writes are atomic;
+- corrupt state produces a clear error.
 
 ## Agent boundaries
 
-* Scout cannot write;
-* Planner cannot modify repository;
-* Reviewer cannot modify repository;
-* Implementer cannot modify workflow state or `plan.md`.
+- Scout cannot write;
+- Planner cannot modify repository;
+- Reviewer cannot modify repository;
+- Implementer cannot modify workflow state or `plan.md`.
 
 ---
 
@@ -1940,28 +1885,28 @@ Add tests for:
 
 The implementation is complete when:
 
-* `/workflow <task>` creates a persisted workflow;
-* the Scout produces a structured repository report;
-* the Planner writes `plan.md`;
-* the workflow pauses before implementation;
-* the user can add one or more `R:` lines to `plan.md`;
-* `/plan-review` revises `plan.md`;
-* review can repeat multiple times;
-* `/plan-approve` refuses approval while unresolved `R:` lines remain;
-* approval stores a hash of the plan;
-* implementation cannot begin without approval;
-* modification of an approved plan invalidates approval;
-* the Implementer follows the approved plan;
-* fast checks run after implementation;
-* failed checks trigger bounded repairs;
-* full checks include Fallow when configured;
-* the Reviewer receives the diff, plan, Scout report, and check results;
-* semantic review failures trigger bounded repairs;
-* final verification runs after review passes;
-* workflow state can resume after interruption;
-* all stages are recorded in an append-only event journal;
-* no role can silently skip mandatory gates;
-* model profiles are configurable independently from workflow code.
+- `/workflow <task>` creates a persisted workflow;
+- the Scout produces a structured repository report;
+- the Planner writes `plan.md`;
+- the workflow pauses before implementation;
+- the user can add one or more `R:` lines to `plan.md`;
+- `/plan-review` revises `plan.md`;
+- review can repeat multiple times;
+- `/plan-approve` refuses approval while unresolved `R:` lines remain;
+- approval stores a hash of the plan;
+- implementation cannot begin without approval;
+- modification of an approved plan invalidates approval;
+- the Implementer follows the approved plan;
+- fast checks run after implementation;
+- failed checks trigger bounded repairs;
+- full checks include Fallow when configured;
+- the Reviewer receives the diff, plan, Scout report, and check results;
+- semantic review failures trigger bounded repairs;
+- final verification runs after review passes;
+- workflow state can resume after interruption;
+- all stages are recorded in an append-only event journal;
+- no role can silently skip mandatory gates;
+- model profiles are configurable independently from workflow code.
 
 ---
 
@@ -1996,17 +1941,17 @@ Implement in this order:
 
 Do not initially implement:
 
-* parallel Implementers;
-* automatic Git commits;
-* automatic pull-request creation;
-* distributed execution;
-* remote workflow dashboard;
-* automatic merge;
-* autonomous dependency installation;
-* unrestricted network research;
-* dynamic prompt generation;
-* more than one active workflow per repository;
-* complex task graph scheduling.
+- parallel Implementers;
+- automatic Git commits;
+- automatic pull-request creation;
+- distributed execution;
+- remote workflow dashboard;
+- automatic merge;
+- autonomous dependency installation;
+- unrestricted network research;
+- dynamic prompt generation;
+- more than one active workflow per repository;
+- complex task graph scheduling.
 
 Keep the first version focused on one reliable sequential workflow with strong human plan approval.
 

@@ -25,19 +25,19 @@ Reference anchor:
 Minimal shape:
 
 ```ts
-import { createActor, fromObservable } from 'xstate';
-import { interval } from 'rxjs';
+import { createActor, fromObservable } from 'xstate'
+import { interval } from 'rxjs'
 
-type Output = number;
-type Input = { period?: number };
+type Output = number
+type Input = { period?: number }
 
 const tickerLogic = fromObservable<Output, Input>(({ input }) => {
-  return interval(input.period ?? 1000);
-});
+  return interval(input.period ?? 1000)
+})
 
 const actor = createActor(tickerLogic, {
-  input: { period: 500 }
-});
+  input: { period: 500 },
+})
 ```
 
 ## Inspection API
@@ -59,17 +59,17 @@ Reference anchor:
 Minimal shape:
 
 ```ts
-import { createActor, createMachine } from 'xstate';
+import { createActor, createMachine } from 'xstate'
 
-const actor = createActor(createMachine({}));
+const actor = createActor(createMachine({}))
 
 const sub = actor.system.inspect((inspectionEvent) => {
-  console.log(inspectionEvent.type);
-});
+  console.log(inspectionEvent.type)
+})
 
-actor.start();
+actor.start()
 
-sub.unsubscribe();
+sub.unsubscribe()
 ```
 
 ## Browser inspector
@@ -83,24 +83,24 @@ Reference anchor:
 Minimal shape:
 
 ```tsx
-import { useMachine } from '@xstate/react';
-import { createBrowserInspector } from '@statelyai/inspect';
-import { feedbackMachine } from './feedbackMachine';
+import { useMachine } from '@xstate/react'
+import { createBrowserInspector } from '@statelyai/inspect'
+import { feedbackMachine } from './feedbackMachine'
 
 const { inspect } = createBrowserInspector({
-  autoStart: false
-});
+  autoStart: false,
+})
 
 export function Feedback() {
   const [snapshot, send] = useMachine(feedbackMachine, {
-    inspect
-  });
+    inspect,
+  })
 
   return (
     <button onClick={() => send({ type: 'restart' })}>
       {snapshot.matches('closed') ? 'Restart' : 'Send'}
     </button>
-  );
+  )
 }
 ```
 

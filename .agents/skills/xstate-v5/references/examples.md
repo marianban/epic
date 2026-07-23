@@ -86,46 +86,46 @@ export const feedbackMachine = setup({
 ## Shared actor with React
 
 ```tsx
-import { createActorContext } from '@xstate/react';
-import { feedbackMachine } from './feedbackMachine';
+import { createActorContext } from '@xstate/react'
+import { feedbackMachine } from './feedbackMachine'
 
-const FeedbackContext = createActorContext(feedbackMachine);
+const FeedbackContext = createActorContext(feedbackMachine)
 
 export function FeedbackProvider(props: { children: React.ReactNode }) {
-  return <FeedbackContext.Provider>{props.children}</FeedbackContext.Provider>;
+  return <FeedbackContext.Provider>{props.children}</FeedbackContext.Provider>
 }
 
 export function FeedbackForm() {
-  const actorRef = FeedbackContext.useActorRef();
+  const actorRef = FeedbackContext.useActorRef()
   const canSubmit = FeedbackContext.useSelector((snapshot) =>
     snapshot.can({ type: 'feedback.submitted' })
-  );
+  )
   const isEditable = FeedbackContext.useSelector((snapshot) =>
     snapshot.hasTag('editable')
-  );
+  )
 
   if (!isEditable) {
-    return null;
+    return null
   }
 
   return (
     <form
       onSubmit={(event) => {
-        event.preventDefault();
-        actorRef.send({ type: 'feedback.submitted' });
+        event.preventDefault()
+        actorRef.send({ type: 'feedback.submitted' })
       }}
     >
       <textarea
         onChange={(event) => {
           actorRef.send({
             type: 'feedback.changed',
-            value: event.target.value
-          });
+            value: event.target.value,
+          })
         }}
       />
       <button disabled={!canSubmit}>Submit</button>
     </form>
-  );
+  )
 }
 ```
 
@@ -137,22 +137,22 @@ If a named `assign(...)` action updates multiple properties, use one `params` ob
 
 ```ts
 // authMachine.ts
-import { assign, assertEvent, fromPromise, setup } from 'xstate';
+import { assign, assertEvent, fromPromise, setup } from 'xstate'
 
-type User = { id: string; email: string; name: string };
-type Session = { token: string; expiresAt: number };
+type User = { id: string; email: string; name: string }
+type Session = { token: string; expiresAt: number }
 
 export const authMachine = setup({
   types: {} as {
     context: {
-      user: User | null;
-      session: Session | null;
-      error: string | null;
-    };
+      user: User | null
+      session: Session | null
+      error: string | null
+    }
     events:
       | { type: 'auth.login'; email: string; password: string }
       | { type: 'auth.logout' }
-      | { type: 'auth.refresh' };
+      | { type: 'auth.refresh' }
   },
   actors: {
     login: fromPromise(
@@ -160,69 +160,69 @@ export const authMachine = setup({
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(input)
-        });
+          body: JSON.stringify(input),
+        })
 
         if (!res.ok) {
-          throw new Error('Login failed');
+          throw new Error('Login failed')
         }
 
-        return (await res.json()) as { user: User; session: Session };
+        return (await res.json()) as { user: User; session: Session }
       }
     ),
     refreshSession: fromPromise(async () => {
-      const res = await fetch('/api/auth/refresh', { method: 'POST' });
+      const res = await fetch('/api/auth/refresh', { method: 'POST' })
 
       if (!res.ok) {
-        throw new Error('Refresh failed');
+        throw new Error('Refresh failed')
       }
 
-      return (await res.json()) as { session: Session };
-    })
+      return (await res.json()) as { session: Session }
+    }),
   },
   actions: {
     setAuth: assign({
       user: (_, params: { user: User; session: Session }) => params.user,
       session: (_, params: { user: User; session: Session }) => params.session,
-      error: () => null
+      error: () => null,
     }),
     setSession: assign({
-      session: (_, params: { session: Session }) => params.session
+      session: (_, params: { session: Session }) => params.session,
     }),
     setError: assign({
-      error: (_, params: { message: string }) => params.message
+      error: (_, params: { message: string }) => params.message,
     }),
     clearAuth: assign({
       user: () => null,
       session: () => null,
-      error: () => null
-    })
-  }
+      error: () => null,
+    }),
+  },
 }).createMachine({
   id: 'auth',
   context: {
     user: null,
     session: null,
-    error: null
+    error: null,
   },
   initial: 'signedOut',
   states: {
     signedOut: {
       on: {
-        'auth.login': { target: 'signingIn' }
-      }
+        'auth.login': { target: 'signingIn' },
+      },
     },
     signingIn: {
       tags: ['loading'],
       invoke: {
         src: 'login',
         input: ({ event }) => {
-          assertEvent(event, 'auth.login');
+          assertEvent(event, 'auth.login')
 
           return {
             email: event.email,
-            password: event.password
-          };
+            password: event.password,
+          }
         },
         onDone: {
           target: 'signedIn',
@@ -231,10 +231,10 @@ export const authMachine = setup({
               type: 'setAuth',
               params: ({ event }) => ({
                 user: event.output.user,
-                session: event.output.session
-              })
-            }
-          ]
+                session: event.output.session,
+              }),
+            },
+          ],
         },
         onError: {
           target: 'signedOut',
@@ -242,21 +242,24 @@ export const authMachine = setup({
             {
               type: 'setError',
               params: ({ event }) => ({
-                message: event.error instanceof Error ? event.error.message : 'Login failed'
-              })
-            }
-          ]
-        }
-      }
+                message:
+                  event.error instanceof Error
+                    ? event.error.message
+                    : 'Login failed',
+              }),
+            },
+          ],
+        },
+      },
     },
     signedIn: {
       on: {
         'auth.logout': {
           target: 'signedOut',
-          actions: [{ type: 'clearAuth' }]
+          actions: [{ type: 'clearAuth' }],
         },
-        'auth.refresh': { target: 'refreshing' }
-      }
+        'auth.refresh': { target: 'refreshing' },
+      },
     },
     refreshing: {
       tags: ['loading'],
@@ -268,10 +271,10 @@ export const authMachine = setup({
             {
               type: 'setSession',
               params: ({ event }) => ({
-                session: event.output.session
-              })
-            }
-          ]
+                session: event.output.session,
+              }),
+            },
+          ],
         },
         onError: {
           target: 'signedOut',
@@ -279,65 +282,76 @@ export const authMachine = setup({
             {
               type: 'setError',
               params: ({ event }) => ({
-                message: event.error instanceof Error ? event.error.message : 'Refresh failed'
-              })
+                message:
+                  event.error instanceof Error
+                    ? event.error.message
+                    : 'Refresh failed',
+              }),
             },
-            { type: 'clearAuth' }
-          ]
-        }
-      }
-    }
-  }
-});
+            { type: 'clearAuth' },
+          ],
+        },
+      },
+    },
+  },
+})
 ```
 
 ```tsx
 // AuthContext.tsx
-import { createActorContext } from '@xstate/react';
-import { authMachine } from './authMachine';
+import { createActorContext } from '@xstate/react'
+import { authMachine } from './authMachine'
 
-export const AuthContext = createActorContext(authMachine);
+export const AuthContext = createActorContext(authMachine)
 
 export function AuthProvider(props: { children: React.ReactNode }) {
-  return <AuthContext.Provider>{props.children}</AuthContext.Provider>;
+  return <AuthContext.Provider>{props.children}</AuthContext.Provider>
 }
 ```
 
 ```tsx
 // Navbar.tsx
-import { AuthContext } from './AuthContext';
+import { AuthContext } from './AuthContext'
 
 export function Navbar() {
-  const actorRef = AuthContext.useActorRef();
-  const userName = AuthContext.useSelector((snapshot) => snapshot.context.user?.name ?? null);
-  const isSignedIn = AuthContext.useSelector((snapshot) => snapshot.matches('signedIn'));
+  const actorRef = AuthContext.useActorRef()
+  const userName = AuthContext.useSelector(
+    (snapshot) => snapshot.context.user?.name ?? null
+  )
+  const isSignedIn = AuthContext.useSelector((snapshot) =>
+    snapshot.matches('signedIn')
+  )
 
   return (
     <nav>
       {isSignedIn ? (
         <>
           <span>{userName}</span>
-          <button onClick={() => actorRef.send({ type: 'auth.logout' })}>Logout</button>
+          <button onClick={() => actorRef.send({ type: 'auth.logout' })}>
+            Logout
+          </button>
         </>
       ) : (
         <span>Signed out</span>
       )}
     </nav>
-  );
+  )
 }
 ```
 
 ```tsx
 // SettingsPage.tsx
-import { AuthContext } from './AuthContext';
+import { AuthContext } from './AuthContext'
 
 export function SettingsPage() {
-  const actorRef = AuthContext.useActorRef();
-  const user = AuthContext.useSelector((snapshot) => snapshot.context.user);
-  const isLoading = AuthContext.useSelector((snapshot) => snapshot.hasTag('loading'));
+  const actorRef = AuthContext.useActorRef()
+  const user = AuthContext.useSelector((snapshot) => snapshot.context.user)
+  const isLoading = AuthContext.useSelector((snapshot) =>
+    snapshot.hasTag('loading')
+  )
 
   if (!user) {
-    return <p>Please sign in.</p>;
+    return <p>Please sign in.</p>
   }
 
   return (
@@ -350,36 +364,40 @@ export function SettingsPage() {
         {isLoading ? 'Refreshing…' : 'Refresh session'}
       </button>
     </section>
-  );
+  )
 }
 ```
 
 ```tsx
 // BillingPage.tsx
-import { AuthContext } from './AuthContext';
+import { AuthContext } from './AuthContext'
 
 export function BillingPage() {
-  const session = AuthContext.useSelector((snapshot) => snapshot.context.session);
-  const isSignedIn = AuthContext.useSelector((snapshot) => snapshot.matches('signedIn'));
+  const session = AuthContext.useSelector(
+    (snapshot) => snapshot.context.session
+  )
+  const isSignedIn = AuthContext.useSelector((snapshot) =>
+    snapshot.matches('signedIn')
+  )
 
   if (!isSignedIn || !session) {
-    return <p>Billing is unavailable while signed out.</p>;
+    return <p>Billing is unavailable while signed out.</p>
   }
 
   return (
     <section>
       <p>Session expires at: {new Date(session.expiresAt).toLocaleString()}</p>
     </section>
-  );
+  )
 }
 ```
 
 ```tsx
 // App.tsx
-import { AuthProvider } from './AuthContext';
-import { BillingPage } from './BillingPage';
-import { Navbar } from './Navbar';
-import { SettingsPage } from './SettingsPage';
+import { AuthProvider } from './AuthContext'
+import { BillingPage } from './BillingPage'
+import { Navbar } from './Navbar'
+import { SettingsPage } from './SettingsPage'
 
 export function App() {
   return (
@@ -388,7 +406,7 @@ export function App() {
       <SettingsPage />
       <BillingPage />
     </AuthProvider>
-  );
+  )
 }
 ```
 
@@ -397,12 +415,12 @@ export function App() {
 Use a store when the domain is just event-based state updates without meaningful modes or actors.
 
 ```ts
-import { createStore } from '@xstate/store';
+import { createStore } from '@xstate/store'
 
 export const preferencesStore = createStore({
   context: {
     theme: 'light' as 'light' | 'dark',
-    compactMode: false
+    compactMode: false,
   },
   on: {
     'preferences.themeChanged': (
@@ -410,14 +428,14 @@ export const preferencesStore = createStore({
       event: { value: 'light' | 'dark' }
     ) => ({
       ...context,
-      theme: event.value
+      theme: event.value,
     }),
     'preferences.compactModeToggled': (context) => ({
       ...context,
-      compactMode: !context.compactMode
-    })
-  }
-});
+      compactMode: !context.compactMode,
+    }),
+  },
+})
 ```
 
 ## Migration notes example
@@ -428,17 +446,17 @@ export const preferencesStore = createStore({
 const machine = createMachine({
   schema: {
     context: {} as { count: number },
-    events: {} as { type: 'inc' } | { type: 'dec' }
+    events: {} as { type: 'inc' } | { type: 'dec' },
   },
   on: {
     inc: {
       cond: (context) => context.count < 10,
       actions: assign({
-        count: (context) => context.count + 1
-      })
-    }
-  }
-});
+        count: (context) => context.count + 1,
+      }),
+    },
+  },
+})
 ```
 
 ### After
@@ -446,28 +464,28 @@ const machine = createMachine({
 ```ts
 const machine = setup({
   types: {} as {
-    context: { count: number };
-    events: { type: 'inc' } | { type: 'dec' };
+    context: { count: number }
+    events: { type: 'inc' } | { type: 'dec' }
   },
   guards: {
-    canIncrement: ({ context }) => context.count < 10
+    canIncrement: ({ context }) => context.count < 10,
   },
   actions: {
     increment: assign({
-      count: ({ context }) => context.count + 1
-    })
-  }
+      count: ({ context }) => context.count + 1,
+    }),
+  },
 }).createMachine({
   context: {
-    count: 0
+    count: 0,
   },
   on: {
     inc: [
       {
         guard: { type: 'canIncrement' },
-        actions: [{ type: 'increment' }]
-      }
-    ]
-  }
-});
+        actions: [{ type: 'increment' }],
+      },
+    ],
+  },
+})
 ```
