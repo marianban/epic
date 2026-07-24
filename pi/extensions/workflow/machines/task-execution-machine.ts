@@ -63,6 +63,10 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
   }).createMachine({
     id: 'taskExecution',
     initial: 'awaitingApproval',
+    // Final-state output belongs to the compound machine actor. Without
+    // forwarding the nested final state's output here, an invoking parent
+    // receives xstate.done.actor.task-execution with event.output undefined.
+    output: ({ event }) => event.output as TaskExecutionResult,
     context: ({ input }) => ({
       state: input.state,
       fastRepairAttempt: input.state.fastRepairAttempt,

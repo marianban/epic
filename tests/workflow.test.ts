@@ -40,6 +40,7 @@ import {
   createWorkflowMachine,
   machineStage,
 } from '../pi/extensions/workflow/machines/workflow-machine.ts'
+import { createTaskExecutionMachine } from '../pi/extensions/workflow/machines/task-execution-machine.ts'
 import type { WorkflowMachineContext } from '../pi/extensions/workflow/machines/workflow-machine.ts'
 import type { WorkflowServices } from '../pi/extensions/workflow/services.ts'
 
@@ -77,6 +78,44 @@ Extend the existing implementation.
 - Initial plan.
 `
 
+function createTestWorkflowServices(): WorkflowServices {
+  return {
+    ctx: undefined as never,
+    notify: () => undefined,
+    classify: (value) => value,
+    scout: async (value) => ({ state: value, report: {} as never }),
+    plan: async (value) => ({ state: value, result: 'plan' }),
+    approvePlan: async (value) => value,
+    reviewPlan: async (value) => ({ state: value, revised: false }),
+    decompose: async (value) => value,
+    prerequisites: async (value) => ({ ...value, prerequisites: [] }),
+    preparePrerequisites: async (value) => value,
+    implement: async (value) => value,
+    checks: async (value, suite) => ({
+      state: value,
+      result: {
+        suite,
+        passed: true,
+        checks: [],
+        introducedFindings: [],
+        preExistingFindings: [],
+        deferredChecks: [],
+      },
+    }),
+    review: async (value) => ({
+      state: value,
+      result: {
+        passed: true,
+        summary: 'passed',
+        acceptanceCriteria: [],
+        findings: [],
+        requiresPlanRevision: false,
+      },
+    }),
+    reviseTask: async (value) => value,
+  }
+}
+
 test('root actor accepts domain events only in valid states', () => {
   const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
   const actor = createActor(workflowMachine, { input: { state } })
@@ -113,6 +152,77 @@ test('task execution stage follows the invoked child actor', () => {
     }),
     'escalating'
   )
+})
+
+test('task execution actor exposes final output to its invoking parent', async () => {
+  const state = createWorkflowState('/repo', 'task')
+  const services = createTestWorkflowServices()
+  const actor = createActor(createTaskExecutionMachine(services), {
+    input: { state },
+  })
+  actor.start()
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let i = 0; i < 10 && actor.getSnapshot().value !== 'awaitingReview'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(actor.getSnapshot().value, 'awaitingReview')
+
+  actor.send({ type: 'TASK.APPROVE' })
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(actor.getSnapshot().status, 'done')
+  assert.equal(
+    (actor.getSnapshot().output as { kind?: string } | undefined)?.kind,
+    'completed'
+  )
+  actor.stop()
+})
+
+test('completed task re-enters task execution for the next task', async () => {
+  const state = createWorkflowState('/repo', 'task')
+  state.tasks = [{ id: 'task-1' } as never, { id: 'task-2' } as never]
+  const actor = createActor(
+    createWorkflowMachine(createTestWorkflowServices()),
+    { input: { state } }
+  )
+  const childValue = () =>
+    (
+      actor.getSnapshot().children['task-execution']?.getSnapshot?.() as
+        | { value?: unknown }
+        | undefined
+    )?.value
+  actor.start()
+  actor.send({ type: 'WORKFLOW.START' })
+  for (
+    let i = 0;
+    i < 10 && JSON.stringify(actor.getSnapshot().value) !==
+      JSON.stringify({ planning: 'awaitingReview' });
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'PLAN.APPROVE' })
+  for (
+    let i = 0;
+    i < 10 && childValue() !== 'awaitingApproval';
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'TASK.APPROVE' })
+  for (
+    let i = 0;
+    i < 10 && childValue() !== 'awaitingReview';
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'TASK.APPROVE' })
+  for (
+    let i = 0;
+    i < 10 && actor.getSnapshot().context.state.currentTaskIndex !== 1;
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(actor.getSnapshot().context.state.currentTaskIndex, 1)
+  assert.equal(childValue(), 'awaitingApproval')
+  actor.stop()
 })
 
 test('implementer receives human R instructions from the task artifact', () => {

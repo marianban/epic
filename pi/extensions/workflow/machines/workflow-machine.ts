@@ -367,6 +367,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
                   pendingHumanAction: 'review_task',
                 }),
               }),
+              reenter: true,
             },
             {
               guard: ({ event }) =>
