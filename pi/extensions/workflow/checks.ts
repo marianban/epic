@@ -43,6 +43,22 @@ function commandForScript(
   return scripts[name] ? `npm run ${name}${suffix}` : undefined
 }
 
+function checkNameForCommand(
+  suite: CheckSuiteName,
+  command: string,
+  index: number
+): string {
+  const normalized = command.trim()
+  if (/^git\s+diff\s+--check$/i.test(normalized)) return 'diff-check'
+  if (/\bnpm\s+run\s+typecheck\b/i.test(normalized)) return 'typecheck'
+  if (/\bnpm\s+run\s+lint\b/i.test(normalized)) return 'lint'
+  if (/\bnpm\s+(?:run\s+)?test\b/i.test(normalized))
+    return suite === 'fast' ? 'focused-tests' : 'tests'
+  if (/\bnpm\s+run\s+build\b/i.test(normalized)) return 'build'
+  if (/\bfallow\b/i.test(normalized)) return 'fallow'
+  return `${suite}-${index + 1}`
+}
+
 async function resolveCheckDefinitions(
   root: string,
   suite: CheckSuiteName
@@ -52,7 +68,7 @@ async function resolveCheckDefinitions(
   const configured = config.checks?.[suite]
   if (configured?.length)
     return configured.map((command, index) => ({
-      name: /\bfallow\b/i.test(command) ? 'fallow' : `${suite}-${index + 1}`,
+      name: checkNameForCommand(suite, command, index),
       command,
       required: true,
     }))
@@ -98,6 +114,52 @@ async function resolveCheckDefinitions(
       })
   }
   return definitions
+}
+
+async function resolveFinalCheckDefinitions(
+  root: string,
+  state: WorkflowState
+): Promise<CheckDefinition[]> {
+  const definitions = await resolveCheckDefinitions(root, 'final')
+  const deferredNames = new Set(
+    state.tasks?.flatMap((task) => task.deferredChecks) ?? []
+  )
+  if (!deferredNames.size) return definitions
+
+  const candidates = [
+    ...(await resolveCheckDefinitions(root, 'fast')),
+    ...(await resolveCheckDefinitions(root, 'full')),
+  ]
+  for (const name of deferredNames) {
+    if (definitions.some((definition) => definition.name === name)) continue
+    const candidate = candidates.find((definition) => definition.name === name)
+    if (!candidate)
+      throw new Error(
+        `Deferred check ${name} is unavailable during final verification.`
+      )
+    definitions.push({ ...candidate, required: true })
+  }
+  return definitions
+}
+
+function taskCheckPolicy(
+  state: WorkflowState,
+  suite: CheckSuiteName
+): WorkflowTaskCheckPolicy | undefined {
+  if (suite === 'final') return undefined
+  const task = state.tasks?.[state.currentTaskIndex]
+  if (!task) return undefined
+  return {
+    requiredChecks: task.requiredChecks,
+    deferredChecks: task.deferredChecks,
+    reason: task.reason,
+  }
+}
+
+interface WorkflowTaskCheckPolicy {
+  requiredChecks: string[]
+  deferredChecks: string[]
+  reason: string
 }
 
 function normalizeFindings(
@@ -257,11 +319,52 @@ export async function runCheckSuite(
   state: WorkflowState
 ): Promise<CheckSuiteResult> {
   const config = (await readConfig(state.repositoryRoot)) as WorkflowConfig
-  const definitions = await resolveCheckDefinitions(state.repositoryRoot, suite)
+  const policy = taskCheckPolicy(state, suite)
+  const resolvedDefinitions =
+    suite === 'final'
+      ? await resolveFinalCheckDefinitions(state.repositoryRoot, state)
+      : await resolveCheckDefinitions(state.repositoryRoot, suite)
+  const definitions = resolvedDefinitions.map((definition) => {
+    if (!policy) return definition
+    const required = policy.requiredChecks.includes(definition.name)
+    const deferred = policy.deferredChecks.includes(definition.name)
+    if (!required && !deferred)
+      throw new Error(
+        `Task ${state.tasks?.[state.currentTaskIndex]?.id ?? state.currentTaskIndex} check policy does not classify ${definition.name} for the ${suite} suite.`
+      )
+    return {
+      ...definition,
+      required,
+      skipped: deferred,
+      skipReason: deferred ? policy.reason : undefined,
+    }
+  })
   const timeoutMs = config.commandTimeoutMs ?? DEFAULT_TIMEOUT_MS
   const maxOutputBytes = config.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
   const checks: CheckResult[] = []
   for (const definition of definitions) {
+    if (definition.skipped) {
+      const check: CheckResult = {
+        name: definition.name,
+        command: definition.command,
+        passed: true,
+        required: false,
+        exitCode: 0,
+        durationMs: 0,
+        stdoutPreview: '',
+        stderrPreview: '',
+        findings: [],
+        outputTruncated: false,
+        skipped: true,
+        skipReason: definition.skipReason,
+      }
+      checks.push(check)
+      await logWorkflow(state, 'info', 'Check skipped', {
+        suite,
+        ...check,
+      })
+      continue
+    }
     await logWorkflow(state, 'info', 'Check started', {
       suite,
       name: definition.name,
@@ -333,5 +436,8 @@ export async function runCheckSuite(
     preExistingFindings: allFindings.filter(
       (finding) => finding.introduced === false
     ),
+    deferredChecks: checks
+      .filter((check) => check.skipped)
+      .map((check) => check.name),
   }
 }

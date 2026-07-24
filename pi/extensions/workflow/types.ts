@@ -101,6 +101,9 @@ export interface WorkflowTask {
   verification: string[]
   manualReviewSteps: string[]
   risks: string[]
+  requiredChecks: string[]
+  deferredChecks: string[]
+  reason: string
 }
 
 export interface Prerequisite {
@@ -134,6 +137,8 @@ export interface CheckDefinition {
   command: string
   required: boolean
   timeoutMs?: number
+  skipped?: boolean
+  skipReason?: string
 }
 
 export interface CheckResult {
@@ -148,6 +153,7 @@ export interface CheckResult {
   findings: Finding[]
   outputTruncated: boolean
   skipped?: boolean
+  skipReason?: string
 }
 
 export interface CheckSuiteResult {
@@ -156,6 +162,7 @@ export interface CheckSuiteResult {
   checks: CheckResult[]
   introducedFindings: Finding[]
   preExistingFindings: Finding[]
+  deferredChecks: string[]
 }
 
 export interface FallowDelta {

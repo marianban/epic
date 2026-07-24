@@ -6,6 +6,7 @@ import { test } from 'node:test'
 import {
   appendEvent,
   loadActiveWorkflow,
+  persistWorkflowTasks,
   saveState,
 } from '../pi/extensions/workflow/persistence.ts'
 import { createWorkflowRuntime } from '../pi/extensions/workflow/runtime.ts'
@@ -19,7 +20,10 @@ import {
   hashPlan,
   validatePlanCompleteness,
 } from '../pi/extensions/workflow/plan-review.ts'
-import { normalizeFallowDelta } from '../pi/extensions/workflow/checks.ts'
+import {
+  normalizeFallowDelta,
+  runCheckSuite,
+} from '../pi/extensions/workflow/checks.ts'
 import {
   parsePlannerResponse,
   parseTaskDecomposition,
@@ -267,11 +271,16 @@ test('task decomposition requires independently reviewable task fields', () => {
           verification: ['npm test'],
           manualReviewSteps: ['Run the feature and observe the result.'],
           risks: [],
+          requiredChecks: ['diff-check'],
+          deferredChecks: ['build'],
+          reason: 'The entry point is created by a later task.',
         },
       ],
     })
   )
   assert.equal(tasks[0].manualReviewSteps.length, 1)
+  assert.deepEqual(tasks[0].requiredChecks, ['diff-check'])
+  assert.deepEqual(tasks[0].deferredChecks, ['build'])
   assert.throws(
     () =>
       parseTaskDecomposition(
@@ -285,12 +294,97 @@ test('task decomposition requires independently reviewable task fields', () => {
               acceptanceCriteria: [],
               verification: [],
               manualReviewSteps: [],
+              risks: [],
+              requiredChecks: [],
+              deferredChecks: [],
+              reason: 'No checks are applicable.',
             },
           ],
         })
       ),
     /acceptance criteria/
   )
+})
+
+test('task check policy defers checks per task but final verification runs them', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-task-check-policy-'))
+  try {
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({
+        scripts: { build: 'node -e "process.exit(0)"' },
+      })
+    )
+    const state = createWorkflowState(root, 'task')
+    state.tasks = [
+      {
+        id: 'task-001',
+        title: 'Manifest',
+        objective: 'Create the manifest.',
+        scope: { read: [], modify: [], create: ['package.json'], delete: [] },
+        implementation: ['Create package.json.'],
+        acceptanceCriteria: ['The manifest exists.'],
+        verification: ['npm pkg get name'],
+        manualReviewSteps: ['Inspect package.json.'],
+        risks: [],
+        requiredChecks: ['diff-check'],
+        deferredChecks: ['build'],
+        reason: 'The browser entry point is created by a later task.',
+      },
+    ]
+    await saveState(state)
+    assert.ok(state.tasks)
+    const manifestPath = await persistWorkflowTasks(state, state.tasks)
+    assert.match(await readFile(manifestPath, 'utf8'), /"deferredChecks"/)
+    const taskMarkdown = await readFile(
+      join(
+        root,
+        '.pi',
+        'workflows',
+        'runs',
+        state.workflowId,
+        'tasks',
+        'task-001.md'
+      ),
+      'utf8'
+    )
+    assert.match(taskMarkdown, /## Check Policy/)
+    assert.match(taskMarkdown, /The browser entry point is created by a later task\./)
+
+    const taskResult = await runCheckSuite('full', state)
+    assert.equal(taskResult.passed, true)
+    assert.deepEqual(taskResult.deferredChecks, ['build'])
+    assert.deepEqual(taskResult.checks[0], {
+      name: 'build',
+      command: 'npm run build',
+      passed: true,
+      required: false,
+      exitCode: 0,
+      durationMs: 0,
+      stdoutPreview: '',
+      stderrPreview: '',
+      findings: [],
+      outputTruncated: false,
+      skipped: true,
+      skipReason: 'The browser entry point is created by a later task.',
+    })
+
+    await mkdir(join(root, '.pi'), { recursive: true })
+    await writeFile(
+      join(root, '.pi', 'workflow.config.json'),
+      JSON.stringify({ checks: { final: ['node -e "process.exit(0)"'] } })
+    )
+    const finalResult = await runCheckSuite('final', state)
+    assert.equal(finalResult.passed, true)
+    assert.equal(finalResult.deferredChecks.length, 0)
+    assert.deepEqual(
+      finalResult.checks.map((check) => check.name),
+      ['final-1', 'build']
+    )
+    assert.equal(finalResult.checks[1].skipped, undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('persistence writes an active state and append-only event journal', async () => {

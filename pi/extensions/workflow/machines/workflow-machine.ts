@@ -15,7 +15,7 @@ import {
 import { createWorkflowServices, type WorkflowServices } from '../services.ts'
 
 export const WORKFLOW_SCHEMA_VERSION = 2
-export const WORKFLOW_MACHINE_VERSION = 3
+export const WORKFLOW_MACHINE_VERSION = 4
 export interface WorkflowMachineContext {
   state: WorkflowState
   report?: ScoutReport

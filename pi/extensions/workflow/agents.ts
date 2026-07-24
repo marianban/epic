@@ -359,7 +359,11 @@ export function parseTaskDecomposition(output: string): WorkflowTask[] {
       !Array.isArray(task.implementation) ||
       !Array.isArray(task.acceptanceCriteria) ||
       !Array.isArray(task.verification) ||
-      !Array.isArray(task.manualReviewSteps)
+      !Array.isArray(task.manualReviewSteps) ||
+      !Array.isArray(task.requiredChecks) ||
+      !Array.isArray(task.deferredChecks) ||
+      typeof task.reason !== 'string' ||
+      task.reason.trim().length === 0
     )
       throw new Error('Planner returned an invalid task.')
     if (
@@ -368,6 +372,21 @@ export function parseTaskDecomposition(output: string): WorkflowTask[] {
     )
       throw new Error(
         `Task ${task.id} must include acceptance criteria and manual review steps.`
+      )
+    if (
+      !task.requiredChecks.every((check) => typeof check === 'string') ||
+      !task.deferredChecks.every((check) => typeof check === 'string')
+    )
+      throw new Error(`Task ${task.id} contains invalid check names.`)
+    const required = new Set(task.requiredChecks)
+    if (required.size !== task.requiredChecks.length)
+      throw new Error(`Task ${task.id} contains duplicate required checks.`)
+    const deferred = new Set(task.deferredChecks)
+    if (deferred.size !== task.deferredChecks.length)
+      throw new Error(`Task ${task.id} contains duplicate deferred checks.`)
+    if (task.deferredChecks.some((check) => required.has(check)))
+      throw new Error(
+        `Task ${task.id} cannot require and defer the same check.`
       )
   }
   return parsed.tasks

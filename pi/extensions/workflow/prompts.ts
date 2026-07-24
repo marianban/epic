@@ -88,7 +88,7 @@ export function taskDecompositionTask(
   plan: string
 ): string {
   return [
-    'Break the approved implementation plan into the smallest independently implementable and reviewable tasks, preserving dependency order. Return JSON only with shape {tasks:[{id,title,objective,scope:{read,modify,create,delete},implementation,acceptanceCriteria,verification,manualReviewSteps,risks}]}.',
+    'Break the approved implementation plan into the smallest independently implementable and reviewable tasks, preserving dependency order. Return JSON only with shape {tasks:[{id,title,objective,scope:{read,modify,create,delete},implementation,acceptanceCriteria,verification,manualReviewSteps,risks,requiredChecks,deferredChecks,reason}]}. For each task, requiredChecks lists checks that must pass before the task advances, deferredChecks lists checks that are intentionally not applicable until a later task, and reason explains the decision. Use stable check names such as diff-check, typecheck, lint, focused-tests, tests, build, and fallow. Deferred checks remain mandatory during final verification; never defer a check without a concrete dependency-based reason.',
     `Task:\n${state.task}`,
     `Approved plan:\n${plan}`,
     'Every task must have observable acceptance criteria and concrete manual review steps. Avoid mixing unrelated concerns.',
@@ -101,7 +101,7 @@ export function taskReviewTask(
   instructions: PlanReviewInstruction[]
 ): string {
   return [
-    'Revise only the current task artifact in response to every human R: instruction. Do not modify application code, plan.md, or workflow state. Preserve unaffected task details, update scope, implementation, acceptance criteria, verification, manual review steps, and risks consistently, remove handled R: lines, and return the complete task Markdown only.',
+    'Revise only the current task artifact in response to every human R: instruction. Do not modify application code, plan.md, or workflow state. Preserve unaffected task details, including the check policy, update scope, implementation, acceptance criteria, verification, manual review steps, and risks consistently, remove handled R: lines, and return the complete task Markdown only.',
     `Workflow task:\n${state.task}`,
     `Current task artifact:\n${taskMarkdown}`,
     `Human R: instructions:\n${instructions.map((item) => `- line ${item.lineNumber}: ${item.text}`).join('\n')}`,
