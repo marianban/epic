@@ -27,13 +27,22 @@ async function dispatch(
   }
 }
 
+export function formatEscalationMessage(
+  state: Pick<EpicState, 'stage' | 'failureReason'>,
+  next?: string
+): string | undefined {
+  if (state.stage !== 'escalating' || !state.failureReason) return next
+  return [state.failureReason, next].filter(Boolean).join(' ')
+}
+
 function notifyNextAction(
   ctx: ExtensionCommandContext,
   state: EpicState,
   messages: { completed: string; next?: string }
 ): void {
+  const next = formatEscalationMessage(state, messages.next)
   ctx.ui.notify(
-    [messages.completed, messages.next].filter(Boolean).join(' '),
+    [messages.completed, next].filter(Boolean).join(' '),
     state.stage === 'escalating' ? 'warning' : 'info'
   )
 }

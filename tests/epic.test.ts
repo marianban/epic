@@ -37,6 +37,7 @@ import {
   isSafeReadOnlyCommand,
 } from '../pi/extensions/epic/tools.ts'
 import { discoverPrerequisites } from '../pi/extensions/epic/prerequisites.ts'
+import { formatEscalationMessage } from '../pi/extensions/epic/epic.ts'
 import {
   createEpicMachine,
   machineStage,
@@ -127,6 +128,23 @@ test('root actor accepts domain events only in valid states', () => {
   actor.send({ type: 'EPIC.START' })
   assert.equal(actor.getSnapshot().value, 'classifying')
   actor.stop()
+})
+
+test('escalation notifications include the persisted failure reason', () => {
+  assert.equal(
+    formatEscalationMessage(
+      {
+        stage: 'escalating',
+        failureReason: 'Task T1 requires unavailable check(s): fallow.',
+      },
+      'Inspect the failure and run /epic-resume to retry, or /epic-cancel.'
+    ),
+    'Task T1 requires unavailable check(s): fallow. Inspect the failure and run /epic-resume to retry, or /epic-cancel.'
+  )
+  assert.equal(
+    formatEscalationMessage({ stage: 'awaiting_task_review' }, 'Review the task.'),
+    'Review the task.'
+  )
 })
 
 test('task execution stage follows the invoked child actor', () => {
