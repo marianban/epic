@@ -5,45 +5,46 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import {
   appendEvent,
-  loadActiveWorkflow,
-  persistWorkflowTasks,
+  loadActiveEpic,
+  persistEpic,
+  persistEpicTasks,
   saveState,
-} from '../pi/extensions/workflow/persistence.ts'
-import { createWorkflowRuntime } from '../pi/extensions/workflow/runtime.ts'
+} from '../pi/extensions/epic/persistence.ts'
+import { createEpicRuntime } from '../pi/extensions/epic/runtime.ts'
 import { createActor } from 'xstate'
 import {
-  logWorkflow,
-  workflowLogPath,
-} from '../pi/extensions/workflow/logger.ts'
+  logEpic,
+  epicLogPath,
+} from '../pi/extensions/epic/logger.ts'
 import {
   extractReviewInstructions,
   hashPlan,
   validatePlanCompleteness,
-} from '../pi/extensions/workflow/plan-review.ts'
+} from '../pi/extensions/epic/plan-review.ts'
 import {
   normalizeFallowDelta,
   runCheckSuite,
-} from '../pi/extensions/workflow/checks.ts'
+} from '../pi/extensions/epic/checks.ts'
 import {
   parsePlannerResponse,
   parseTaskDecomposition,
-} from '../pi/extensions/workflow/agents.ts'
-import { implementerTask } from '../pi/extensions/workflow/prompts.ts'
-import { createWorkflowState } from '../pi/extensions/workflow/state.ts'
-import { workflowMachine } from '../pi/extensions/workflow/machines/workflow-machine.ts'
+} from '../pi/extensions/epic/agents.ts'
+import { implementerTask } from '../pi/extensions/epic/prompts.ts'
+import { createEpicState } from '../pi/extensions/epic/state.ts'
+import { epicMachine } from '../pi/extensions/epic/machines/epic-machine.ts'
 import {
   assertRepositoryPath,
   isSafeReadOnlyCommand,
-} from '../pi/extensions/workflow/tools.ts'
-import { discoverPrerequisites } from '../pi/extensions/workflow/prerequisites.ts'
+} from '../pi/extensions/epic/tools.ts'
+import { discoverPrerequisites } from '../pi/extensions/epic/prerequisites.ts'
 import {
-  createWorkflowMachine,
+  createEpicMachine,
   machineStage,
-} from '../pi/extensions/workflow/machines/workflow-machine.ts'
-import { createTaskExecutionMachine } from '../pi/extensions/workflow/machines/task-execution-machine.ts'
-import type { WorkflowMachineContext } from '../pi/extensions/workflow/machines/workflow-machine.ts'
-import type { WorkflowServices } from '../pi/extensions/workflow/services.ts'
-import type { WorkflowState } from '../pi/extensions/workflow/types.ts'
+} from '../pi/extensions/epic/machines/epic-machine.ts'
+import { createTaskExecutionMachine } from '../pi/extensions/epic/machines/task-execution-machine.ts'
+import type { EpicMachineContext } from '../pi/extensions/epic/machines/epic-machine.ts'
+import type { EpicServices } from '../pi/extensions/epic/services.ts'
+import type { EpicState } from '../pi/extensions/epic/types.ts'
 
 const validPlan = `# Implementation Plan
 
@@ -79,7 +80,7 @@ Extend the existing implementation.
 - Initial plan.
 `
 
-function createTestWorkflowServices(): WorkflowServices {
+function createTestEpicServices(): EpicServices {
   return {
     ctx: undefined as never,
     notify: () => undefined,
@@ -118,21 +119,21 @@ function createTestWorkflowServices(): WorkflowServices {
 }
 
 test('root actor accepts domain events only in valid states', () => {
-  const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
-  const actor = createActor(workflowMachine, { input: { state } })
+  const state = createEpicState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const actor = createActor(epicMachine, { input: { state } })
   actor.start()
-  assert.equal(actor.getSnapshot().can({ type: 'WORKFLOW.START' }), true)
+  assert.equal(actor.getSnapshot().can({ type: 'EPIC.START' }), true)
   assert.equal(actor.getSnapshot().can({ type: 'TASK.APPROVE' }), false)
-  actor.send({ type: 'WORKFLOW.START' })
+  actor.send({ type: 'EPIC.START' })
   assert.equal(actor.getSnapshot().value, 'classifying')
   actor.stop()
 })
 
 test('task execution stage follows the invoked child actor', () => {
-  const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const state = createEpicState('/repo', 'task', '2026-01-01T00:00:00.000Z')
   const context = {
     state: { ...state, stage: 'reviewing' as const },
-  } as WorkflowMachineContext
+  } as EpicMachineContext
 
   assert.equal(machineStage({ value: 'taskExecution', context }), 'reviewing')
   assert.equal(
@@ -140,7 +141,7 @@ test('task execution stage follows the invoked child actor', () => {
       value: 'taskExecution',
       context: {
         state: { ...state, stage: 'awaiting_task_review' },
-      } as WorkflowMachineContext,
+      } as EpicMachineContext,
     }),
     'awaiting_task_review'
   )
@@ -149,15 +150,15 @@ test('task execution stage follows the invoked child actor', () => {
       value: 'taskExecution',
       context: {
         state: { ...state, stage: 'escalating' },
-      } as WorkflowMachineContext,
+      } as EpicMachineContext,
     }),
     'escalating'
   )
 })
 
 test('task execution actor exposes final output to its invoking parent', async () => {
-  const state = createWorkflowState('/repo', 'task')
-  const services = createTestWorkflowServices()
+  const state = createEpicState('/repo', 'task')
+  const services = createTestEpicServices()
   const actor = createActor(createTaskExecutionMachine(services), {
     input: { state },
   })
@@ -180,8 +181,8 @@ test('task execution actor exposes final output to its invoking parent', async (
 })
 
 test('task escalation keeps durable root and snapshot stages aligned', async () => {
-  const state = createWorkflowState('/repo', 'task')
-  const services = createTestWorkflowServices()
+  const state = createEpicState('/repo', 'task')
+  const services = createTestEpicServices()
   services.checks = async (value, suite) => {
     if (suite === 'full') throw new Error('full checks unavailable')
     return {
@@ -196,11 +197,11 @@ test('task escalation keeps durable root and snapshot stages aligned', async () 
       },
     }
   }
-  const actor = createActor(createWorkflowMachine(services), {
+  const actor = createActor(createEpicMachine(services), {
     input: { state },
   })
   actor.start()
-  actor.send({ type: 'WORKFLOW.START' })
+  actor.send({ type: 'EPIC.START' })
   for (
     let i = 0;
     i < 10 && JSON.stringify(actor.getSnapshot().value) !==
@@ -239,8 +240,8 @@ test('task escalation keeps durable root and snapshot stages aligned', async () 
 })
 
 test('task child snapshots synchronize approval and repair counters to the root', async () => {
-  const state = createWorkflowState('/repo', 'task')
-  const services = createTestWorkflowServices()
+  const state = createEpicState('/repo', 'task')
+  const services = createTestEpicServices()
   services.implement = async (value, feedback = '') => ({
     ...value,
     implementationAttempt: value.implementationAttempt + (feedback ? 0 : 1),
@@ -255,11 +256,11 @@ test('task child snapshots synchronize approval and repair counters to the root'
       requiresPlanRevision: false,
     },
   })
-  const actor = createActor(createWorkflowMachine(services), {
+  const actor = createActor(createEpicMachine(services), {
     input: { state },
   })
   actor.start()
-  actor.send({ type: 'WORKFLOW.START' })
+  actor.send({ type: 'EPIC.START' })
   for (
     let i = 0;
     i < 20 && JSON.stringify(actor.getSnapshot().value) !==
@@ -274,7 +275,7 @@ test('task child snapshots synchronize approval and repair counters to the root'
           value?: unknown
           context?: {
             semanticRepairAttempt?: number
-            state?: WorkflowState
+            state?: EpicState
           }
         }
       | undefined
@@ -294,7 +295,7 @@ test('task child snapshots synchronize approval and repair counters to the root'
   assert.equal(childSnapshot?.context?.semanticRepairAttempt, 2)
   assert.equal(childSnapshot?.context?.state?.taskApproved, true)
   const persisted = actor.getPersistedSnapshot() as unknown as {
-    context: { state: WorkflowState }
+    context: { state: EpicState }
   }
   assert.equal(persisted.context.state.taskApproved, true)
   assert.equal(persisted.context.state.semanticRepairAttempt, 2)
@@ -302,10 +303,10 @@ test('task child snapshots synchronize approval and repair counters to the root'
 })
 
 test('completed task re-enters task execution for the next task', async () => {
-  const state = createWorkflowState('/repo', 'task')
+  const state = createEpicState('/repo', 'task')
   state.tasks = [{ id: 'task-1' } as never, { id: 'task-2' } as never]
   const actor = createActor(
-    createWorkflowMachine(createTestWorkflowServices()),
+    createEpicMachine(createTestEpicServices()),
     { input: { state } }
   )
   const childValue = () =>
@@ -315,7 +316,7 @@ test('completed task re-enters task execution for the next task', async () => {
         | undefined
     )?.value
   actor.start()
-  actor.send({ type: 'WORKFLOW.START' })
+  actor.send({ type: 'EPIC.START' })
   for (
     let i = 0;
     i < 10 && JSON.stringify(actor.getSnapshot().value) !==
@@ -351,7 +352,7 @@ test('completed task re-enters task execution for the next task', async () => {
 })
 
 test('implementer receives human R instructions from the task artifact', () => {
-  const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const state = createEpicState('/repo', 'task', '2026-01-01T00:00:00.000Z')
   const prompt = implementerTask(
     state,
     '# Plan',
@@ -363,8 +364,8 @@ test('implementer receives human R instructions from the task artifact', () => {
 })
 
 test('post-plan machine state is visible as the plan review stage', async () => {
-  const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
-  const services: WorkflowServices = {
+  const state = createEpicState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const services: EpicServices = {
     ctx: undefined as never,
     notify: () => undefined,
     classify: (value) => value,
@@ -383,9 +384,9 @@ test('post-plan machine state is visible as the plan review stage', async () => 
     review: async (value) => ({ state: value, result: {} as never }),
     reviseTask: async (value) => value,
   }
-  const actor = createActor(createWorkflowMachine(services), { input: { state } })
+  const actor = createActor(createEpicMachine(services), { input: { state } })
   actor.start()
-  actor.send({ type: 'WORKFLOW.START' })
+  actor.send({ type: 'EPIC.START' })
   await new Promise((resolve) => setTimeout(resolve, 0))
   await new Promise((resolve) => setTimeout(resolve, 0))
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -394,7 +395,7 @@ test('post-plan machine state is visible as the plan review stage', async () => 
   assert.deepEqual(snapshot.value, { planning: 'awaitingReview' })
   assert.equal(
     machineStage(
-      snapshot as unknown as { value: unknown; context: WorkflowMachineContext }
+      snapshot as unknown as { value: unknown; context: EpicMachineContext }
     ),
     'awaiting_plan_review'
   )
@@ -550,7 +551,7 @@ test('task check policy defers checks per task but final verification runs them'
         scripts: { build: 'node -e "process.exit(0)"' },
       })
     )
-    const state = createWorkflowState(root, 'task')
+    const state = createEpicState(root, 'task')
     state.tasks = [
       {
         id: 'task-001',
@@ -569,15 +570,15 @@ test('task check policy defers checks per task but final verification runs them'
     ]
     await saveState(state)
     assert.ok(state.tasks)
-    const manifestPath = await persistWorkflowTasks(state, state.tasks)
+    const manifestPath = await persistEpicTasks(state, state.tasks)
     assert.match(await readFile(manifestPath, 'utf8'), /"deferredChecks"/)
     const taskMarkdown = await readFile(
       join(
         root,
         '.pi',
-        'workflows',
+        'epics',
         'runs',
-        state.workflowId,
+        state.epicId,
         'tasks',
         'task-001.md'
       ),
@@ -606,7 +607,7 @@ test('task check policy defers checks per task but final verification runs them'
 
     await mkdir(join(root, '.pi'), { recursive: true })
     await writeFile(
-      join(root, '.pi', 'workflow.config.json'),
+      join(root, '.pi', 'epic.config.json'),
       JSON.stringify({ checks: { final: ['node -e "process.exit(0)"'] } })
     )
     const finalResult = await runCheckSuite('final', state)
@@ -631,7 +632,7 @@ test('task check policy skips discovered checks that are not required', async ()
         scripts: { build: 'node -e "process.exit(0)"' },
       })
     )
-    const state = createWorkflowState(root, 'task')
+    const state = createEpicState(root, 'task')
     state.tasks = [
       {
         id: 'task-001',
@@ -674,27 +675,30 @@ test('task check policy skips discovered checks that are not required', async ()
 })
 
 test('persistence writes an active state and append-only event journal', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'pi-workflow-'))
+  const root = await mkdtemp(join(tmpdir(), 'pi-epic-'))
   try {
-    const state = createWorkflowState(root, 'task')
+    const state = createEpicState(root, 'task')
+    const epicPath = await persistEpic(state)
+    assert.equal(epicPath, join(root, '.pi', 'epics', 'runs', state.epicId, 'Epic.md'))
+    assert.equal(await readFile(epicPath, 'utf8'), '# Epic\n\ntask\n')
     await saveState(state)
-    await appendEvent(state, 'workflow_created', { test: true })
-    const loaded = await loadActiveWorkflow(root)
-    assert.equal(loaded.workflowId, state.workflowId)
+    await appendEvent(state, 'epic_created', { test: true })
+    const loaded = await loadActiveEpic(root)
+    assert.equal(loaded.epicId, state.epicId)
     const journal = await readFile(
-      join(root, '.pi', 'workflows', 'runs', state.workflowId, 'events.jsonl'),
+      join(root, '.pi', 'epics', 'runs', state.epicId, 'events.jsonl'),
       'utf8'
     )
     assert.equal(journal.trim().split('\n').length, 1)
-    const log = await readFile(workflowLogPath(root, state.workflowId), 'utf8')
-    assert.match(log, /DEBUG Workflow state saved/)
-    assert.match(log, /INFO workflow_created/)
+    const log = await readFile(epicLogPath(root, state.epicId), 'utf8')
+    assert.match(log, /DEBUG Epic state saved/)
+    assert.match(log, /INFO epic_created/)
     assert.match(log, /"test":true/)
-    await logWorkflow(state, 'info', 'credentials captured', {
+    await logEpic(state, 'info', 'credentials captured', {
       token: 'do-not-write',
     })
     const redactedLog = await readFile(
-      workflowLogPath(root, state.workflowId),
+      epicLogPath(root, state.epicId),
       'utf8'
     )
     assert.match(redactedLog, /"token":"\[REDACTED\]"/)
@@ -707,10 +711,10 @@ test('persistence writes an active state and append-only event journal', async (
 test('XState snapshots round-trip and expose machine capabilities', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pi-xstate-snapshot-'))
   try {
-    const state = createWorkflowState(root, 'task')
+    const state = createEpicState(root, 'task')
     await saveState(state)
-    const loaded = await loadActiveWorkflow(root)
-    const runtime = await createWorkflowRuntime(loaded)
+    const loaded = await loadActiveEpic(root)
+    const runtime = await createEpicRuntime(loaded)
     assert.equal(runtime.matches('idle'), true)
     assert.equal(runtime.tags().size, 0)
     runtime.stop()
@@ -719,27 +723,28 @@ test('XState snapshots round-trip and expose machine capabilities', async () => 
   }
 })
 
-test('unsupported persisted workflow versions are rejected without migration', async () => {
+test('unsupported persisted epic versions are rejected without migration', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pi-xstate-incompatible-'))
   try {
-    const state = createWorkflowState(root, 'task')
+    const state = createEpicState(root, 'task')
     await saveState(state)
     const statePath = join(
       root,
       '.pi',
-      'workflows',
+      'epics',
       'runs',
-      state.workflowId,
+      state.epicId,
       'state.json'
     )
     const persisted = JSON.parse(await readFile(statePath, 'utf8')) as Record<
       string,
       unknown
     >
-    persisted.schemaVersion = 1
+    persisted.schemaVersion = 2
+    persisted.machineVersion = 4
     await writeFile(statePath, `${JSON.stringify(persisted)}\n`)
     await assert.rejects(
-      () => loadActiveWorkflow(root),
+      () => loadActiveEpic(root),
       /incompatible.*unsupported persistence version/
     )
   } finally {

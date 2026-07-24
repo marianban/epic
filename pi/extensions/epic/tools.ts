@@ -34,9 +34,9 @@ export function assertRepositoryPath(
   if (
     !allowPlan &&
     (resolved === path.join(root, 'plan.md') ||
-      resolved.startsWith(path.join(root, '.pi', 'workflows')))
+      resolved.startsWith(path.join(root, '.pi', 'epics')))
   ) {
-    throw new Error(`Workflow-managed path is protected: ${candidate}`)
+    throw new Error(`Epic-managed path is protected: ${candidate}`)
   }
   return resolved
 }
@@ -45,8 +45,8 @@ export async function readConfig(
   root: string
 ): Promise<Record<string, unknown>> {
   const candidates = [
-    path.join(root, '.pi', 'workflow.config.json'),
-    path.join(root, '.pi', 'workflow.config.local.json'),
+    path.join(root, '.pi', 'epic.config.json'),
+    path.join(root, '.pi', 'epic.config.local.json'),
   ]
   for (const candidate of candidates) {
     try {
@@ -80,9 +80,9 @@ export function isSafeReadOnlyCommand(command: string): boolean {
 }
 
 /** Guard extension loaded into each role's child Pi process. */
-export default function workflowToolGuard(pi: ExtensionAPI): void {
+export default function epicToolGuard(pi: ExtensionAPI): void {
   const root = process.cwd()
-  const role = process.env.PI_WORKFLOW_ROLE ?? 'unknown'
+  const role = process.env.PI_EPIC_ROLE ?? 'unknown'
   pi.on('tool_call', (event) => {
     const input = event.input as Record<string, unknown>
     const candidate = String(input.file_path ?? input.path ?? '')
@@ -95,7 +95,7 @@ export default function workflowToolGuard(pi: ExtensionAPI): void {
       if (candidate && isSecretPath(candidate))
         return {
           block: true,
-          reason: 'Workflow guard: sensitive paths are blocked.',
+          reason: 'Epic guard: sensitive paths are blocked.',
         }
     }
     if (event.toolName === 'edit' || event.toolName === 'write') {
@@ -116,10 +116,10 @@ export default function workflowToolGuard(pi: ExtensionAPI): void {
           block: true,
           reason: `${role} may only run read-only commands.`,
         }
-      if (/plan\.md|\.pi[/\\]workflows/i.test(command))
+      if (/plan\.md|\.pi[/\\]epics/i.test(command))
         return {
           block: true,
-          reason: 'Workflow-managed files cannot be changed by an agent.',
+          reason: 'Epic-managed files cannot be changed by an agent.',
         }
     }
   })

@@ -12,7 +12,7 @@ import {
   appendEvent,
   persistJsonArtifact,
   persistScoutReport,
-  persistWorkflowTasks,
+  persistEpicTasks,
   writePlanRevision,
 } from './persistence.ts'
 import {
@@ -23,9 +23,9 @@ import {
 } from './plan-review.ts'
 import {
   implementerTask,
-  plannerTask,
+  plannerEpicPrompt,
   reviewerTask,
-  scoutTask,
+  scoutEpicPrompt,
   taskDecompositionTask,
   taskReviewTask,
 } from './prompts.ts'
@@ -38,53 +38,53 @@ import type {
   PlannerContextRequest,
   ReviewResult,
   ScoutReport,
-  WorkflowConfig,
-  WorkflowState,
+  EpicConfig,
+  EpicState,
 } from './types.ts'
 
-export interface WorkflowServices {
+export interface EpicServices {
   ctx: ExtensionCommandContext
   notify(message: string, level?: 'info' | 'warning' | 'error'): void
-  classify(state: WorkflowState): WorkflowState
+  classify(state: EpicState): EpicState
   scout(
-    state: WorkflowState,
+    state: EpicState,
     questions?: string[]
-  ): Promise<{ state: WorkflowState; report: ScoutReport }>
+  ): Promise<{ state: EpicState; report: ScoutReport }>
   plan(
-    state: WorkflowState,
+    state: EpicState,
     report: ScoutReport
-  ): Promise<{ state: WorkflowState; result: string | PlannerContextRequest }>
-  approvePlan(state: WorkflowState): Promise<WorkflowState>
+  ): Promise<{ state: EpicState; result: string | PlannerContextRequest }>
+  approvePlan(state: EpicState): Promise<EpicState>
   reviewPlan(
-    state: WorkflowState,
+    state: EpicState,
     force: boolean
-  ): Promise<{ state: WorkflowState; revised: boolean }>
-  decompose(state: WorkflowState): Promise<WorkflowState>
-  prerequisites(state: WorkflowState): Promise<WorkflowState>
-  preparePrerequisites(state: WorkflowState): Promise<WorkflowState>
-  implement(state: WorkflowState, feedback?: string): Promise<WorkflowState>
+  ): Promise<{ state: EpicState; revised: boolean }>
+  decompose(state: EpicState): Promise<EpicState>
+  prerequisites(state: EpicState): Promise<EpicState>
+  preparePrerequisites(state: EpicState): Promise<EpicState>
+  implement(state: EpicState, feedback?: string): Promise<EpicState>
   checks(
-    state: WorkflowState,
+    state: EpicState,
     suite: 'fast' | 'full' | 'final'
-  ): Promise<{ state: WorkflowState; result: CheckSuiteResult }>
+  ): Promise<{ state: EpicState; result: CheckSuiteResult }>
   review(
-    state: WorkflowState,
+    state: EpicState,
     checks: CheckSuiteResult
-  ): Promise<{ state: WorkflowState; result: ReviewResult }>
-  reviseTask(state: WorkflowState): Promise<WorkflowState>
+  ): Promise<{ state: EpicState; result: ReviewResult }>
+  reviseTask(state: EpicState): Promise<EpicState>
 }
 
-export function createWorkflowServices(
+export function createEpicServices(
   ctx: ExtensionCommandContext
-): WorkflowServices {
+): EpicServices {
   const notify = (
     message: string,
     level: 'info' | 'warning' | 'error' = 'info'
   ) => ctx.ui.notify(message, level)
   const runRole = async (
-    state: WorkflowState,
+    state: EpicState,
     role: Parameters<typeof runAgentActor>[0]['role'],
-    task: string,
+    prompt: string,
     action: string
   ): Promise<AgentRunResult> => {
     await appendEvent(state, 'agent_started', { role, action })
@@ -92,10 +92,10 @@ export function createWorkflowServices(
     const result = await runAgentActor({
       repositoryRoot: state.repositoryRoot,
       role,
-      task,
+      prompt,
       signal: ctx.signal,
       onProgress: (message) =>
-        ctx.ui.setStatus('workflow', `${state.workflowId}: ${message}`),
+        ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
     })
     await appendEvent(state, 'agent_finished', {
       role,
@@ -105,24 +105,24 @@ export function createWorkflowServices(
     })
     return result
   }
-  const currentTaskPath = (state: WorkflowState) =>
+  const currentTaskPath = (state: EpicState) =>
     path.join(
       state.repositoryRoot,
       '.pi',
-      'workflows',
+      'epics',
       'runs',
-      state.workflowId,
+      state.epicId,
       'tasks',
       `task-${String(state.currentTaskIndex + 1).padStart(3, '0')}.md`
     )
-  const config = async (root: string): Promise<WorkflowConfig> => {
+  const config = async (root: string): Promise<EpicConfig> => {
     try {
       return JSON.parse(
         await fs.readFile(
-          path.join(root, '.pi', 'workflow.config.json'),
+          path.join(root, '.pi', 'epic.config.json'),
           'utf8'
         )
-      ) as WorkflowConfig
+      ) as EpicConfig
     } catch {
       return {}
     }
@@ -132,9 +132,9 @@ export function createWorkflowServices(
     notify,
     classify: (state) => ({
       ...state,
-      taskComplexity: state.task.toLowerCase().includes('migration')
+      epicComplexity: state.epic.toLowerCase().includes('migration')
         ? 'complex'
-        : state.task.length < 140
+        : state.epic.length < 140
           ? 'simple'
           : 'moderate',
     }),
@@ -143,7 +143,7 @@ export function createWorkflowServices(
       const run = await runRole(
         next,
         'scout',
-        scoutTask(next, questions),
+        scoutEpicPrompt(next, questions),
         questions.length ? 'focused discovery' : 'repository discovery'
       )
       if (run.exitCode !== 0)
@@ -158,7 +158,7 @@ export function createWorkflowServices(
       const run = await runRole(
         state,
         'planner',
-        plannerTask(state, report, null),
+        plannerEpicPrompt(state, report, null),
         'planning'
       )
       if (run.exitCode !== 0)
@@ -217,11 +217,11 @@ export function createWorkflowServices(
           ) as ScoutReport)
         : undefined
       if (!report)
-        throw new Error('Scout report is missing from workflow state.')
+        throw new Error('Scout report is missing from epic state.')
       const run = await runRole(
         state,
         'plan-reviewer',
-        plannerTask(state, report, current, instructions),
+        plannerEpicPrompt(state, report, current, instructions),
         'plan revision'
       )
       if (run.exitCode !== 0)
@@ -259,7 +259,7 @@ export function createWorkflowServices(
         currentTaskIndex: 0,
         taskApproved: false,
       }
-      next.taskPlanPath = await persistWorkflowTasks(next, tasks)
+      next.taskPlanPath = await persistEpicTasks(next, tasks)
       return next
     },
     async prerequisites(state) {

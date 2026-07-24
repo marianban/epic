@@ -52,7 +52,7 @@ export async function discoverPrerequisites(
       kind: 'git',
       command: 'git init',
       reason:
-        'The workflow uses Git diff checks and this directory is not a Git repository.',
+        'The epic uses Git diff checks and this directory is not a Git repository.',
     })
   }
 

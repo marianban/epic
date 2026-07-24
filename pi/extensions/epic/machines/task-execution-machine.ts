@@ -1,9 +1,9 @@
 import { assign, fromPromise, setup } from 'xstate'
-import type { CheckSuiteResult, ReviewResult, WorkflowState } from '../types.ts'
-import type { WorkflowServices } from '../services.ts'
+import type { CheckSuiteResult, ReviewResult, EpicState } from '../types.ts'
+import type { EpicServices } from '../services.ts'
 
 interface TaskExecutionContext {
-  state: WorkflowState
+  state: EpicState
   fast?: CheckSuiteResult
   full?: CheckSuiteResult
   review?: ReviewResult
@@ -12,37 +12,37 @@ interface TaskExecutionContext {
   semanticRepairAttempt: number
 }
 interface TaskExecutionInput {
-  state: WorkflowState
+  state: EpicState
 }
 export type TaskExecutionEvent =
   | { type: 'TASK.APPROVE' }
   | { type: 'TASK.REVIEW' }
   | { type: 'TASK.REVISE' }
-  | { type: 'WORKFLOW.RESUME' }
-  | { type: 'WORKFLOW.CANCEL' }
+  | { type: 'EPIC.RESUME' }
+  | { type: 'EPIC.CANCEL' }
 export interface TaskExecutionResult {
   kind: 'completed' | 'escalated' | 'cancelled'
-  state: WorkflowState
+  state: EpicState
   reason?: string
 }
 
-export function createTaskExecutionMachine(services: WorkflowServices) {
+export function createTaskExecutionMachine(services: EpicServices) {
   const implementation = fromPromise<
-    WorkflowState,
+    EpicState,
     { context: TaskExecutionContext; feedback?: string }
   >(({ input }) => services.implement(input.context.state, input.feedback))
   const checks = fromPromise<
-    { state: WorkflowState; result: CheckSuiteResult },
+    { state: EpicState; result: CheckSuiteResult },
     { context: TaskExecutionContext; suite: 'fast' | 'full' }
   >(({ input }) => services.checks(input.context.state, input.suite))
   const review = fromPromise<
-    { state: WorkflowState; result: ReviewResult },
+    { state: EpicState; result: ReviewResult },
     { context: TaskExecutionContext }
   >(({ input }) => {
     if (!input.context.full) throw new Error('Full check result is missing.')
     return services.review(input.context.state, input.context.full)
   })
-  const revise = fromPromise<WorkflowState, { context: TaskExecutionContext }>(
+  const revise = fromPromise<EpicState, { context: TaskExecutionContext }>(
     ({ input }) => services.reviseTask(input.context.state)
   )
   return setup({
@@ -92,7 +92,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
             actions: 'markTaskApproved',
           },
           'TASK.REVIEW': 'revisingTask',
-          'WORKFLOW.CANCEL': 'cancelled',
+          'EPIC.CANCEL': 'cancelled',
         },
       },
       revisingTask: {
@@ -105,7 +105,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           },
           onError: 'failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       implementing: {
         invoke: {
@@ -117,7 +117,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           },
           onError: 'failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       fastChecks: {
         invoke: {
@@ -142,7 +142,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           ],
           onError: 'failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingFast: {
         tags: ['active', 'repairing'],
@@ -156,7 +156,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           },
           { target: 'escalating' },
         ],
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingFastInvoke: {
         invoke: {
@@ -171,7 +171,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           },
           onError: 'failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       fullChecks: {
         invoke: {
@@ -196,7 +196,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           ],
           onError: 'failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingFull: {
         tags: ['active', 'repairing'],
@@ -210,7 +210,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           },
           { target: 'escalating' },
         ],
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingFullInvoke: {
         invoke: {
@@ -225,7 +225,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           },
           onError: 'failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       reviewing: {
         invoke: {
@@ -250,7 +250,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           ],
           onError: 'failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingReview: {
         tags: ['active', 'repairing'],
@@ -265,7 +265,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           },
           { target: 'escalating' },
         ],
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingReviewInvoke: {
         invoke: {
@@ -280,7 +280,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           },
           onError: 'failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'cancelled' },
+        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       awaitingReview: {
         tags: ['awaiting-human', 'awaiting-task-review'],
@@ -288,18 +288,18 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
           'TASK.APPROVE': { target: 'done', actions: 'markTaskApproved' },
           'TASK.REVIEW': 'repairingReviewInvoke',
           'TASK.REVISE': 'revisingTask',
-          'WORKFLOW.CANCEL': 'cancelled',
+          'EPIC.CANCEL': 'cancelled',
         },
       },
       escalating: {
         tags: ['awaiting-human', 'escalated'],
         on: {
-          'WORKFLOW.RESUME': 'implementing',
+          'EPIC.RESUME': 'implementing',
           'TASK.APPROVE': {
             target: 'implementing',
             actions: 'markTaskApproved',
           },
-          'WORKFLOW.CANCEL': 'cancelled',
+          'EPIC.CANCEL': 'cancelled',
         },
       },
       done: {

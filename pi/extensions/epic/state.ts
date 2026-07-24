@@ -1,26 +1,26 @@
 import { randomUUID } from 'node:crypto'
-import type { WorkflowState } from './types.ts'
+import type { EpicState } from './types.ts'
 import {
-  WORKFLOW_MACHINE_VERSION,
-  WORKFLOW_SCHEMA_VERSION,
-} from './machines/workflow-machine.ts'
+  EPIC_MACHINE_VERSION,
+  EPIC_SCHEMA_VERSION,
+} from './machines/epic-machine.ts'
 
-export function createWorkflowState(
+export function createEpicState(
   repositoryRoot: string,
-  task: string,
+  epic: string,
   now = new Date().toISOString()
-): WorkflowState {
-  const workflowId = `${now.replace(/[-:.TZ]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`
+): EpicState {
+  const epicId = `${now.replace(/[-:.TZ]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`
   return {
-    workflowId,
-    schemaVersion: WORKFLOW_SCHEMA_VERSION,
-    machineVersion: WORKFLOW_MACHINE_VERSION,
-    task,
+    epicId,
+    schemaVersion: EPIC_SCHEMA_VERSION,
+    machineVersion: EPIC_MACHINE_VERSION,
+    epic,
     repositoryRoot,
     stage: 'idle',
     createdAt: now,
     updatedAt: now,
-    taskComplexity: 'moderate',
+    epicComplexity: 'moderate',
     scoutRound: 0,
     maxScoutRounds: 3,
     planPath: `${repositoryRoot}/plan.md`,

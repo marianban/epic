@@ -5,13 +5,13 @@ import type { AgentRole } from '../types.ts'
 interface AgentActorInput {
   repositoryRoot: string
   role: Exclude<AgentRole, 'orchestrator'>
-  task: string
+  prompt: string
   signal?: AbortSignal
   onProgress?: (message: string) => void
 }
 
 const agentActor = fromPromise<AgentRunResult, AgentActorInput>(({ input }) =>
-  runAgent(input.repositoryRoot, input.role, input.task, {
+  runAgent(input.repositoryRoot, input.role, input.prompt, {
     signal: input.signal,
     onProgress: input.onProgress,
   })

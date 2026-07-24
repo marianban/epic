@@ -8,8 +8,8 @@ import type {
   AgentProfile,
   AgentRole,
   PlannerContextRequest,
-  WorkflowConfig,
-  WorkflowTask,
+  EpicConfig,
+  EpicTask,
 } from './types.ts'
 import { readConfig, redactSecrets } from './tools.ts'
 
@@ -74,7 +74,7 @@ async function getAgentProfile(
   root: string,
   role: AgentRole
 ): Promise<AgentProfile> {
-  const config = (await readConfig(root)) as WorkflowConfig
+  const config = (await readConfig(root)) as EpicConfig
   const override = config.agents?.[role] ?? {}
   const base = DEFAULT_AGENT_PROFILES[role]
   return {
@@ -150,13 +150,13 @@ async function readPrompt(root: string, relativePath: string): Promise<string> {
 export async function runAgent(
   root: string,
   role: AgentRole,
-  task: string,
+  userPrompt: string,
   options: AgentRunOptions = {}
 ): Promise<AgentRunResult> {
   const profile = await getAgentProfile(root, role)
-  const prompt = await readPrompt(root, profile.systemPromptPath)
+  const systemPrompt = await readPrompt(root, profile.systemPromptPath)
   // The guard belongs to the loaded extension package, not necessarily to the
-  // target repository. This allows `pi -e /path/to/workflow/index.ts` to run
+  // target repository. This allows `pi -e /path/to/epic/index.ts` to run
   // against an otherwise empty repository.
   const guard = path.resolve(
     path.dirname(fileURLToPath(import.meta.url)),
@@ -178,11 +178,11 @@ export async function runAgent(
   if (profile.provider) args.push('--provider', profile.provider)
   if (profile.model) args.push('--model', profile.model)
   if (profile.thinking) args.push('--thinking', profile.thinking)
-  const promptDir = await fs.mkdtemp(path.join(tmpdir(), 'pi-workflow-'))
+  const promptDir = await fs.mkdtemp(path.join(tmpdir(), 'pi-epic-'))
   const promptPath = path.join(promptDir, `${role}.md`)
-  await fs.writeFile(promptPath, prompt, { encoding: 'utf8', mode: 0o600 })
-  args.push('--append-system-prompt', promptPath, task)
-  const config = (await readConfig(root)) as WorkflowConfig
+  await fs.writeFile(promptPath, systemPrompt, { encoding: 'utf8', mode: 0o600 })
+  args.push('--append-system-prompt', promptPath, userPrompt)
+  const config = (await readConfig(root)) as EpicConfig
   const timeoutMs = profile.timeoutMs ?? config.agentTimeoutMs ?? 300_000
   const invocation = getPiInvocation(args)
   return new Promise((resolve, reject) => {
@@ -190,7 +190,7 @@ export async function runAgent(
       cwd: root,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PI_WORKFLOW_ROLE: role },
+      env: { ...process.env, PI_EPIC_ROLE: role },
       signal: options.signal,
     })
     let stdout = ''
@@ -343,8 +343,8 @@ export function parsePlannerResponse(
   return parseMarkdownResponse(trimmed, 'planner')
 }
 
-export function parseTaskDecomposition(output: string): WorkflowTask[] {
-  const parsed = parseJsonResponse<{ tasks?: WorkflowTask[] }>(
+export function parseTaskDecomposition(output: string): EpicTask[] {
+  const parsed = parseJsonResponse<{ tasks?: EpicTask[] }>(
     output,
     'planner'
   )

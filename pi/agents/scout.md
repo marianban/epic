@@ -7,7 +7,7 @@ Use repository inspection, targeted search, package/config inspection, and read-
 Return valid JSON only:
 
 {
-"taskSummary":"",
+"epicSummary":"",
 "relevantFiles":[{"path":"","purpose":"","symbols":[],"reason":""}],
 "codeExcerpts":[{"path":"","startLine":1,"endLine":1,"reason":"","content":""}],
 "callPaths":[],"dataFlow":[],"existingPatterns":[],

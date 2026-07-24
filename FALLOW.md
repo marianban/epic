@@ -12,6 +12,6 @@ cyclomatic and cognitive findings remain visible, and real coverage should let
 us lower the CRAP ceiling in a later change.
 
 The single inline circular-dependency exception is intentional: persistence
-creates the canonical workflow machine snapshot, while the machine's services
-persist workflow events and artifacts. Removing that edge would duplicate the
+creates the canonical epic machine snapshot, while the machine's services
+persist epic events and artifacts. Removing that edge would duplicate the
 machine bootstrap or change persisted-state behavior.

@@ -1,4 +1,4 @@
-export type WorkflowStage =
+export type EpicStage =
   | 'idle'
   | 'classifying'
   | 'scouting'
@@ -26,7 +26,7 @@ export type WorkflowStage =
   | 'failed'
   | 'cancelled'
 
-export type TaskComplexity = 'simple' | 'moderate' | 'complex'
+export type EpicComplexity = 'simple' | 'moderate' | 'complex'
 export type AgentRole =
   | 'orchestrator'
   | 'scout'
@@ -46,16 +46,16 @@ export type PendingHumanAction =
 export type CheckSuiteName = 'fast' | 'full' | 'final'
 export type Severity = 'error' | 'warning' | 'info'
 
-export interface WorkflowState {
-  workflowId: string
+export interface EpicState {
+  epicId: string
   schemaVersion: number
   machineVersion: number
-  task: string
+  epic: string
   repositoryRoot: string
-  stage: WorkflowStage
+  stage: EpicStage
   createdAt: string
   updatedAt: string
-  taskComplexity: TaskComplexity
+  epicComplexity: EpicComplexity
   scoutRound: number
   maxScoutRounds: number
   scoutReportPath?: string
@@ -65,7 +65,7 @@ export interface WorkflowState {
   planApprovedAt?: string
   approvedPlanHash?: string
   taskPlanPath?: string
-  tasks?: WorkflowTask[]
+  tasks?: EpicTask[]
   currentTaskIndex: number
   taskApproved: boolean
   taskApprovedAt?: string
@@ -86,7 +86,7 @@ export interface WorkflowState {
   machineSnapshot?: unknown
 }
 
-export interface WorkflowTask {
+export interface EpicTask {
   id: string
   title: string
   objective: string
@@ -186,7 +186,7 @@ export interface AgentProfile {
 }
 
 export interface ScoutReport {
-  taskSummary: string
+  epicSummary: string
   relevantFiles: {
     path: string
     purpose: string
@@ -237,16 +237,16 @@ export interface ReviewResult {
   requiresPlanRevision: boolean
 }
 
-export interface WorkflowEvent {
+export interface EpicEvent {
   id: string
-  workflowId: string
+  epicId: string
   timestamp: string
   type: string
-  stage: WorkflowStage
+  stage: EpicStage
   payload: Record<string, unknown>
 }
 
-export interface WorkflowConfig {
+export interface EpicConfig {
   inspector?: {
     enabled?: boolean
     port?: number

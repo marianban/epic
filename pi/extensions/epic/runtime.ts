@@ -10,34 +10,34 @@ import { createInspectorServer } from '@statelyai/inspect/server'
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import {
   createServices,
-  createWorkflowMachine,
+  createEpicMachine,
   machineStage,
-  type WorkflowMachineContext,
-  type WorkflowMachineEvent,
-} from './machines/workflow-machine.ts'
+  type EpicMachineContext,
+  type EpicMachineEvent,
+} from './machines/epic-machine.ts'
 import { readConfig } from './tools.ts'
-import type { WorkflowConfig, WorkflowStage, WorkflowState } from './types.ts'
+import type { EpicConfig, EpicStage, EpicState } from './types.ts'
 
-type WorkflowActor = Actor<ReturnType<typeof createWorkflowMachine>>
+type EpicActor = Actor<ReturnType<typeof createEpicMachine>>
 
-interface WorkflowInspector {
+interface EpicInspector {
   inspect: Observer<InspectionEvent>
 }
 
-// The Pi extension process owns the live workflow session. Keep one relay per
+// The Pi extension process owns the live epic session. Keep one relay per
 // port so each short-lived command runtime can reconnect its actor without
 // tearing down the inspector server after the command returns.
-const inspectors = new Map<number, WorkflowInspector>()
+const inspectors = new Map<number, EpicInspector>()
 
-function createWorkflowInspector(config: WorkflowConfig['inspector']):
-  | WorkflowInspector
+function createEpicInspector(config: EpicConfig['inspector']):
+  | EpicInspector
   | undefined {
   const enabled =
-    process.env.PI_WORKFLOW_INSPECTOR === '1' || config?.enabled === true
-  if (!enabled || process.env.PI_WORKFLOW_INSPECTOR === '0') return undefined
+    process.env.PI_EPIC_INSPECTOR === '1' || config?.enabled === true
+  if (!enabled || process.env.PI_EPIC_INSPECTOR === '0') return undefined
 
   const configuredPort = Number(
-    process.env.PI_WORKFLOW_INSPECTOR_PORT ?? config?.port ?? 8080
+    process.env.PI_EPIC_INSPECTOR_PORT ?? config?.port ?? 8080
   )
   const port =
     Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65536
@@ -49,8 +49,8 @@ function createWorkflowInspector(config: WorkflowConfig['inspector']):
   createInspectorServer({
     port,
     autoOpen:
-      process.env.PI_WORKFLOW_INSPECTOR_AUTO_OPEN === '1' ||
-      (process.env.PI_WORKFLOW_INSPECTOR_AUTO_OPEN !== '0' &&
+      process.env.PI_EPIC_INSPECTOR_AUTO_OPEN === '1' ||
+      (process.env.PI_EPIC_INSPECTOR_AUTO_OPEN !== '0' &&
         (config?.autoOpen ?? true)),
   })
   const inspector = createWebSocketInspector({
@@ -65,15 +65,15 @@ function createWorkflowInspector(config: WorkflowConfig['inspector']):
   return result
 }
 
-export async function createWorkflowRuntime(
-  state: WorkflowState,
+export async function createEpicRuntime(
+  state: EpicState,
   ctx?: ExtensionCommandContext
-): Promise<WorkflowRuntime> {
-  const machine = createWorkflowMachine(
+): Promise<EpicRuntime> {
+  const machine = createEpicMachine(
     ctx ? createServices(ctx) : createServices(undefined as never)
   )
-  const config = (await readConfig(state.repositoryRoot)) as WorkflowConfig
-  const inspector = createWorkflowInspector(config.inspector)
+  const config = (await readConfig(state.repositoryRoot)) as EpicConfig
+  const inspector = createEpicInspector(config.inspector)
   const actor = state.machineSnapshot
     ? createActor(machine, {
         snapshot: state.machineSnapshot as SnapshotFrom<typeof machine>,
@@ -82,20 +82,20 @@ export async function createWorkflowRuntime(
       })
     : createActor(machine, { input: { state }, inspect: inspector?.inspect })
   actor.start()
-  return new WorkflowRuntime(state, actor)
+  return new EpicRuntime(state, actor)
 }
 
-class WorkflowRuntime {
-  private readonly actor: WorkflowActor
-  private readonly state: WorkflowState
-  constructor(state: WorkflowState, actor: WorkflowActor) {
+class EpicRuntime {
+  private readonly actor: EpicActor
+  private readonly state: EpicState
+  constructor(state: EpicState, actor: EpicActor) {
     this.state = state
     this.actor = actor
   }
-  send(event: WorkflowMachineEvent): void {
+  send(event: EpicMachineEvent): void {
     if (!this.actor.getSnapshot().can(event))
       throw new Error(
-        `Workflow event ${event.type} is not available in stage ${machineStage(this.actor.getSnapshot() as { context: WorkflowMachineContext })}.`
+        `Epic event ${event.type} is not available in stage ${machineStage(this.actor.getSnapshot() as { context: EpicMachineContext })}.`
       )
     this.actor.send(event)
   }
@@ -114,11 +114,11 @@ class WorkflowRuntime {
     ])
     while (Date.now() - started < timeoutMs) {
       const snapshot = this.actor.getSnapshot() as unknown as {
-        context: WorkflowMachineContext
+        context: EpicMachineContext
       }
       // The machine owns the live stage. `context.state.stage` is only
       // synchronized after settle() returns, so reading it here can leave
-      // every in-flight workflow looking permanently idle.
+      // every in-flight epic looking permanently idle.
       if (waiting.has(machineStage(snapshot))) {
         await this.sync()
         return
@@ -126,12 +126,12 @@ class WorkflowRuntime {
       await new Promise((resolve) => setTimeout(resolve, 10))
     }
     throw new Error(
-      'Workflow actor did not reach a human or terminal state before timeout.'
+      'Epic actor did not reach a human or terminal state before timeout.'
     )
   }
   async sync(): Promise<void> {
     const snapshot = this.actor.getSnapshot() as unknown as {
-      context: WorkflowMachineContext
+      context: EpicMachineContext
     }
     const current = snapshot.context.state
     Object.assign(this.state, current, {
@@ -139,13 +139,13 @@ class WorkflowRuntime {
       stage: machineStage(snapshot),
     })
   }
-  snapshot(): ReturnType<WorkflowActor['getPersistedSnapshot']> {
+  snapshot(): ReturnType<EpicActor['getPersistedSnapshot']> {
     return this.actor.getPersistedSnapshot()
   }
-  matches(stage: WorkflowStage): boolean {
+  matches(stage: EpicStage): boolean {
     return (
       machineStage(
-        this.actor.getSnapshot() as { context: WorkflowMachineContext }
+        this.actor.getSnapshot() as { context: EpicMachineContext }
       ) === stage
     )
   }

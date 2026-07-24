@@ -1,10 +1,10 @@
 {
-  "name": "pi-deterministic-workflow",
+  "name": "pi-deterministic-epic",
   "private": true,
   "type": "module",
   "pi": {
     "extensions": [
-      "./pi/extensions/workflow/index.ts"
+      "./pi/extensions/epic/index.ts"
     ]
   },
   "scripts": {

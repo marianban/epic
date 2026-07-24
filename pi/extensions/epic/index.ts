@@ -1,36 +1,36 @@
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 import {
-  cancelWorkflow,
+  cancelEpic,
   approvePlan,
-  resumeWorkflow,
+  resumeEpic,
   reviewPlan,
-  startWorkflow,
-  workflowStatus,
+  startEpic,
+  epicStatus,
   approvePrerequisites,
   approveTask,
   reviseTask,
-} from './workflow.ts'
+} from './epic.ts'
 
-export default function workflowExtension(pi: ExtensionAPI): void {
-  pi.registerCommand('workflow', {
-    description: 'Start a deterministic human-gated workflow',
-    handler: async (args, ctx) => startWorkflow(args, ctx),
+export default function epicExtension(pi: ExtensionAPI): void {
+  pi.registerCommand('epic', {
+    description: 'Start a deterministic human-gated epic',
+    handler: async (args, ctx) => startEpic(args, ctx),
   })
-  pi.registerCommand('workflow-status', {
-    description: 'Show active workflow state',
-    handler: async (_args, ctx) => workflowStatus(ctx),
+  pi.registerCommand('epic-status', {
+    description: 'Show active epic state',
+    handler: async (_args, ctx) => epicStatus(ctx),
   })
-  pi.registerCommand('workflow-resume', {
-    description: 'Resume the persisted workflow',
-    handler: async (_args, ctx) => resumeWorkflow(ctx),
+  pi.registerCommand('epic-resume', {
+    description: 'Resume the persisted epic',
+    handler: async (_args, ctx) => resumeEpic(ctx),
   })
-  pi.registerCommand('workflow-approve-prerequisites', {
+  pi.registerCommand('epic-approve-prerequisites', {
     description: 'Approve and apply detected repository prerequisites',
     handler: async (_args, ctx) => approvePrerequisites(ctx),
   })
-  pi.registerCommand('workflow-cancel', {
+  pi.registerCommand('epic-cancel', {
     description: 'Cancel without reverting repository changes',
-    handler: async (_args, ctx) => cancelWorkflow(ctx),
+    handler: async (_args, ctx) => cancelEpic(ctx),
   })
   pi.registerCommand('task-approve', {
     description: 'Approve the current task after manual review',

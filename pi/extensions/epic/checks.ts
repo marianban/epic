@@ -8,11 +8,11 @@ import type {
   CheckSuiteResult,
   FallowDelta,
   Finding,
-  WorkflowConfig,
-  WorkflowState,
+  EpicConfig,
+  EpicState,
 } from './types.ts'
 import { assertRepositoryPath, readConfig, redactSecrets } from './tools.ts'
-import { logWorkflow } from './logger.ts'
+import { logEpic } from './logger.ts'
 
 const DEFAULT_TIMEOUT_MS = 120_000
 const DEFAULT_MAX_OUTPUT_BYTES = 20_000
@@ -63,7 +63,7 @@ async function resolveCheckDefinitions(
   root: string,
   suite: CheckSuiteName
 ): Promise<CheckDefinition[]> {
-  const config = (await readConfig(root)) as WorkflowConfig
+  const config = (await readConfig(root)) as EpicConfig
   const scripts = await packageScripts(root)
   const configured = config.checks?.[suite]
   if (configured?.length)
@@ -118,7 +118,7 @@ async function resolveCheckDefinitions(
 
 async function resolveFinalCheckDefinitions(
   root: string,
-  state: WorkflowState
+  state: EpicState
 ): Promise<CheckDefinition[]> {
   const definitions = await resolveCheckDefinitions(root, 'final')
   const deferredNames = new Set(
@@ -143,9 +143,9 @@ async function resolveFinalCheckDefinitions(
 }
 
 function taskCheckPolicy(
-  state: WorkflowState,
+  state: EpicState,
   suite: CheckSuiteName
-): WorkflowTaskCheckPolicy | undefined {
+): EpicTaskCheckPolicy | undefined {
   if (suite === 'final') return undefined
   const task = state.tasks?.[state.currentTaskIndex]
   if (!task) return undefined
@@ -156,7 +156,7 @@ function taskCheckPolicy(
   }
 }
 
-interface WorkflowTaskCheckPolicy {
+interface EpicTaskCheckPolicy {
   requiredChecks: string[]
   deferredChecks: string[]
   reason: string
@@ -316,9 +316,9 @@ function runShell(
 
 export async function runCheckSuite(
   suite: CheckSuiteName,
-  state: WorkflowState
+  state: EpicState
 ): Promise<CheckSuiteResult> {
-  const config = (await readConfig(state.repositoryRoot)) as WorkflowConfig
+  const config = (await readConfig(state.repositoryRoot)) as EpicConfig
   const policy = taskCheckPolicy(state, suite)
   const resolvedDefinitions =
     suite === 'final'
@@ -379,13 +379,13 @@ export async function runCheckSuite(
         skipReason: definition.skipReason,
       }
       checks.push(check)
-      await logWorkflow(state, 'info', 'Check skipped', {
+      await logEpic(state, 'info', 'Check skipped', {
         suite,
         ...check,
       })
       continue
     }
-    await logWorkflow(state, 'info', 'Check started', {
+    await logEpic(state, 'info', 'Check started', {
       suite,
       name: definition.name,
       command: definition.command,
@@ -437,7 +437,7 @@ export async function runCheckSuite(
       outputTruncated: result.timedOut,
     }
     checks.push(check)
-    await logWorkflow(
+    await logEpic(
       state,
       check.passed ? 'info' : 'error',
       'Check finished',

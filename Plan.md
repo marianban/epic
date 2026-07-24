@@ -1,8 +1,8 @@
-# Implement a Deterministic Multi-Agent Workflow Extension for Pi
+# Implement a Deterministic Multi-Agent Epic Extension for Pi
 
 ## Objective
 
-Create a Pi extension that implements a deterministic, human-gated software-development workflow. The first working phase includes only these roles:
+Create a Pi extension that implements a deterministic, human-gated software-development epic. The first working phase includes only these roles:
 
 1. Orchestrator
 2. Scout
@@ -10,7 +10,7 @@ Create a Pi extension that implements a deterministic, human-gated software-deve
 
 Implementer and Reviewer are deferred until the Orchestrator → Scout → Planner → human approval flow is working and tested.
 
-The workflow must:
+The epic must:
 
 - use separate agent contexts for each role;
 - support different models or providers per role;
@@ -23,7 +23,7 @@ The workflow must:
 - run deterministic static-analysis and verification gates;
 - run semantic review after deterministic checks pass;
 - support bounded repair loops;
-- preserve an audit trail of workflow stages and results;
+- preserve an audit trail of epic stages and results;
 - avoid unnecessary paid-model token usage by using a local Scout for repository discovery.
 
 The first implementation should prioritize clarity, deterministic control flow, testability, and extensibility over UI polish.
@@ -32,14 +32,14 @@ The first implementation should prioritize clarity, deterministic control flow, 
 
 # 1. High-Level Architecture
 
-Implement the workflow as a Pi TypeScript extension.
+Implement the epic as a Pi TypeScript extension.
 
-The extension owns orchestration. Models must not decide which workflow stage runs next.
+The extension owns orchestration. Models must not decide which epic stage runs next.
 
 ```text
-User task
+User epic
     ↓
-Orchestrator classifies task
+Orchestrator classifies epic
     ↓
 Scout investigates repository
     ↓
@@ -89,10 +89,10 @@ The Orchestrator should be implemented mostly as TypeScript state transitions ra
 Add at least these Pi slash commands:
 
 ```text
-/workflow <task>
-/workflow-status
-/workflow-resume
-/workflow-cancel
+/epic <epic>
+/epic-status
+/epic-resume
+/epic-cancel
 /plan-review
 /plan-approve
 /plan-revise
@@ -100,21 +100,21 @@ Add at least these Pi slash commands:
 
 Recommended semantics:
 
-## `/workflow <task>`
+## `/epic <epic>`
 
-Start a new workflow.
+Start a new epic.
 
 Example:
 
 ```text
-/workflow Add deterministic diving attacks to EnemyFormation
+/epic Add deterministic diving attacks to EnemyFormation
 ```
 
-## `/workflow-status`
+## `/epic-status`
 
 Display:
 
-- workflow ID;
+- epic ID;
 - current stage;
 - active agent;
 - repair attempt count;
@@ -122,13 +122,13 @@ Display:
 - last verification result;
 - pending human action.
 
-## `/workflow-resume`
+## `/epic-resume`
 
-Resume a previously interrupted workflow from persisted state.
+Resume a previously interrupted epic from persisted state.
 
-## `/workflow-cancel`
+## `/epic-cancel`
 
-Cancel the current workflow without reverting repository changes automatically.
+Cancel the current epic without reverting repository changes automatically.
 
 ## `/plan-review`
 
@@ -151,9 +151,9 @@ The extension should use the following files.
 ```text
 .pi/
 ├── extensions/
-│   └── workflow/
+│   └── epic/
 │       ├── index.ts
-│       ├── workflow.ts
+│       ├── epic.ts
 │       ├── state.ts
 │       ├── persistence.ts
 │       ├── agents.ts
@@ -164,11 +164,11 @@ The extension should use the following files.
 │       ├── diff.ts
 │       └── types.ts
 │
-├── workflows/
+├── epics/
 │   └── runs/
-│       └── <workflow-id>/
+│       └── <epic-id>/
 │           ├── state.json
-│           ├── task.md
+│           ├── Epic.md
 │           ├── scout-report.json
 │           ├── plan-revisions/
 │           │   ├── plan-001.md
@@ -185,7 +185,7 @@ The extension should use the following files.
 │           │   ├── implementation-001.patch
 │           │   └── ...
 │           ├── events.jsonl
-│           └── workflow.log
+│           └── epic.log
 │
 └── agents/
     ├── scout.md
@@ -200,16 +200,16 @@ The repository root should contain the active plan:
 plan.md
 ```
 
-Add generated workflow-state directories to `.gitignore`, but do not automatically ignore `plan.md`. Let the project owner decide whether plans should be committed.
+Add generated epic-state directories to `.gitignore`, but do not automatically ignore `plan.md`. Let the project owner decide whether plans should be committed.
 
 ---
 
-# 4. Workflow State Machine
+# 4. Epic State Machine
 
 Use an explicit state machine.
 
 ```ts
-type WorkflowStage =
+type EpicStage =
   | 'idle'
   | 'classifying'
   | 'scouting'
@@ -231,20 +231,20 @@ type WorkflowStage =
   | 'cancelled'
 ```
 
-Define persisted workflow state:
+Define persisted epic state:
 
 ```ts
-interface WorkflowState {
-  workflowId: string
-  task: string
+interface EpicState {
+  epicId: string
+  epic: string
   repositoryRoot: string
 
-  stage: WorkflowStage
+  stage: EpicStage
 
   createdAt: string
   updatedAt: string
 
-  taskComplexity: 'simple' | 'moderate' | 'complex'
+  epicComplexity: 'simple' | 'moderate' | 'complex'
 
   scoutReportPath?: string
 
@@ -285,7 +285,7 @@ Every state transition must:
 Example transition validator:
 
 ```ts
-const ALLOWED_TRANSITIONS: Record<WorkflowStage, WorkflowStage[]> = {
+const ALLOWED_TRANSITIONS: Record<EpicStage, EpicStage[]> = {
   idle: ['classifying'],
   classifying: ['scouting', 'failed', 'cancelled'],
   scouting: ['planning', 'failed', 'cancelled'],
@@ -318,25 +318,25 @@ const ALLOWED_TRANSITIONS: Record<WorkflowStage, WorkflowStage[]> = {
 
 ---
 
-# 5. Complete Workflow Pseudocode
+# 5. Complete Epic Pseudocode
 
 ```ts
-async function runWorkflow(
-  task: string,
+async function runEpic(
+  epic: string,
   context: ExtensionContext
-): Promise<WorkflowResult> {
-  const state = await createWorkflowState(task, context.cwd)
+): Promise<EpicResult> {
+  const state = await createEpicState(epic, context.cwd)
 
   try {
     await transition(state, 'classifying')
 
-    state.taskComplexity = classifyTask(task)
+    state.epicComplexity = classifyEpic(epic)
     await saveState(state)
 
     await transition(state, 'scouting')
 
     const scoutReport = await runScout({
-      task,
+      epic,
       repositoryRoot: state.repositoryRoot,
       limits: {
         maxFiles: 15,
@@ -353,7 +353,7 @@ async function runWorkflow(
 
     const initialPlan = await runPlanner({
       mode: 'create',
-      task,
+      epic,
       scoutReport,
       currentPlan: null,
       reviewInstructions: [],
@@ -379,7 +379,7 @@ async function runWorkflow(
     return {
       status: 'paused',
       reason: 'awaiting_plan_review',
-      workflowId: state.workflowId,
+      epicId: state.epicId,
     }
   } catch (error) {
     await markFailed(state, error)
@@ -388,7 +388,7 @@ async function runWorkflow(
 }
 ```
 
-The workflow must pause after writing `plan.md`.
+The epic must pause after writing `plan.md`.
 
 It must not continue automatically to implementation.
 
@@ -521,7 +521,7 @@ function extractReviewInstructions(markdown: string): PlanReviewInstruction[] {
 
 ```ts
 async function reviewPlanCommand(ctx: ExtensionContext): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
+  const state = await loadActiveEpic(ctx.cwd)
 
   assertStage(state, ['awaiting_plan_review', 'awaiting_plan_approval'])
 
@@ -546,7 +546,7 @@ async function reviewPlanCommand(ctx: ExtensionContext): Promise<void> {
 
   const revisedPlan = await runPlanner({
     mode: 'revise',
-    task: state.task,
+    epic: state.epic,
     scoutReport,
     currentPlan,
     reviewInstructions: instructions,
@@ -604,7 +604,7 @@ Addressed:
 
 ```ts
 async function approvePlanCommand(ctx: ExtensionContext): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
+  const state = await loadActiveEpic(ctx.cwd)
 
   assertStage(state, ['awaiting_plan_review', 'awaiting_plan_approval'])
 
@@ -627,7 +627,7 @@ async function approvePlanCommand(ctx: ExtensionContext): Promise<void> {
   await saveState(state)
   await transition(state, 'implementing')
 
-  await continueApprovedWorkflow(state, ctx)
+  await continueApprovedEpic(state, ctx)
 }
 ```
 
@@ -641,11 +641,11 @@ When the approved plan changes afterward, stop implementation and require approv
 
 ---
 
-# 7. Approved Workflow Continuation
+# 7. Approved Epic Continuation
 
 ```ts
-async function continueApprovedWorkflow(
-  state: WorkflowState,
+async function continueApprovedEpic(
+  state: EpicState,
   ctx: ExtensionContext
 ): Promise<void> {
   assertApprovedPlanUnchanged(state)
@@ -658,7 +658,7 @@ async function continueApprovedWorkflow(
 
   await runImplementer({
     mode: 'implement',
-    task: state.task,
+    epic: state.epic,
     plan: approvedPlan,
     scoutReport,
     findings: [],
@@ -748,7 +748,7 @@ const FULL_CHECKS: CheckDefinition[] = [
 ]
 ```
 
-Repository-specific commands should be discovered during project initialization or read from a workflow configuration file.
+Repository-specific commands should be discovered during project initialization or read from an epic configuration file.
 
 Suggested config:
 
@@ -834,7 +834,7 @@ Normal task gates should primarily block on findings introduced by the current c
 
 ```ts
 async function runVerificationAndReviewLoop(
-  state: WorkflowState,
+  state: EpicState,
   ctx: ExtensionContext
 ): Promise<void> {
   const approvedPlan = await readApprovedPlan(state)
@@ -847,7 +847,7 @@ async function runVerificationAndReviewLoop(
 
     if (!fast.passed) {
       if (state.fastRepairAttempt >= state.maxFastRepairs) {
-        await escalateWorkflow(state, {
+        await escalateEpic(state, {
           reason: 'fast_checks_exhausted',
           evidence: fast,
         })
@@ -860,7 +860,7 @@ async function runVerificationAndReviewLoop(
 
       await runImplementer({
         mode: 'repair',
-        task: state.task,
+        epic: state.epic,
         plan: approvedPlan,
         scoutReport: await readScoutReport(state),
         findings: fast.introducedFindings,
@@ -878,7 +878,7 @@ async function runVerificationAndReviewLoop(
 
     if (!full.passed) {
       if (state.fullRepairAttempt >= state.maxFullRepairs) {
-        await escalateWorkflow(state, {
+        await escalateEpic(state, {
           reason: 'full_checks_exhausted',
           evidence: full,
         })
@@ -891,7 +891,7 @@ async function runVerificationAndReviewLoop(
 
       await runImplementer({
         mode: 'repair',
-        task: state.task,
+        epic: state.epic,
         plan: approvedPlan,
         scoutReport: await readScoutReport(state),
         findings: full.introducedFindings,
@@ -905,7 +905,7 @@ async function runVerificationAndReviewLoop(
     await transition(state, 'reviewing')
 
     const review = await runReviewer({
-      task: state.task,
+      epic: state.epic,
       approvedPlan,
       scoutReport: await readScoutReport(state),
       diff: await getCurrentDiff(state.repositoryRoot),
@@ -919,7 +919,7 @@ async function runVerificationAndReviewLoop(
 
     if (!review.passed) {
       if (state.semanticRepairAttempt >= state.maxSemanticRepairs) {
-        await escalateWorkflow(state, {
+        await escalateEpic(state, {
           reason: 'semantic_review_exhausted',
           evidence: review,
         })
@@ -932,7 +932,7 @@ async function runVerificationAndReviewLoop(
 
       await runImplementer({
         mode: 'repair',
-        task: state.task,
+        epic: state.epic,
         plan: approvedPlan,
         scoutReport: await readScoutReport(state),
         findings: review.findings,
@@ -1008,7 +1008,7 @@ Escalation options:
 2. Invoke a stronger Planner.
 3. Invoke Codex CLI in read-only mode for diagnosis.
 4. Invoke a stronger Implementer.
-5. End the workflow as failed.
+5. End the epic as failed.
 
 Do not silently switch to an expensive model.
 
@@ -1099,7 +1099,7 @@ const AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
 }
 ```
 
-The workflow should allow changing these profiles without modifying orchestration code.
+The epic should allow changing these profiles without modifying orchestration code.
 
 ---
 
@@ -1118,18 +1118,18 @@ Content:
 ```md
 # Role
 
-You are the workflow Orchestrator for a deterministic software-development pipeline.
+You are the epic Orchestrator for a deterministic software-development pipeline.
 
 You do not implement code, perform broad repository investigation, or independently rewrite the implementation plan.
 
-The TypeScript workflow engine owns stage transitions. Your role is limited to classification, concise routing decisions, escalation summaries, and human-facing status communication.
+The TypeScript epic engine owns stage transitions. Your role is limited to classification, concise routing decisions, escalation summaries, and human-facing status communication.
 
 # Responsibilities
 
 - Classify tasks as simple, moderate, or complex.
 - Identify whether planning is required.
 - Identify whether an escalation should return to planning, implementation, or human review.
-- Summarize workflow state for the user.
+- Summarize epic state for the user.
 - Preserve the approved scope and acceptance criteria.
 - Prefer local agents and deterministic tools when they are sufficient.
 - Recommend paid-model escalation only when evidence justifies it.
@@ -1142,7 +1142,7 @@ The TypeScript workflow engine owns stage transitions. Your role is limited to c
 - Do not implement fixes.
 - Do not approve your own plan.
 - Do not skip human plan approval.
-- Do not mark a workflow completed when required checks failed.
+- Do not mark an epic completed when required checks failed.
 - Do not silently increase repair limits.
 - Do not silently invoke expensive models.
 
@@ -1206,7 +1206,7 @@ You investigate. You do not design the final solution and you never modify files
 
 # Objectives
 
-For the supplied task:
+For the supplied epic:
 
 1. Locate the relevant files and symbols.
 2. Trace important call paths and data flow.
@@ -1256,14 +1256,14 @@ Unless explicitly expanded:
 - include no more than 140 lines per excerpt;
 - avoid copying entire large files;
 - deduplicate repeated code;
-- prioritize code directly relevant to the task.
+- prioritize code directly relevant to the epic.
 
 # Required Output
 
 Return valid JSON:
 
 {
-"taskSummary": "brief normalized task",
+"epicSummary": "brief normalized epic",
 "relevantFiles": [
 {
 "path": "path/to/file",
@@ -1340,7 +1340,7 @@ Content:
 
 You are a software implementation Planner.
 
-You create and revise `plan.md` using the task, Scout evidence, repository constraints, and human review instructions.
+You create and revise `plan.md` using the epic, Scout evidence, repository constraints, and human review instructions.
 
 You do not modify application code.
 
@@ -1352,7 +1352,7 @@ Produce a bounded, implementable, verifiable plan that the Implementer can follo
 
 You may receive:
 
-- original task;
+- original epic;
 - Scout evidence package;
 - current `plan.md`;
 - human instructions extracted from `R:` lines;
@@ -1361,7 +1361,7 @@ You may receive:
 
 # Planning Rules
 
-- Treat the user's task and explicit constraints as authoritative.
+- Treat the user's epic and explicit constraints as authoritative.
 - Base repository claims on Scout evidence.
 - Reuse existing repository patterns.
 - Minimize affected files.
@@ -1521,7 +1521,7 @@ The approved plan, task, acceptance criteria, and repair findings are authoritat
 
 Before changing code:
 
-- confirm that the plan is marked approved by the workflow engine;
+- confirm that the plan is marked approved by the epic engine;
 - confirm that the plan hash matches the approved revision;
 - inspect only the files and symbols needed for the current implementation or repair;
 - review the supplied Scout evidence.
@@ -1541,7 +1541,7 @@ When the plan is not approved or its hash changed, stop and report the problem.
 - Handle edge cases listed in the plan.
 - Keep changes within scope.
 - Do not modify `plan.md`.
-- Do not alter workflow state files.
+- Do not alter epic state files.
 - Do not disable or weaken tests, lint rules, compiler settings, or static-analysis rules merely to pass gates.
 - Do not suppress diagnostics without addressing their cause.
 - Do not claim verification that was not performed.
@@ -1614,7 +1614,7 @@ You are a strict, read-only semantic code Reviewer.
 
 You review the current diff against:
 
-- the original task;
+- the original epic;
 - the approved `plan.md`;
 - acceptance criteria;
 - Scout evidence;
@@ -1783,12 +1783,12 @@ Optional stronger isolation:
 Append every event as one JSON line.
 
 ```ts
-interface WorkflowEvent {
+interface EpicEvent {
   id: string
-  workflowId: string
+  epicId: string
   timestamp: string
   type:
-    | 'workflow_created'
+    | 'epic_created'
     | 'stage_changed'
     | 'agent_started'
     | 'agent_completed'
@@ -1802,10 +1802,10 @@ interface WorkflowEvent {
     | 'repair_started'
     | 'review_completed'
     | 'escalation_requested'
-    | 'workflow_completed'
-    | 'workflow_failed'
-    | 'workflow_cancelled'
-  stage: WorkflowStage
+    | 'epic_completed'
+    | 'epic_failed'
+    | 'epic_cancelled'
+  stage: EpicStage
   payload: Record<string, unknown>
 }
 ```
@@ -1834,7 +1834,7 @@ Add tests for:
 
 - valid transitions succeed;
 - invalid transitions fail;
-- completed and cancelled workflows cannot resume incorrectly.
+- completed and cancelled epics cannot resume incorrectly.
 
 ## Plan review parser
 
@@ -1867,7 +1867,7 @@ Add tests for:
 
 ## Persistence
 
-- interrupted workflow resumes;
+- interrupted epic resumes;
 - journal remains append-only;
 - state writes are atomic;
 - corrupt state produces a clear error.
@@ -1877,7 +1877,7 @@ Add tests for:
 - Scout cannot write;
 - Planner cannot modify repository;
 - Reviewer cannot modify repository;
-- Implementer cannot modify workflow state or `plan.md`.
+- Implementer cannot modify epic state or `plan.md`.
 
 ---
 
@@ -1885,10 +1885,10 @@ Add tests for:
 
 The implementation is complete when:
 
-- `/workflow <task>` creates a persisted workflow;
+- `/epic <epic>` creates a persisted epic and writes `Epic.md`;
 - the Scout produces a structured repository report;
 - the Planner writes `plan.md`;
-- the workflow pauses before implementation;
+- the epic pauses before implementation;
 - the user can add one or more `R:` lines to `plan.md`;
 - `/plan-review` revises `plan.md`;
 - review can repeat multiple times;
@@ -1903,10 +1903,10 @@ The implementation is complete when:
 - the Reviewer receives the diff, plan, Scout report, and check results;
 - semantic review failures trigger bounded repairs;
 - final verification runs after review passes;
-- workflow state can resume after interruption;
+- epic state can resume after interruption;
 - all stages are recorded in an append-only event journal;
 - no role can silently skip mandatory gates;
-- model profiles are configurable independently from workflow code.
+- model profiles are configurable independently from epic code.
 
 ---
 
@@ -1914,7 +1914,7 @@ The implementation is complete when:
 
 Implement in this order:
 
-1. Types and persisted workflow state.
+1. Types and persisted epic state.
 2. Atomic persistence and event journal.
 3. State-transition validation.
 4. Pi slash commands.
@@ -1945,15 +1945,15 @@ Do not initially implement:
 - automatic Git commits;
 - automatic pull-request creation;
 - distributed execution;
-- remote workflow dashboard;
+- remote epic dashboard;
 - automatic merge;
 - autonomous dependency installation;
 - unrestricted network research;
 - dynamic prompt generation;
-- more than one active workflow per repository;
+- more than one active epic per repository;
 - complex task graph scheduling.
 
-Keep the first version focused on one reliable sequential workflow with strong human plan approval.
+Keep the first version focused on one reliable sequential epic with strong human plan approval.
 
 ---
 
@@ -1962,17 +1962,17 @@ Keep the first version focused on one reliable sequential workflow with strong h
 Create:
 
 ```text
-.pi/extensions/workflow/index.ts
-.pi/extensions/workflow/workflow.ts
-.pi/extensions/workflow/state.ts
-.pi/extensions/workflow/persistence.ts
-.pi/extensions/workflow/agents.ts
-.pi/extensions/workflow/prompts.ts
-.pi/extensions/workflow/tools.ts
-.pi/extensions/workflow/checks.ts
-.pi/extensions/workflow/plan-review.ts
-.pi/extensions/workflow/diff.ts
-.pi/extensions/workflow/types.ts
+.pi/extensions/epic/index.ts
+.pi/extensions/epic/epic.ts
+.pi/extensions/epic/state.ts
+.pi/extensions/epic/persistence.ts
+.pi/extensions/epic/agents.ts
+.pi/extensions/epic/prompts.ts
+.pi/extensions/epic/tools.ts
+.pi/extensions/epic/checks.ts
+.pi/extensions/epic/plan-review.ts
+.pi/extensions/epic/diff.ts
+.pi/extensions/epic/types.ts
 
 .pi/agents/orchestrator.md
 .pi/agents/scout.md
@@ -1980,8 +1980,8 @@ Create:
 .pi/agents/implementer.md
 .pi/agents/reviewer.md
 
-.pi/workflow.config.example.json
-docs/pi-workflow.md
+.pi/epic.config.example.json
+docs/pi-epic.md
 ```
 
 Also update:
@@ -2011,14 +2011,14 @@ npm run build
 Also execute an end-to-end dry run using a small test task:
 
 ```text
-/workflow Add a harmless exported helper with one unit test
+/epic Add a harmless exported helper with one unit test
 ```
 
 Verify this sequence:
 
 1. Scout runs.
 2. `plan.md` is written.
-3. Workflow pauses.
+3. Epic pauses.
 4. Add:
 
 ```text
@@ -2032,4 +2032,4 @@ R: Rename the helper to a different explicit name.
 9. Confirm checks run.
 10. Confirm Reviewer runs.
 11. Confirm final verification passes.
-12. Confirm workflow completes and journal files exist.
+12. Confirm epic completes and journal files exist.

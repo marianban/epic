@@ -1,19 +1,19 @@
 import type {
   PlanReviewInstruction,
   ScoutReport,
-  WorkflowState,
+  EpicState,
 } from './types.ts'
 import { extractReviewInstructions } from './plan-review.ts'
 
-export function scoutTask(
-  state: WorkflowState,
+export function scoutEpicPrompt(
+  state: EpicState,
   focusedQuestions: string[] = []
 ): string {
-  return `Investigate the repository for this task and return the exact JSON contract from your role prompt.\n\nTask:\n${state.task}\n\nRepository root: ${state.repositoryRoot}\nLimits: inspect at most 15 primary files, 30 excerpts, and 140 lines per excerpt.${focusedQuestions.length ? `\n\nThe Planner requested this focused follow-up context. Answer only these questions:\n${focusedQuestions.map((question) => `- ${question}`).join('\n')}` : ''}`
+  return `Investigate the repository for this epic and return the exact JSON contract from your role prompt.\n\nEpic:\n${state.epic}\n\nRepository root: ${state.repositoryRoot}\nLimits: inspect at most 15 primary files, 30 excerpts, and 140 lines per excerpt.${focusedQuestions.length ? `\n\nThe Planner requested this focused follow-up context. Answer only these questions:\n${focusedQuestions.map((question) => `- ${question}`).join('\n')}` : ''}`
 }
 
-export function plannerTask(
-  state: WorkflowState,
+export function plannerEpicPrompt(
+  state: EpicState,
   report: ScoutReport,
   currentPlan: string | null,
   instructions: PlanReviewInstruction[] = []
@@ -22,7 +22,7 @@ export function plannerTask(
     currentPlan
       ? 'Revise the current plan using every human instruction.'
       : 'Create the initial implementation plan.',
-    `Task:\n${state.task}`,
+    `Epic:\n${state.epic}`,
     `Scout report:\n${JSON.stringify(report)}`,
     currentPlan ? `Current plan:\n${currentPlan}` : 'No current plan exists.',
     instructions.length
@@ -33,7 +33,7 @@ export function plannerTask(
 }
 
 export function implementerTask(
-  state: WorkflowState,
+  state: EpicState,
   plan: string,
   feedback = '',
   taskArtifact = ''
@@ -41,8 +41,8 @@ export function implementerTask(
   const task = state.tasks?.[state.currentTaskIndex]
   const humanInstructions = extractReviewInstructions(taskArtifact)
   return [
-    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify plan.md, task artifacts, or .pi/workflows. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
-    `Task:\n${state.task}`,
+    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify plan.md, task artifacts, or .pi/epics. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
+    `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     task
       ? `Current task:\n${JSON.stringify(task)}`
@@ -56,12 +56,12 @@ export function implementerTask(
     feedback
       ? `Repair feedback:\n${feedback}`
       : 'This is the initial implementation attempt.',
-    'Run only safe, relevant local checks if useful. Return a concise summary of changes and checks; the workflow engine owns all stage transitions.',
+    'Run only safe, relevant local checks if useful. Return a concise summary of changes and checks; the epic engine owns all stage transitions.',
   ].join('\n\n')
 }
 
 export function reviewerTask(
-  state: WorkflowState,
+  state: EpicState,
   plan: string,
   diff: string,
   checks: string,
@@ -70,7 +70,7 @@ export function reviewerTask(
   const task = state.tasks?.[state.currentTaskIndex]
   return [
     'Review only the current task semantically against its acceptance criteria and manual review steps. Do not modify files. Return valid JSON matching the ReviewResult contract from your role prompt.',
-    `Task:\n${state.task}`,
+    `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     task
       ? `Current task:\n${JSON.stringify(task)}`
@@ -84,25 +84,25 @@ export function reviewerTask(
 }
 
 export function taskDecompositionTask(
-  state: WorkflowState,
+  state: EpicState,
   plan: string
 ): string {
   return [
     'Break the approved implementation plan into the smallest independently implementable and reviewable tasks, preserving dependency order. Return JSON only with shape {tasks:[{id,title,objective,scope:{read,modify,create,delete},implementation,acceptanceCriteria,verification,manualReviewSteps,risks,requiredChecks,deferredChecks,reason}]}. For each task, requiredChecks lists checks that must pass before the task advances, deferredChecks lists checks that are intentionally not applicable until a later task, and reason explains the decision. Use stable check names such as diff-check, typecheck, lint, focused-tests, tests, build, and fallow. Deferred checks remain mandatory during final verification; never defer a check without a concrete dependency-based reason.',
-    `Task:\n${state.task}`,
+    `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     'Every task must have observable acceptance criteria and concrete manual review steps. Avoid mixing unrelated concerns.',
   ].join('\n\n')
 }
 
 export function taskReviewTask(
-  state: WorkflowState,
+  state: EpicState,
   taskMarkdown: string,
   instructions: PlanReviewInstruction[]
 ): string {
   return [
-    'Revise only the current task artifact in response to every human R: instruction. Do not modify application code, plan.md, or workflow state. Preserve unaffected task details, including the check policy, update scope, implementation, acceptance criteria, verification, manual review steps, and risks consistently, remove handled R: lines, and return the complete task Markdown only.',
-    `Workflow task:\n${state.task}`,
+    'Revise only the current task artifact in response to every human R: instruction. Do not modify application code, plan.md, or epic state. Preserve unaffected task details, including the check policy, update scope, implementation, acceptance criteria, verification, manual review steps, and risks consistently, remove handled R: lines, and return the complete task Markdown only.',
+    `Epic:\n${state.epic}`,
     `Current task artifact:\n${taskMarkdown}`,
     `Human R: instructions:\n${instructions.map((item) => `- line ${item.lineNumber}: ${item.text}`).join('\n')}`,
   ].join('\n\n')

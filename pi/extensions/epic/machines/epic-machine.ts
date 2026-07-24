@@ -3,8 +3,8 @@ import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import type {
   PlannerContextRequest,
   ScoutReport,
-  WorkflowStage,
-  WorkflowState,
+  EpicStage,
+  EpicState,
 } from '../types.ts'
 import {
   createTaskExecutionMachine,
@@ -12,19 +12,19 @@ import {
   type TaskExecutionResult,
 } from './task-execution-machine.ts'
 // fallow-ignore-next-line circular-dependency -- canonical machine bootstrap is required for persisted snapshots
-import { createWorkflowServices, type WorkflowServices } from '../services.ts'
+import { createEpicServices, type EpicServices } from '../services.ts'
 
-export const WORKFLOW_SCHEMA_VERSION = 2
-export const WORKFLOW_MACHINE_VERSION = 4
-export interface WorkflowMachineContext {
-  state: WorkflowState
+export const EPIC_SCHEMA_VERSION = 3
+export const EPIC_MACHINE_VERSION = 5
+export interface EpicMachineContext {
+  state: EpicState
   report?: ScoutReport
   focusedQuestions?: string[]
 }
-export type WorkflowMachineEvent =
-  | { type: 'WORKFLOW.START' }
-  | { type: 'WORKFLOW.RESUME' }
-  | { type: 'WORKFLOW.CANCEL' }
+export type EpicMachineEvent =
+  | { type: 'EPIC.START' }
+  | { type: 'EPIC.RESUME' }
+  | { type: 'EPIC.CANCEL' }
   | { type: 'PLAN.REVIEW'; force?: boolean }
   | { type: 'PLAN.APPROVE' }
   | { type: 'PLAN.REVISE' }
@@ -33,7 +33,7 @@ export type WorkflowMachineEvent =
   | { type: 'TASK.REVIEW' }
   | { type: 'TASK.REVISE' }
 
-const taskStage = (value: unknown): WorkflowStage =>
+const taskStage = (value: unknown): EpicStage =>
   (
     ({
       awaitingApproval: 'awaiting_task_approval',
@@ -53,47 +53,47 @@ const taskStage = (value: unknown): WorkflowStage =>
       done: 'final_verification',
       cancelled: 'cancelled',
       failed: 'failed',
-    }) as Record<string, WorkflowStage>
+    }) as Record<string, EpicStage>
   )[String(value)] ?? 'implementing'
 
-export function createWorkflowMachine(services: WorkflowServices) {
+export function createEpicMachine(services: EpicServices) {
   const task = createTaskExecutionMachine(services)
-  const classify = fromPromise<WorkflowState, { state: WorkflowState }>(
+  const classify = fromPromise<EpicState, { state: EpicState }>(
     ({ input }) => Promise.resolve(services.classify(input.state))
   )
   const scout = fromPromise<
-    { state: WorkflowState; report: ScoutReport },
-    { state: WorkflowState; questions?: string[] }
+    { state: EpicState; report: ScoutReport },
+    { state: EpicState; questions?: string[] }
   >(({ input }) => services.scout(input.state, input.questions))
   const plan = fromPromise<
-    { state: WorkflowState; result: string | PlannerContextRequest },
-    { state: WorkflowState; report: ScoutReport }
+    { state: EpicState; result: string | PlannerContextRequest },
+    { state: EpicState; report: ScoutReport }
   >(({ input }) => services.plan(input.state, input.report))
   const planReview = fromPromise<
-    { state: WorkflowState; revised: boolean },
-    { state: WorkflowState; force: boolean }
+    { state: EpicState; revised: boolean },
+    { state: EpicState; force: boolean }
   >(({ input }) => services.reviewPlan(input.state, input.force))
-  const approvePlan = fromPromise<WorkflowState, { state: WorkflowState }>(
+  const approvePlan = fromPromise<EpicState, { state: EpicState }>(
     ({ input }) => services.approvePlan(input.state)
   )
-  const decompose = fromPromise<WorkflowState, { state: WorkflowState }>(
+  const decompose = fromPromise<EpicState, { state: EpicState }>(
     ({ input }) => services.decompose(input.state)
   )
-  const prerequisites = fromPromise<WorkflowState, { state: WorkflowState }>(
+  const prerequisites = fromPromise<EpicState, { state: EpicState }>(
     ({ input }) => services.prerequisites(input.state)
   )
-  const prepare = fromPromise<WorkflowState, { state: WorkflowState }>(
+  const prepare = fromPromise<EpicState, { state: EpicState }>(
     ({ input }) => services.preparePrerequisites(input.state)
   )
   const finalChecks = fromPromise<
-    { state: WorkflowState; result: { passed: boolean } },
-    { state: WorkflowState }
+    { state: EpicState; result: { passed: boolean } },
+    { state: EpicState }
   >(({ input }) => services.checks(input.state, 'final'))
   return setup({
     types: {
-      context: {} as WorkflowMachineContext,
-      input: {} as { state: WorkflowState },
-      events: {} as WorkflowMachineEvent,
+      context: {} as EpicMachineContext,
+      input: {} as { state: EpicState },
+      events: {} as EpicMachineEvent,
     },
     actors: {
       classify,
@@ -114,13 +114,13 @@ export function createWorkflowMachine(services: WorkflowServices) {
       ),
     },
   }).createMachine({
-    id: 'workflow',
+    id: 'epic',
     initial: 'idle',
     context: ({ input }) => ({
       state: { ...input.state, machineSnapshot: undefined },
     }),
     states: {
-      idle: { on: { 'WORKFLOW.START': 'classifying' } },
+      idle: { on: { 'EPIC.START': 'classifying' } },
       classifying: {
         tags: ['active', 'classifying'],
         invoke: {
@@ -132,7 +132,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
           },
           onError: 'terminal.failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'terminal.cancelled' },
+        on: { 'EPIC.CANCEL': 'terminal.cancelled' },
       },
       planning: {
         initial: 'scouting',
@@ -153,9 +153,9 @@ export function createWorkflowMachine(services: WorkflowServices) {
                   focusedQuestions: undefined,
                 }),
               },
-              onError: '#workflow.terminal.failed',
+              onError: '#epic.terminal.failed',
             },
-            on: { 'WORKFLOW.CANCEL': '#workflow.terminal.cancelled' },
+            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
           generating: {
             tags: ['active', 'planning'],
@@ -186,9 +186,9 @@ export function createWorkflowMachine(services: WorkflowServices) {
                   }),
                 },
               ],
-              onError: '#workflow.terminal.failed',
+              onError: '#epic.terminal.failed',
             },
-            on: { 'WORKFLOW.CANCEL': '#workflow.terminal.cancelled' },
+            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
           awaitingReview: {
             tags: ['awaiting-human', 'awaiting-plan-review'],
@@ -196,7 +196,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
               'PLAN.REVIEW': 'revising',
               'PLAN.REVISE': 'revising',
               'PLAN.APPROVE': 'approving',
-              'WORKFLOW.CANCEL': '#workflow.terminal.cancelled',
+              'EPIC.CANCEL': '#epic.terminal.cancelled',
             },
           },
           revising: {
@@ -212,9 +212,9 @@ export function createWorkflowMachine(services: WorkflowServices) {
                 target: 'awaitingReview',
                 actions: assign({ state: ({ event }) => event.output.state }),
               },
-              onError: '#workflow.terminal.failed',
+              onError: '#epic.terminal.failed',
             },
-            on: { 'WORKFLOW.CANCEL': '#workflow.terminal.cancelled' },
+            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
           awaitingApproval: {
             tags: ['awaiting-human', 'awaiting-plan-approval'],
@@ -222,7 +222,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
               'PLAN.REVIEW': 'revising',
               'PLAN.REVISE': 'revising',
               'PLAN.APPROVE': 'approving',
-              'WORKFLOW.CANCEL': '#workflow.terminal.cancelled',
+              'EPIC.CANCEL': '#epic.terminal.cancelled',
             },
           },
           approving: {
@@ -230,12 +230,12 @@ export function createWorkflowMachine(services: WorkflowServices) {
               src: 'approvePlan',
               input: ({ context }) => ({ state: context.state }),
               onDone: {
-                target: '#workflow.decomposingTasks',
+                target: '#epic.decomposingTasks',
                 actions: assign({ state: ({ event }) => event.output }),
               },
-              onError: '#workflow.terminal.failed',
+              onError: '#epic.terminal.failed',
             },
-            on: { 'WORKFLOW.CANCEL': '#workflow.terminal.cancelled' },
+            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
         },
       },
@@ -250,7 +250,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
           },
           onError: 'terminal.failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'terminal.cancelled' },
+        on: { 'EPIC.CANCEL': 'terminal.cancelled' },
       },
       prerequisites: {
         initial: 'checking',
@@ -264,7 +264,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
                 {
                   guard: ({ event }) =>
                     event.output.prerequisites?.length === 0,
-                  target: '#workflow.taskExecution',
+                  target: '#epic.taskExecution',
                   actions: assign({
                     state: ({ event }) => ({
                       ...event.output,
@@ -282,15 +282,15 @@ export function createWorkflowMachine(services: WorkflowServices) {
                   }),
                 },
               ],
-              onError: '#workflow.terminal.failed',
+              onError: '#epic.terminal.failed',
             },
-            on: { 'WORKFLOW.CANCEL': '#workflow.terminal.cancelled' },
+            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
           awaitingApproval: {
             tags: ['awaiting-human', 'awaiting-prerequisite-approval'],
             on: {
               'PREREQUISITES.APPROVE': 'preparing',
-              'WORKFLOW.CANCEL': '#workflow.terminal.cancelled',
+              'EPIC.CANCEL': '#epic.terminal.cancelled',
             },
           },
           preparing: {
@@ -298,7 +298,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
               src: 'prepare',
               input: ({ context }) => ({ state: context.state }),
               onDone: {
-                target: '#workflow.taskExecution',
+                target: '#epic.taskExecution',
                 actions: assign({
                   state: ({ event }) => ({
                     ...event.output,
@@ -306,9 +306,9 @@ export function createWorkflowMachine(services: WorkflowServices) {
                   }),
                 }),
               },
-              onError: '#workflow.terminal.failed',
+              onError: '#epic.terminal.failed',
             },
-            on: { 'WORKFLOW.CANCEL': '#workflow.terminal.cancelled' },
+            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
         },
       },
@@ -326,7 +326,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
                     snapshot: {
                       value: unknown
                       context?: {
-                        state?: WorkflowState
+                        state?: EpicState
                         fastRepairAttempt?: number
                         fullRepairAttempt?: number
                         semanticRepairAttempt?: number
@@ -430,15 +430,15 @@ export function createWorkflowMachine(services: WorkflowServices) {
           'TASK.APPROVE': { actions: 'forwardTask' },
           'TASK.REVIEW': { actions: 'forwardTask' },
           'TASK.REVISE': { actions: 'forwardTask' },
-          'WORKFLOW.RESUME': { actions: 'forwardTask' },
-          'WORKFLOW.CANCEL': { actions: 'forwardTask' },
+          'EPIC.RESUME': { actions: 'forwardTask' },
+          'EPIC.CANCEL': { actions: 'forwardTask' },
         },
       },
       escalating: {
         tags: ['awaiting-human', 'escalated'],
         on: {
-          'WORKFLOW.RESUME': 'taskExecution',
-          'WORKFLOW.CANCEL': 'terminal.cancelled',
+          'EPIC.RESUME': 'taskExecution',
+          'EPIC.CANCEL': 'terminal.cancelled',
         },
       },
       finalVerification: {
@@ -470,7 +470,7 @@ export function createWorkflowMachine(services: WorkflowServices) {
           ],
           onError: 'terminal.failed',
         },
-        on: { 'WORKFLOW.CANCEL': 'terminal.cancelled' },
+        on: { 'EPIC.CANCEL': 'terminal.cancelled' },
       },
       terminal: {
         initial: 'completed',
@@ -486,8 +486,8 @@ export function createWorkflowMachine(services: WorkflowServices) {
 
 export function machineStage(snapshot: {
   value?: unknown
-  context: WorkflowMachineContext
-}): WorkflowStage {
+  context: EpicMachineContext
+}): EpicStage {
   const value = snapshot.value
   if (value === 'classifying') return 'classifying'
   if (value === 'decomposingTasks') return 'decomposing_tasks'
@@ -529,7 +529,7 @@ export function machineStage(snapshot: {
             awaitingReview: 'awaiting_plan_review',
             revising: 'revising_plan',
             awaitingApproval: 'awaiting_plan_approval',
-          } as Record<string, WorkflowStage>
+          } as Record<string, EpicStage>
         )[record.planning] ?? snapshot.context.state.stage
       )
     if (typeof record.prerequisites === 'string')
@@ -539,24 +539,24 @@ export function machineStage(snapshot: {
             checking: 'checking_prerequisites',
             awaitingApproval: 'awaiting_prerequisite_approval',
             preparing: 'preparing_prerequisites',
-          } as Record<string, WorkflowStage>
+          } as Record<string, EpicStage>
         )[record.prerequisites] ?? snapshot.context.state.stage
       )
     if (typeof record.terminal === 'string')
-      return record.terminal as WorkflowStage
+      return record.terminal as EpicStage
   }
   return snapshot.context.state.stage
 }
-export function createServices(ctx: ExtensionCommandContext): WorkflowServices {
-  return createWorkflowServices(ctx)
+export function createServices(ctx: ExtensionCommandContext): EpicServices {
+  return createEpicServices(ctx)
 }
 
 const unavailable = async (): Promise<never> => {
   throw new Error(
-    'Workflow services are unavailable during snapshot initialization.'
+    'Epic services are unavailable during snapshot initialization.'
   )
 }
-export const workflowMachine = createWorkflowMachine({
+export const epicMachine = createEpicMachine({
   ctx: undefined as never,
   notify: () => undefined,
   classify: (state) => state,

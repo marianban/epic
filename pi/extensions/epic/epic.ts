@@ -2,21 +2,21 @@ import * as path from 'node:path'
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import {
   appendEvent,
-  loadActiveWorkflow,
-  persistTask,
+  loadActiveEpic,
+  persistEpic,
   saveState,
 } from './persistence.ts'
-import { createWorkflowState } from './state.ts'
-import { createWorkflowRuntime } from './runtime.ts'
-import type { WorkflowMachineEvent } from './machines/workflow-machine.ts'
-import type { WorkflowState } from './types.ts'
+import { createEpicState } from './state.ts'
+import { createEpicRuntime } from './runtime.ts'
+import type { EpicMachineEvent } from './machines/epic-machine.ts'
+import type { EpicState } from './types.ts'
 
 async function dispatch(
-  state: WorkflowState,
+  state: EpicState,
   ctx: ExtensionCommandContext,
-  event: WorkflowMachineEvent
+  event: EpicMachineEvent
 ): Promise<void> {
-  const runtime = await createWorkflowRuntime(state, ctx)
+  const runtime = await createEpicRuntime(state, ctx)
   try {
     runtime.send(event)
     await runtime.settle()
@@ -29,7 +29,7 @@ async function dispatch(
 
 function notifyNextAction(
   ctx: ExtensionCommandContext,
-  state: WorkflowState,
+  state: EpicState,
   messages: { completed: string; next?: string }
 ): void {
   ctx.ui.notify(
@@ -38,21 +38,21 @@ function notifyNextAction(
   )
 }
 
-export async function startWorkflow(
-  task: string,
+export async function startEpic(
+  epic: string,
   ctx: ExtensionCommandContext
 ): Promise<void> {
-  if (!task.trim()) throw new Error('Usage: /workflow <task>')
+  if (!epic.trim()) throw new Error('Usage: /epic <epic>')
   const root = path.resolve(ctx.cwd)
-  await ensureNoActiveWorkflow(root)
-  const state = createWorkflowState(root, task.trim())
-  await persistTask(state)
-  await appendEvent(state, 'workflow_created', { task: state.task })
-  const runtime = await createWorkflowRuntime(state, ctx)
+  await ensureNoActiveEpic(root)
+  const state = createEpicState(root, epic.trim())
+  await persistEpic(state)
+  await appendEvent(state, 'epic_created', { epic: state.epic })
+  const runtime = await createEpicRuntime(state, ctx)
   try {
     await runtime.sync()
     await saveState(state)
-    runtime.send({ type: 'WORKFLOW.START' })
+    runtime.send({ type: 'EPIC.START' })
     await runtime.settle()
     await runtime.sync()
     await saveState(state)
@@ -66,7 +66,7 @@ export async function startWorkflow(
         ? 'Plan is ready for approval. Use /plan-approve.'
         : undefined
   ctx.ui.notify(
-    [`Workflow ${state.workflowId} started.`, nextAction].filter(Boolean).join(' '),
+    [`Epic ${state.epicId} started.`, nextAction].filter(Boolean).join(' '),
     'info'
   )
 }
@@ -75,13 +75,13 @@ export async function reviewPlan(
   ctx: ExtensionCommandContext,
   force = false
 ): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
+  const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, {
     type: force ? 'PLAN.REVISE' : 'PLAN.REVIEW',
     force,
   })
   notifyNextAction(ctx, state, {
-    completed: `Plan review completed for workflow ${state.workflowId}.`,
+    completed: `Plan review completed for epic ${state.epicId}.`,
     next:
       state.stage === 'awaiting_plan_review'
         ? 'Review plan.md and run /plan-review, or run /plan-approve when satisfied.'
@@ -91,13 +91,13 @@ export async function reviewPlan(
   })
 }
 export async function approvePlan(ctx: ExtensionCommandContext): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
+  const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, { type: 'PLAN.APPROVE' })
   notifyNextAction(ctx, state, {
-    completed: `Plan approved for workflow ${state.workflowId}.`,
+    completed: `Plan approved for epic ${state.epicId}.`,
     next:
       state.stage === 'awaiting_prerequisite_approval'
-        ? 'Review the proposed prerequisite commands and run /workflow-approve-prerequisites to continue.'
+        ? 'Review the proposed prerequisite commands and run /epic-approve-prerequisites to continue.'
         : state.stage === 'awaiting_task_approval'
           ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
           : undefined,
@@ -106,60 +106,60 @@ export async function approvePlan(ctx: ExtensionCommandContext): Promise<void> {
 export async function approvePrerequisites(
   ctx: ExtensionCommandContext
 ): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
+  const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, { type: 'PREREQUISITES.APPROVE' })
   notifyNextAction(ctx, state, {
-    completed: `Prerequisites approved for workflow ${state.workflowId}.`,
+    completed: `Prerequisites approved for epic ${state.epicId}.`,
     next:
       state.stage === 'awaiting_task_approval'
         ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
         : undefined,
   })
 }
-export async function resumeWorkflow(
+export async function resumeEpic(
   ctx: ExtensionCommandContext
 ): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
-  await dispatch(state, ctx, { type: 'WORKFLOW.RESUME' })
+  const state = await loadActiveEpic(ctx.cwd)
+  await dispatch(state, ctx, { type: 'EPIC.RESUME' })
   notifyNextAction(ctx, state, {
-    completed: `Workflow ${state.workflowId} resumed.`,
+    completed: `Epic ${state.epicId} resumed.`,
     next:
       state.stage === 'awaiting_task_review'
         ? `Review Task ${state.currentTaskIndex + 1}'s implementation and run /task-approve, or add R: findings and run /task-review.`
         : state.stage === 'awaiting_task_approval'
           ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
           : state.stage === 'escalating'
-            ? 'Inspect the failure and run /workflow-resume to retry, or /workflow-cancel.'
+            ? 'Inspect the failure and run /epic-resume to retry, or /epic-cancel.'
             : undefined,
   })
 }
-export async function cancelWorkflow(
+export async function cancelEpic(
   ctx: ExtensionCommandContext
 ): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
-  await dispatch(state, ctx, { type: 'WORKFLOW.CANCEL' })
-  ctx.ui.notify(`Workflow ${state.workflowId} cancelled.`)
+  const state = await loadActiveEpic(ctx.cwd)
+  await dispatch(state, ctx, { type: 'EPIC.CANCEL' })
+  ctx.ui.notify(`Epic ${state.epicId} cancelled.`)
 }
 export async function approveTask(ctx: ExtensionCommandContext): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
+  const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, { type: 'TASK.APPROVE' })
   notifyNextAction(ctx, state, {
-    completed: `Task approval processed for workflow ${state.workflowId}.`,
+    completed: `Task approval processed for epic ${state.epicId}.`,
     next:
       state.stage === 'awaiting_task_review'
         ? `Review Task ${state.currentTaskIndex + 1}'s implementation and run /task-approve, or add R: findings and run /task-review.`
         : state.stage === 'awaiting_task_approval'
           ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
           : state.stage === 'escalating'
-            ? 'Inspect the failure and run /workflow-resume to retry, or /workflow-cancel.'
+            ? 'Inspect the failure and run /epic-resume to retry, or /epic-cancel.'
             : undefined,
   })
 }
 export async function reviseTask(ctx: ExtensionCommandContext): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
+  const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, { type: 'TASK.REVIEW' })
   notifyNextAction(ctx, state, {
-    completed: `Task review completed for workflow ${state.workflowId}.`,
+    completed: `Task review completed for epic ${state.epicId}.`,
     next:
       state.stage === 'awaiting_task_approval'
         ? `Task ${state.currentTaskIndex + 1} was revised and is ready for approval. Run /task-approve when satisfied.`
@@ -169,16 +169,16 @@ export async function reviseTask(ctx: ExtensionCommandContext): Promise<void> {
   })
 }
 
-export async function workflowStatus(
+export async function epicStatus(
   ctx: ExtensionCommandContext
 ): Promise<void> {
-  const state = await loadActiveWorkflow(ctx.cwd)
-  const runtime = await createWorkflowRuntime(state, ctx)
+  const state = await loadActiveEpic(ctx.cwd)
+  const runtime = await createEpicRuntime(state, ctx)
   try {
     const task = state.tasks?.[state.currentTaskIndex]
     ctx.ui.notify(
       [
-        `Workflow: ${state.workflowId}`,
+        `Epic: ${state.epicId}`,
         `Stage: ${state.stage}`,
         `Machine state: ${JSON.stringify(runtime.value())}`,
         `Tags: ${Array.from(runtime.tags()).join(', ') || 'none'}`,
@@ -193,12 +193,12 @@ export async function workflowStatus(
   }
 }
 
-async function ensureNoActiveWorkflow(root: string): Promise<void> {
+async function ensureNoActiveEpic(root: string): Promise<void> {
   try {
-    const state = await loadActiveWorkflow(root)
+    const state = await loadActiveEpic(root)
     if (!['completed', 'failed', 'cancelled'].includes(state.stage))
       throw new Error(
-        `Workflow ${state.workflowId} is already active at stage ${state.stage}.`
+        `Epic ${state.epicId} is already active at stage ${state.stage}.`
       )
   } catch (error) {
     if (error instanceof Error && !/ENOENT|no such file/i.test(error.message))

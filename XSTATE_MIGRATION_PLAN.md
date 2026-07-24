@@ -2,13 +2,13 @@
 
 ## Summary
 
-The workflow already behaves like an explicit state machine. It has validated transitions, persisted state, append-only events, human approval gates, bounded repair loops, task iteration, and terminal states.
+The epic already behaves like an explicit state machine. It has validated transitions, persisted state, append-only events, human approval gates, bounded repair loops, task iteration, and terminal states.
 
-Migrating to XState is viable and could improve the representation of hierarchical workflow phases. It is not an urgent requirement, because the current implementation already provides the core safety guarantees. The main benefit would be clearer modeling and maintenance as branching, task-scoped workflows, and resumable activities become more complex.
+Migrating to XState is viable and could improve the representation of hierarchical epic phases. It is not an urgent requirement, because the current implementation already provides the core safety guarantees. The main benefit would be clearer modeling and maintenance as branching, task-scoped epics, and resumable activities become more complex.
 
 Recommendation: first extract and document a hierarchical domain model, then migrate incrementally if the resulting orchestration remains difficult to maintain. Do not perform a wholesale rewrite as the first step.
 
-The current recommendation after reviewing the Stately Agent examples is to use raw XState for the workflow engine. `@statelyai/agent` should remain an optional dependency for a future role that needs autonomous, multi-step model reasoning.
+The current recommendation after reviewing the Stately Agent examples is to use raw XState for the epic engine. `@statelyai/agent` should remain an optional dependency for a future role that needs autonomous, multi-step model reasoning.
 
 ## Findings from Stately Agent examples
 
@@ -33,7 +33,7 @@ delegating: {
 }
 ```
 
-This maps well to a workflow machine invoking a task-execution submachine or a planning submachine. It also shows that nested machines can inherit the parent host's model executors. The useful architectural idea is child-machine composition, not necessarily the Agent package itself; raw XState actors can provide the same workflow composition without making model calls part of the machine contract.
+This maps well to an epic machine invoking a task-execution submachine or a planning submachine. It also shows that nested machines can inherit the parent host's model executors. The useful architectural idea is child-machine composition, not necessarily the Agent package itself; raw XState actors can provide the same epic composition without making model calls part of the machine contract.
 
 ### Human-in-the-loop example
 
@@ -55,16 +55,16 @@ The example warns that the snapshot must be JSON-serializable, that actions alre
 
 The `ai-sdk-game-host` and related step-path examples advance the machine one model call at a time and return a plain checkpoint after each step. The step helpers are synchronous and deterministic; the host performs the model call, persists the checkpoint, and then advances the machine.
 
-This is potentially useful for long-running Scout, Planner, or Reviewer interactions. It is less important for the current implementation, where each Pi role is already an isolated process with a bounded call and the workflow persists artifacts after meaningful stages. If finer-grained recovery is required later, the step-path approach is a candidate for role-level checkpointing.
+This is potentially useful for long-running Scout, Planner, or Reviewer interactions. It is less important for the current implementation, where each Pi role is already an isolated process with a bounded call and the epic persists artifacts after meaningful stages. If finer-grained recovery is required later, the step-path approach is a candidate for role-level checkpointing.
 
 ### `long-running-onboarding` and snapshot-store examples
 
-The long-running onboarding and file-snapshot-store examples are relevant to the workflow's process boundaries. They demonstrate that a machine can pause for days, persist a JSON snapshot in a file or database-like store, and resume in a different process.
+The long-running onboarding and file-snapshot-store examples are relevant to the epic's process boundaries. They demonstrate that a machine can pause for days, persist a JSON snapshot in a file or database-like store, and resume in a different process.
 
 They reinforce two points for this project:
 
 - XState or Agent snapshots can complement the existing `state.json` persistence, but do not replace artifact storage, audit logs, or repository-specific recovery metadata.
-- A userland snapshot store is still required; the library does not become the system of record for workflow artifacts.
+- A userland snapshot store is still required; the library does not become the system of record for epic artifacts.
 
 ### `retrofit` migration example
 
@@ -76,10 +76,10 @@ These examples model agentic loops where the model selects legal events or tools
 
 - the current Planner returns a plan artifact or a bounded `needs_more_context` request;
 - the current Scout performs bounded read-only discovery;
-- the Implementer and Reviewer are invoked by deterministic workflow code;
+- the Implementer and Reviewer are invoked by deterministic epic code;
 - models do not decide whether mandatory checks or approvals can be skipped.
 
-Adopting these patterns for the main workflow would risk moving orchestration authority back into model-selected decisions.
+Adopting these patterns for the main epic would risk moving orchestration authority back into model-selected decisions.
 
 ### Multi-agent composition and fan-out
 
@@ -89,15 +89,15 @@ The multi-agent examples show three composition styles:
 2. A host-owned tool that delegates to another agent implementation.
 3. Sibling child actors coordinating through events.
 
-The current workflow should prefer the first style only where a role genuinely deserves its own stateful subflow. Parallel fan-out is not an immediate fit because tasks modify the same repository and checks have ordering and audit requirements. Parallel Scout work could be considered later, but would need explicit result aggregation, cancellation, resource limits, and deterministic event ordering.
+The current epic should prefer the first style only where a role genuinely deserves its own stateful subflow. Parallel fan-out is not an immediate fit because tasks modify the same repository and checks have ordering and audit requirements. Parallel Scout work could be considered later, but would need explicit result aggregation, cancellation, resource limits, and deterministic event ordering.
 
 ## Current state
 
 The current implementation uses:
 
-- A flat `WorkflowStage` union and `ALLOWED_TRANSITIONS` table.
-- Imperative orchestration in `workflow.ts`.
-- Persisted workflow context in `state.json`.
+- A flat `EpicStage` union and `ALLOWED_TRANSITIONS` table.
+- Imperative orchestration in `epic.ts`.
+- Persisted epic context in `state.json`.
 - Append-only audit events in `events.jsonl`.
 - Human-gated plan, prerequisite, and task approvals.
 - A `currentTaskIndex` for sequential task execution.
@@ -108,10 +108,10 @@ The state hierarchy is currently implicit. Planning, task execution, checking, r
 
 ## Proposed XState model
 
-The main machine should own the complete workflow lifecycle. Nested machines should own cohesive subflows rather than every individual operation.
+The main machine should own the complete epic lifecycle. Nested machines should own cohesive subflows rather than every individual operation.
 
 ```text
-workflow
+epic
 ├── classifying
 ├── planning
 │   ├── scouting
@@ -157,7 +157,7 @@ Repair transitions should remain guarded by persisted attempt counters and confi
 The Stately `subflows` pattern suggests a concrete composition boundary:
 
 ```text
-main workflow machine
+main epic machine
 ├── planning submachine
 ├── prerequisite submachine
 └── task execution submachine
@@ -168,12 +168,12 @@ The child submachines should expose typed inputs and outputs, while the host rem
 
 ## Migration principles
 
-1. Preserve the existing workflow behavior and approval boundaries.
+1. Preserve the existing epic behavior and approval boundaries.
 2. Keep agent execution, filesystem persistence, command execution, and notifications outside the machine definition.
 3. Treat machine events as intent, and keep side effects in explicit actions or invoked services.
-4. Keep persisted workflow state separate from transient XState runtime state where practical.
+4. Keep persisted epic state separate from transient XState runtime state where practical.
 5. Make every transition auditable with the existing event journal.
-6. Do not silently reinterpret old persisted workflow runs under the new schema.
+6. Do not silently reinterpret old persisted epic runs under the new schema.
 7. Prefer incremental replacement with behavior-equivalence tests over a full rewrite.
 
 ## Proposed migration phases
@@ -195,14 +195,14 @@ The child submachines should expose typed inputs and outputs, while the host rem
 
 ### Phase 2: Define a hierarchical domain model
 
-- Define workflow events such as `START`, `SCOUT_COMPLETE`, `PLAN_APPROVE`, `TASK_APPROVE`, `CHECKS_FAILED`, `REVIEW_FAILED`, `HUMAN_REVIEW`, `RESUME`, and `CANCEL`.
+- Define epic events such as `START`, `SCOUT_COMPLETE`, `PLAN_APPROVE`, `TASK_APPROVE`, `CHECKS_FAILED`, `REVIEW_FAILED`, `HUMAN_REVIEW`, `RESUME`, and `CANCEL`.
 - Group existing flat stages into planning, prerequisite, task execution, escalation, and final verification domains.
 - Define guards for plan hashes, task manifests, approval state, pending human actions, and repair limits.
 - Define the persisted context contract independently from the XState machine configuration.
 
 ### Phase 3: Introduce XState behind an adapter
 
-- Add an adapter that maps the existing persisted `WorkflowState` to machine context.
+- Add an adapter that maps the existing persisted `EpicState` to machine context.
 - Map current commands to machine events.
 - Keep existing persistence and event journaling as the source of durable audit history.
 - Run the machine in shadow mode or through targeted tests before allowing it to control production transitions.
@@ -240,9 +240,9 @@ The child submachines should expose typed inputs and outputs, while the host rem
 
 ## Persistence and compatibility
 
-XState does not remove the need for durable persistence. The workflow must continue to persist:
+XState does not remove the need for durable persistence. The epic must continue to persist:
 
-- current workflow state;
+- current epic state;
 - current task and task manifest;
 - plan approval hash and revision;
 - repair counters and limits;
@@ -257,7 +257,7 @@ Persisted state should include an explicit schema or machine version. On load:
 - supported versions may be restored;
 - unsupported or structurally incompatible versions must fail clearly;
 - no automatic compatibility migration should be added unless explicitly designed, tested, and requested;
-- the user should be told which workflow version or persisted state is incompatible and how to recover.
+- the user should be told which epic version or persisted state is incompatible and how to recover.
 
 The existing task-manifest incompatibility guard is a useful precedent. The migration should preserve that behavior rather than silently inventing missing task data.
 
@@ -268,7 +268,7 @@ The existing task-manifest incompatibility guard is a useful precedent. The migr
 - Better visualization and state-graph testing.
 - More reusable task, review, and approval subflows.
 - Less manual branching for repeated task execution and repairs.
-- Easier future support for workflow variants or controlled concurrency.
+- Easier future support for epic variants or controlled concurrency.
 
 ## Costs and risks
 
@@ -285,16 +285,16 @@ The existing task-manifest incompatibility guard is a useful precedent. The migr
 
 XState is likely to reduce maintenance cost for complex branching and nested task flows. It may increase maintenance cost for simple sequential behavior and for contributors unfamiliar with state-machine libraries.
 
-The migration is worthwhile if the workflow continues to gain:
+The migration is worthwhile if the epic continues to gain:
 
-- multiple workflow variants;
+- multiple epic variants;
 - more nested approval or review stages;
 - richer recovery and resume paths;
 - concurrent activities;
 - reusable subflows;
 - a need for visual state inspection.
 
-If the workflow remains sequential and mostly human-gated, refactoring the current code into smaller domain-specific state modules may provide most of the benefit without adopting XState.
+If the epic remains sequential and mostly human-gated, refactoring the current code into smaller domain-specific state modules may provide most of the benefit without adopting XState.
 
 ## Success criteria
 
@@ -307,11 +307,11 @@ The migration should not be considered successful merely because the machine run
 - cancellation never reverts repository changes automatically;
 - persisted runs resume or fail with clear compatibility diagnostics;
 - event journals retain a complete and understandable audit trail;
-- behavior-equivalence tests pass for all existing workflow paths;
+- behavior-equivalence tests pass for all existing epic paths;
 - status output remains useful to users.
 
 ## Final recommendation
 
-Do not migrate the entire workflow immediately. Begin with raw XState, a hierarchical model, and a task-execution submachine behind an adapter. Use the Stately Agent `subflows` pattern as a design reference for typed child-machine boundaries and the `retrofit` example as a migration/testing reference.
+Do not migrate the entire epic immediately. Begin with raw XState, a hierarchical model, and a task-execution submachine behind an adapter. Use the Stately Agent `subflows` pattern as a design reference for typed child-machine boundaries and the `retrofit` example as a migration/testing reference.
 
-Do not add `@statelyai/agent` to the main workflow initially. Reconsider it only if a specific role becomes an autonomous multi-step agent that needs model-selected legal events, built-in request schemas, executor inheritance, or Agent-specific human-input handling. Even then, keep it inside an invoked role actor; the outer workflow machine must continue to own approvals, deterministic verification, repair limits, security boundaries, and terminal transitions.
+Do not add `@statelyai/agent` to the main epic initially. Reconsider it only if a specific role becomes an autonomous multi-step agent that needs model-selected legal events, built-in request schemas, executor inheritance, or Agent-specific human-input handling. Even then, keep it inside an invoked role actor; the outer epic machine must continue to own approvals, deterministic verification, repair limits, security boundaries, and terminal transitions.
