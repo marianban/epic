@@ -1,4 +1,9 @@
 {
+  "inspector": {
+    "enabled": false,
+    "port": 8080,
+    "autoOpen": true
+  },
   "maxScoutRounds": 3,
   "commandTimeoutMs": 120000,
   "agentTimeoutMs": 300000,

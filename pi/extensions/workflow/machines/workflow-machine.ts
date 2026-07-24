@@ -464,6 +464,7 @@ export function machineStage(snapshot: {
         'repairing_full_checks',
         'reviewing',
         'repairing_review',
+        'escalating',
       ].includes(childStage)
     )
       return childStage

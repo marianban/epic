@@ -240,6 +240,11 @@ export interface WorkflowEvent {
 }
 
 export interface WorkflowConfig {
+  inspector?: {
+    enabled?: boolean
+    port?: number
+    autoOpen?: boolean
+  }
   maxScoutRounds?: number
   commandTimeoutMs?: number
   agentTimeoutMs?: number

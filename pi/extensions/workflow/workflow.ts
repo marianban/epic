@@ -16,7 +16,7 @@ async function dispatch(
   ctx: ExtensionCommandContext,
   event: WorkflowMachineEvent
 ): Promise<void> {
-  const runtime = createWorkflowRuntime(state, ctx)
+  const runtime = await createWorkflowRuntime(state, ctx)
   try {
     runtime.send(event)
     await runtime.settle()
@@ -25,6 +25,17 @@ async function dispatch(
   } finally {
     runtime.stop()
   }
+}
+
+function notifyNextAction(
+  ctx: ExtensionCommandContext,
+  state: WorkflowState,
+  messages: { completed: string; next?: string }
+): void {
+  ctx.ui.notify(
+    [messages.completed, messages.next].filter(Boolean).join(' '),
+    state.stage === 'escalating' ? 'warning' : 'info'
+  )
 }
 
 export async function startWorkflow(
@@ -37,7 +48,7 @@ export async function startWorkflow(
   const state = createWorkflowState(root, task.trim())
   await persistTask(state)
   await appendEvent(state, 'workflow_created', { task: state.task })
-  const runtime = createWorkflowRuntime(state, ctx)
+  const runtime = await createWorkflowRuntime(state, ctx)
   try {
     await runtime.sync()
     await saveState(state)
@@ -69,24 +80,58 @@ export async function reviewPlan(
     type: force ? 'PLAN.REVISE' : 'PLAN.REVIEW',
     force,
   })
-  ctx.ui.notify(`Plan review completed for workflow ${state.workflowId}.`)
+  notifyNextAction(ctx, state, {
+    completed: `Plan review completed for workflow ${state.workflowId}.`,
+    next:
+      state.stage === 'awaiting_plan_review'
+        ? 'Review plan.md and run /plan-review, or run /plan-approve when satisfied.'
+        : state.stage === 'awaiting_plan_approval'
+          ? 'Review plan.md and run /plan-approve when satisfied.'
+          : undefined,
+  })
 }
 export async function approvePlan(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd)
   await dispatch(state, ctx, { type: 'PLAN.APPROVE' })
-  ctx.ui.notify(`Plan approved for workflow ${state.workflowId}.`)
+  notifyNextAction(ctx, state, {
+    completed: `Plan approved for workflow ${state.workflowId}.`,
+    next:
+      state.stage === 'awaiting_prerequisite_approval'
+        ? 'Review the proposed prerequisite commands and run /workflow-approve-prerequisites to continue.'
+        : state.stage === 'awaiting_task_approval'
+          ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
+          : undefined,
+  })
 }
 export async function approvePrerequisites(
   ctx: ExtensionCommandContext
 ): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd)
   await dispatch(state, ctx, { type: 'PREREQUISITES.APPROVE' })
+  notifyNextAction(ctx, state, {
+    completed: `Prerequisites approved for workflow ${state.workflowId}.`,
+    next:
+      state.stage === 'awaiting_task_approval'
+        ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
+        : undefined,
+  })
 }
 export async function resumeWorkflow(
   ctx: ExtensionCommandContext
 ): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd)
   await dispatch(state, ctx, { type: 'WORKFLOW.RESUME' })
+  notifyNextAction(ctx, state, {
+    completed: `Workflow ${state.workflowId} resumed.`,
+    next:
+      state.stage === 'awaiting_task_review'
+        ? `Review Task ${state.currentTaskIndex + 1}'s implementation and run /task-approve, or add R: findings and run /task-review.`
+        : state.stage === 'awaiting_task_approval'
+          ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
+          : state.stage === 'escalating'
+            ? 'Inspect the failure and run /workflow-resume to retry, or /workflow-cancel.'
+            : undefined,
+  })
 }
 export async function cancelWorkflow(
   ctx: ExtensionCommandContext
@@ -98,17 +143,37 @@ export async function cancelWorkflow(
 export async function approveTask(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd)
   await dispatch(state, ctx, { type: 'TASK.APPROVE' })
+  notifyNextAction(ctx, state, {
+    completed: `Task approval processed for workflow ${state.workflowId}.`,
+    next:
+      state.stage === 'awaiting_task_review'
+        ? `Review Task ${state.currentTaskIndex + 1}'s implementation and run /task-approve, or add R: findings and run /task-review.`
+        : state.stage === 'awaiting_task_approval'
+          ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
+          : state.stage === 'escalating'
+            ? 'Inspect the failure and run /workflow-resume to retry, or /workflow-cancel.'
+            : undefined,
+  })
 }
 export async function reviseTask(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd)
   await dispatch(state, ctx, { type: 'TASK.REVIEW' })
+  notifyNextAction(ctx, state, {
+    completed: `Task review completed for workflow ${state.workflowId}.`,
+    next:
+      state.stage === 'awaiting_task_approval'
+        ? `Task ${state.currentTaskIndex + 1} was revised and is ready for approval. Run /task-approve when satisfied.`
+        : state.stage === 'awaiting_task_review'
+          ? `Review Task ${state.currentTaskIndex + 1}'s implementation and run /task-approve, or add R: findings and run /task-review.`
+          : undefined,
+  })
 }
 
 export async function workflowStatus(
   ctx: ExtensionCommandContext
 ): Promise<void> {
   const state = await loadActiveWorkflow(ctx.cwd)
-  const runtime = createWorkflowRuntime(state, ctx)
+  const runtime = await createWorkflowRuntime(state, ctx)
   try {
     const task = state.tasks?.[state.currentTaskIndex]
     ctx.ui.notify(

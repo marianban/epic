@@ -12,6 +12,12 @@ Each enabled role runs in a separate `pi --mode json --no-session` process. Mode
 
 The workflow lifecycle is represented by a typed XState v5 actor. The root machine owns planning, prerequisites, sequential task execution, escalation, final verification, and terminal states. Task execution is an invoked child actor with explicit approval, implementation, checks, semantic review, repair, and human-review states. Commands send domain events through the workflow runtime adapter; they cannot bypass machine guards.
 
+## Live inspection
+
+The workflow can be visualized while it runs with Stately Inspector. Set `inspector.enabled` to `true` in `.pi/workflow.config.json`; the extension starts a local WebSocket bridge on port `8080` and opens the inspector automatically. The bridge remains available across workflow commands for the lifetime of the Pi extension process. Set `inspector.port` to use another port or `inspector.autoOpen` to control browser opening. Inspection is disabled by default, and context snapshots are sanitized before they are sent to the inspector. For one-off debugging, `PI_WORKFLOW_INSPECTOR=1` enables it and `PI_WORKFLOW_INSPECTOR=0` disables it; the corresponding environment variables can override the port and auto-open setting.
+
+The inspector shows root and child actor transitions as a live state-machine and sequence view. It is intended for local debugging; do not enable it for workflows whose event or context data must remain private.
+
 The initial Scout is not necessarily the only discovery pass. A Planner may return a focused `needs_more_context` request; the engine sends only those questions to another read-only Scout and gives the merged evidence back to the Planner. This loop is bounded by `maxScoutRounds` (default: 3).
 
 ## Commands

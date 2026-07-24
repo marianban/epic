@@ -3,6 +3,7 @@ import type {
   ScoutReport,
   WorkflowState,
 } from './types.ts'
+import { extractReviewInstructions } from './plan-review.ts'
 
 export function scoutTask(
   state: WorkflowState,
@@ -38,8 +39,9 @@ export function implementerTask(
   taskArtifact = ''
 ): string {
   const task = state.tasks?.[state.currentTaskIndex]
+  const humanInstructions = extractReviewInstructions(taskArtifact)
   return [
-    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify plan.md, task artifacts, or .pi/workflows.',
+    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify plan.md, task artifacts, or .pi/workflows. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
     `Task:\n${state.task}`,
     `Approved plan:\n${plan}`,
     task
@@ -48,6 +50,9 @@ export function implementerTask(
     taskArtifact
       ? `Human-approved task artifact:\n${taskArtifact}`
       : 'No separate task artifact was supplied.',
+    humanInstructions.length
+      ? `Human R: implementation instructions:\n${humanInstructions.map((item) => `- line ${item.lineNumber}: ${item.text}`).join('\n')}`
+      : 'No human R: implementation instructions were supplied.',
     feedback
       ? `Repair feedback:\n${feedback}`
       : 'This is the initial implementation attempt.',

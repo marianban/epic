@@ -24,6 +24,7 @@ import {
   parsePlannerResponse,
   parseTaskDecomposition,
 } from '../pi/extensions/workflow/agents.ts'
+import { implementerTask } from '../pi/extensions/workflow/prompts.ts'
 import { createWorkflowState } from '../pi/extensions/workflow/state.ts'
 import { workflowMachine } from '../pi/extensions/workflow/machines/workflow-machine.ts'
 import {
@@ -99,6 +100,27 @@ test('task execution stage follows the invoked child actor', () => {
     }),
     'awaiting_task_review'
   )
+  assert.equal(
+    machineStage({
+      value: 'taskExecution',
+      context: {
+        state: { ...state, stage: 'escalating' },
+      } as WorkflowMachineContext,
+    }),
+    'escalating'
+  )
+})
+
+test('implementer receives human R instructions from the task artifact', () => {
+  const state = createWorkflowState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const prompt = implementerTask(
+    state,
+    '# Plan',
+    '',
+    '## Human Review Instructions\nR: install the project dependencies before running the dev server.'
+  )
+  assert.match(prompt, /Human R: implementation instructions:/)
+  assert.match(prompt, /install the project dependencies/)
 })
 
 test('post-plan machine state is visible as the plan review stage', async () => {
@@ -308,7 +330,7 @@ test('XState snapshots round-trip and expose machine capabilities', async () => 
     const state = createWorkflowState(root, 'task')
     await saveState(state)
     const loaded = await loadActiveWorkflow(root)
-    const runtime = createWorkflowRuntime(loaded)
+    const runtime = await createWorkflowRuntime(loaded)
     assert.equal(runtime.matches('idle'), true)
     assert.equal(runtime.tags().size, 0)
     runtime.stop()

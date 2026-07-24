@@ -1,4 +1,12 @@
-import { createActor, type Actor, type SnapshotFrom } from 'xstate'
+import {
+  createActor,
+  type Actor,
+  type InspectionEvent,
+  type Observer,
+  type SnapshotFrom,
+} from 'xstate'
+import { createWebSocketInspector } from '@statelyai/inspect'
+import { createInspectorServer } from '@statelyai/inspect/server'
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import {
   createServices,
@@ -7,23 +15,72 @@ import {
   type WorkflowMachineContext,
   type WorkflowMachineEvent,
 } from './machines/workflow-machine.ts'
-import type { WorkflowStage, WorkflowState } from './types.ts'
+import { readConfig } from './tools.ts'
+import type { WorkflowConfig, WorkflowStage, WorkflowState } from './types.ts'
 
 type WorkflowActor = Actor<ReturnType<typeof createWorkflowMachine>>
 
-export function createWorkflowRuntime(
+interface WorkflowInspector {
+  inspect: Observer<InspectionEvent>
+}
+
+// The Pi extension process owns the live workflow session. Keep one relay per
+// port so each short-lived command runtime can reconnect its actor without
+// tearing down the inspector server after the command returns.
+const inspectors = new Map<number, WorkflowInspector>()
+
+function createWorkflowInspector(config: WorkflowConfig['inspector']):
+  | WorkflowInspector
+  | undefined {
+  const enabled =
+    process.env.PI_WORKFLOW_INSPECTOR === '1' || config?.enabled === true
+  if (!enabled || process.env.PI_WORKFLOW_INSPECTOR === '0') return undefined
+
+  const configuredPort = Number(
+    process.env.PI_WORKFLOW_INSPECTOR_PORT ?? config?.port ?? 8080
+  )
+  const port =
+    Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65536
+      ? configuredPort
+      : 8080
+  const existing = inspectors.get(port)
+  if (existing) return existing
+
+  createInspectorServer({
+    port,
+    autoOpen:
+      process.env.PI_WORKFLOW_INSPECTOR_AUTO_OPEN === '1' ||
+      (process.env.PI_WORKFLOW_INSPECTOR_AUTO_OPEN !== '0' &&
+        (config?.autoOpen ?? true)),
+  })
+  const inspector = createWebSocketInspector({
+    url: `ws://localhost:${port}`,
+    sanitizeContext: () => ({}),
+  })
+
+  const result = {
+    inspect: inspector.inspect,
+  }
+  inspectors.set(port, result)
+  return result
+}
+
+export async function createWorkflowRuntime(
   state: WorkflowState,
   ctx?: ExtensionCommandContext
-): WorkflowRuntime {
+): Promise<WorkflowRuntime> {
   const machine = createWorkflowMachine(
     ctx ? createServices(ctx) : createServices(undefined as never)
   )
+  const config = (await readConfig(state.repositoryRoot)) as WorkflowConfig
+  const inspector = createWorkflowInspector(config.inspector)
   const actor = state.machineSnapshot
     ? createActor(machine, {
         snapshot: state.machineSnapshot as SnapshotFrom<typeof machine>,
         input: { state },
+        inspect: inspector?.inspect,
       })
-    : createActor(machine, { input: { state } })
+    : createActor(machine, { input: { state }, inspect: inspector?.inspect })
   actor.start()
   return new WorkflowRuntime(state, actor)
 }
