@@ -321,11 +321,40 @@ export function createWorkflowMachine(services: WorkflowServices) {
           onSnapshot: {
             actions: assign({
               state: ({ context, event }) => {
-                const childValue = String(
-                  (event as { snapshot: { value: unknown } }).snapshot.value
-                )
-                return {
+                const childSnapshot = (
+                  event as {
+                    snapshot: {
+                      value: unknown
+                      context?: {
+                        state?: WorkflowState
+                        fastRepairAttempt?: number
+                        fullRepairAttempt?: number
+                        semanticRepairAttempt?: number
+                      }
+                    }
+                  }
+                ).snapshot
+                const childValue = String(childSnapshot.value)
+                const childContext = childSnapshot.context
+                const childState = childContext?.state
+                const synchronizedState = {
                   ...context.state,
+                  ...childState,
+                  fastRepairAttempt:
+                    childContext?.fastRepairAttempt ??
+                    childState?.fastRepairAttempt ??
+                    context.state.fastRepairAttempt,
+                  fullRepairAttempt:
+                    childContext?.fullRepairAttempt ??
+                    childState?.fullRepairAttempt ??
+                    context.state.fullRepairAttempt,
+                  semanticRepairAttempt:
+                    childContext?.semanticRepairAttempt ??
+                    childState?.semanticRepairAttempt ??
+                    context.state.semanticRepairAttempt,
+                }
+                return {
+                  ...synchronizedState,
                   stage: taskStage(childValue),
                   pendingHumanAction: [
                     'awaitingApproval',

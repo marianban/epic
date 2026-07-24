@@ -43,6 +43,7 @@ import {
 import { createTaskExecutionMachine } from '../pi/extensions/workflow/machines/task-execution-machine.ts'
 import type { WorkflowMachineContext } from '../pi/extensions/workflow/machines/workflow-machine.ts'
 import type { WorkflowServices } from '../pi/extensions/workflow/services.ts'
+import type { WorkflowState } from '../pi/extensions/workflow/types.ts'
 
 const validPlan = `# Implementation Plan
 
@@ -234,6 +235,69 @@ test('task escalation keeps durable root and snapshot stages aligned', async () 
   assert.equal(snapshot.context.state.pendingHumanAction, 'resolve_escalation')
   assert.equal(persisted.value, 'escalating')
   assert.equal(persisted.context.state.stage, 'escalating')
+  actor.stop()
+})
+
+test('task child snapshots synchronize approval and repair counters to the root', async () => {
+  const state = createWorkflowState('/repo', 'task')
+  const services = createTestWorkflowServices()
+  services.implement = async (value, feedback = '') => ({
+    ...value,
+    implementationAttempt: value.implementationAttempt + (feedback ? 0 : 1),
+  })
+  services.review = async (value) => ({
+    state: value,
+    result: {
+      passed: false,
+      summary: 'verification evidence is missing',
+      acceptanceCriteria: [],
+      findings: [],
+      requiresPlanRevision: false,
+    },
+  })
+  const actor = createActor(createWorkflowMachine(services), {
+    input: { state },
+  })
+  actor.start()
+  actor.send({ type: 'WORKFLOW.START' })
+  for (
+    let i = 0;
+    i < 20 && JSON.stringify(actor.getSnapshot().value) !==
+      JSON.stringify({ planning: 'awaitingReview' });
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'PLAN.APPROVE' })
+  const child = () =>
+    actor.getSnapshot().children['task-execution']?.getSnapshot?.() as
+      | {
+          value?: unknown
+          context?: {
+            semanticRepairAttempt?: number
+            state?: WorkflowState
+          }
+        }
+      | undefined
+  for (let i = 0; i < 20 && child()?.value !== 'awaitingApproval'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let i = 0; i < 100 && child()?.value !== 'escalating'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const snapshot = actor.getSnapshot()
+  const childSnapshot = child()
+  assert.equal(childSnapshot?.value, 'escalating')
+  assert.equal(snapshot.context.state.stage, 'escalating')
+  assert.equal(snapshot.context.state.taskApproved, true)
+  assert.equal(snapshot.context.state.implementationAttempt, 1)
+  assert.equal(snapshot.context.state.semanticRepairAttempt, 2)
+  assert.equal(childSnapshot?.context?.semanticRepairAttempt, 2)
+  assert.equal(childSnapshot?.context?.state?.taskApproved, true)
+  const persisted = actor.getPersistedSnapshot() as unknown as {
+    context: { state: WorkflowState }
+  }
+  assert.equal(persisted.context.state.taskApproved, true)
+  assert.equal(persisted.context.state.semanticRepairAttempt, 2)
   actor.stop()
 })
 
