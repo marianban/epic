@@ -165,6 +165,8 @@ test('task execution actor exposes final output to its invoking parent', async (
   for (let i = 0; i < 10 && actor.getSnapshot().value !== 'awaitingReview'; i++)
     await new Promise((resolve) => setTimeout(resolve, 0))
   assert.equal(actor.getSnapshot().value, 'awaitingReview')
+  assert.equal(actor.getSnapshot().context.state.taskApproved, true)
+  assert.ok(actor.getSnapshot().context.state.taskApprovedAt)
 
   actor.send({ type: 'TASK.APPROVE' })
   await new Promise((resolve) => setTimeout(resolve, 0))
@@ -173,6 +175,65 @@ test('task execution actor exposes final output to its invoking parent', async (
     (actor.getSnapshot().output as { kind?: string } | undefined)?.kind,
     'completed'
   )
+  actor.stop()
+})
+
+test('task escalation keeps durable root and snapshot stages aligned', async () => {
+  const state = createWorkflowState('/repo', 'task')
+  const services = createTestWorkflowServices()
+  services.checks = async (value, suite) => {
+    if (suite === 'full') throw new Error('full checks unavailable')
+    return {
+      state: value,
+      result: {
+        suite,
+        passed: true,
+        checks: [],
+        introducedFindings: [],
+        preExistingFindings: [],
+        deferredChecks: [],
+      },
+    }
+  }
+  const actor = createActor(createWorkflowMachine(services), {
+    input: { state },
+  })
+  actor.start()
+  actor.send({ type: 'WORKFLOW.START' })
+  for (
+    let i = 0;
+    i < 10 && JSON.stringify(actor.getSnapshot().value) !==
+      JSON.stringify({ planning: 'awaitingReview' });
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'PLAN.APPROVE' })
+  const childValue = () =>
+    (
+      actor.getSnapshot().children['task-execution']?.getSnapshot?.() as
+        | { value?: unknown }
+        | undefined
+    )?.value
+  for (
+    let i = 0;
+    i < 10 && childValue() !== 'awaitingApproval';
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let i = 0; i < 10 && actor.getSnapshot().value !== 'escalating'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const snapshot = actor.getSnapshot()
+  const persisted = actor.getPersistedSnapshot() as unknown as {
+    value: unknown
+    context: { state: { stage: string; pendingHumanAction?: string } }
+  }
+  assert.equal(snapshot.value, 'escalating')
+  assert.equal(snapshot.context.state.stage, 'escalating')
+  assert.equal(snapshot.context.state.pendingHumanAction, 'resolve_escalation')
+  assert.equal(persisted.value, 'escalating')
+  assert.equal(persisted.context.state.stage, 'escalating')
   actor.stop()
 })
 
@@ -492,6 +553,57 @@ test('task check policy defers checks per task but final verification runs them'
       ['final-1', 'build']
     )
     assert.equal(finalResult.checks[1].skipped, undefined)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('task check policy skips discovered checks that are not required', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-task-check-allowlist-'))
+  try {
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({
+        scripts: { build: 'node -e "process.exit(0)"' },
+      })
+    )
+    const state = createWorkflowState(root, 'task')
+    state.tasks = [
+      {
+        id: 'task-001',
+        title: 'Documentation',
+        objective: 'Document the project.',
+        scope: { read: [], modify: [], create: ['README.md'], delete: [] },
+        implementation: ['Create README.md.'],
+        acceptanceCriteria: ['The README exists.'],
+        verification: ['git diff --check'],
+        manualReviewSteps: ['Inspect README.md.'],
+        risks: [],
+        requiredChecks: ['diff-check'],
+        deferredChecks: [],
+        reason: 'The task does not change runtime code.',
+      },
+    ]
+    await saveState(state)
+
+    const result = await runCheckSuite('full', state)
+
+    assert.equal(result.passed, true)
+    assert.deepEqual(result.deferredChecks, [])
+    assert.deepEqual(result.checks[0], {
+      name: 'build',
+      command: 'npm run build',
+      passed: true,
+      required: false,
+      exitCode: 0,
+      durationMs: 0,
+      stdoutPreview: '',
+      stderrPreview: '',
+      findings: [],
+      outputTruncated: false,
+      skipped: true,
+      skipReason: 'Not required by task check policy.',
+    })
   } finally {
     await rm(root, { recursive: true, force: true })
   }

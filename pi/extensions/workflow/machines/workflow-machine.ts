@@ -320,23 +320,23 @@ export function createWorkflowMachine(services: WorkflowServices) {
           input: ({ context }) => ({ state: context.state }),
           onSnapshot: {
             actions: assign({
-              state: ({ context, event }) => ({
-                ...context.state,
-                stage: taskStage(
+              state: ({ context, event }) => {
+                const childValue = String(
                   (event as { snapshot: { value: unknown } }).snapshot.value
-                ),
-                pendingHumanAction: [
-                  'awaitingApproval',
-                  'awaitingReview',
-                  'escalating',
-                ].includes(
-                  String(
-                    (event as { snapshot: { value: unknown } }).snapshot.value
-                  )
                 )
-                  ? 'review_task'
-                  : context.state.pendingHumanAction,
-              }),
+                return {
+                  ...context.state,
+                  stage: taskStage(childValue),
+                  pendingHumanAction: [
+                    'awaitingApproval',
+                    'awaitingReview',
+                  ].includes(childValue)
+                    ? 'review_task'
+                    : childValue === 'escalating'
+                      ? 'resolve_escalation'
+                      : context.state.pendingHumanAction,
+                }
+              },
             }),
           },
           onDone: [
@@ -378,7 +378,23 @@ export function createWorkflowMachine(services: WorkflowServices) {
                   (event.output as TaskExecutionResult).state,
               }),
             },
-            { target: 'escalating' },
+            {
+              target: 'escalating',
+              actions: assign({
+                state: ({ event }) => {
+                  const result = event.output as TaskExecutionResult
+                  return {
+                    ...result.state,
+                    stage: 'escalating',
+                    pendingHumanAction: 'resolve_escalation',
+                    failureReason:
+                      result.reason ??
+                      result.state.failureReason ??
+                      'Task actor failed.',
+                  }
+                },
+              }),
+            },
           ],
         },
         on: {

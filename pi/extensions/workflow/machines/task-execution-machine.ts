@@ -60,6 +60,16 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
       semanticRepairAvailable: ({ context }) =>
         context.semanticRepairAttempt < context.state.maxSemanticRepairs,
     },
+    actions: {
+      markTaskApproved: assign({
+        state: ({ context }) => ({
+          ...context.state,
+          taskApproved: true,
+          taskApprovedAt: new Date().toISOString(),
+          pendingHumanAction: 'none',
+        }),
+      }),
+    },
   }).createMachine({
     id: 'taskExecution',
     initial: 'awaitingApproval',
@@ -77,7 +87,10 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
       awaitingApproval: {
         tags: ['awaiting-human', 'awaiting-task-approval'],
         on: {
-          'TASK.APPROVE': 'implementing',
+          'TASK.APPROVE': {
+            target: 'implementing',
+            actions: 'markTaskApproved',
+          },
           'TASK.REVIEW': 'revisingTask',
           'WORKFLOW.CANCEL': 'cancelled',
         },
@@ -272,7 +285,7 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
       awaitingReview: {
         tags: ['awaiting-human', 'awaiting-task-review'],
         on: {
-          'TASK.APPROVE': 'done',
+          'TASK.APPROVE': { target: 'done', actions: 'markTaskApproved' },
           'TASK.REVIEW': 'repairingReviewInvoke',
           'TASK.REVISE': 'revisingTask',
           'WORKFLOW.CANCEL': 'cancelled',
@@ -282,7 +295,10 @@ export function createTaskExecutionMachine(services: WorkflowServices) {
         tags: ['awaiting-human', 'escalated'],
         on: {
           'WORKFLOW.RESUME': 'implementing',
-          'TASK.APPROVE': 'implementing',
+          'TASK.APPROVE': {
+            target: 'implementing',
+            actions: 'markTaskApproved',
+          },
           'WORKFLOW.CANCEL': 'cancelled',
         },
       },

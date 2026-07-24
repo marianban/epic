@@ -324,19 +324,39 @@ export async function runCheckSuite(
     suite === 'final'
       ? await resolveFinalCheckDefinitions(state.repositoryRoot, state)
       : await resolveCheckDefinitions(state.repositoryRoot, suite)
+  if (policy) {
+    const otherSuite = suite === 'fast' ? 'full' : 'fast'
+    const otherDefinitions = await resolveCheckDefinitions(
+      state.repositoryRoot,
+      otherSuite
+    )
+    const availableNames = new Set(
+      [...resolvedDefinitions, ...otherDefinitions].map(
+        (definition) => definition.name
+      )
+    )
+    const missingRequired = policy.requiredChecks.filter(
+      (name) => !availableNames.has(name)
+    )
+    if (missingRequired.length)
+      throw new Error(
+        `Task ${state.tasks?.[state.currentTaskIndex]?.id ?? state.currentTaskIndex} requires unavailable check(s): ${missingRequired.join(', ')}.`
+      )
+  }
   const definitions = resolvedDefinitions.map((definition) => {
     if (!policy) return definition
     const required = policy.requiredChecks.includes(definition.name)
     const deferred = policy.deferredChecks.includes(definition.name)
-    if (!required && !deferred)
-      throw new Error(
-        `Task ${state.tasks?.[state.currentTaskIndex]?.id ?? state.currentTaskIndex} check policy does not classify ${definition.name} for the ${suite} suite.`
-      )
+    const skipped = !required
     return {
       ...definition,
       required,
-      skipped: deferred,
-      skipReason: deferred ? policy.reason : undefined,
+      skipped,
+      skipReason: skipped
+        ? deferred
+          ? policy.reason
+          : 'Not required by task check policy.'
+        : undefined,
     }
   })
   const timeoutMs = config.commandTimeoutMs ?? DEFAULT_TIMEOUT_MS
@@ -436,8 +456,13 @@ export async function runCheckSuite(
     preExistingFindings: allFindings.filter(
       (finding) => finding.introduced === false
     ),
-    deferredChecks: checks
-      .filter((check) => check.skipped)
-      .map((check) => check.name),
+    deferredChecks: policy
+      ? checks
+          .filter(
+            (check) =>
+              check.skipped && policy.deferredChecks.includes(check.name)
+          )
+          .map((check) => check.name)
+      : [],
   }
 }
