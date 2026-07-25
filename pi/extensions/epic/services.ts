@@ -87,10 +87,23 @@ export function createEpicServices(
     prompt: string,
     action: string
   ): Promise<AgentRunResult> => {
-    await appendEvent(state, 'agent_started', { role, action })
+    const agentRunDirectory = path.join(
+      state.repositoryRoot,
+      '.pi',
+      'epics',
+      'runs',
+      state.epicId,
+      'agent-runs'
+    )
+    await appendEvent(state, 'agent_started', {
+      role,
+      action,
+      agentRunDirectory,
+    })
     notify(`${role} started: ${action}.`)
     const result = await runAgentActor({
       repositoryRoot: state.repositoryRoot,
+      agentRunDirectory,
       role,
       prompt,
       signal: ctx.signal,
@@ -101,6 +114,7 @@ export function createEpicServices(
       role,
       action,
       exitCode: result.exitCode,
+      stdoutLogPath: result.stdoutLogPath,
       usage: result.usage,
     })
     return result

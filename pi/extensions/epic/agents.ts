@@ -11,6 +11,7 @@ import type {
   EpicConfig,
   EpicTask,
 } from './types.ts'
+import { createAgentRunStdoutLog } from './agent-runs.ts'
 import { readConfig, redactSecrets } from './tools.ts'
 
 const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
@@ -92,9 +93,11 @@ export interface AgentRunResult {
   exitCode: number
   output: string
   stderr: string
+  stdoutLogPath: string
   usage?: Record<string, unknown>
 }
 export interface AgentRunOptions {
+  agentRunDirectory: string
   signal?: AbortSignal
   onProgress?: (message: string) => void
 }
@@ -151,7 +154,7 @@ export async function runAgent(
   root: string,
   role: AgentRole,
   userPrompt: string,
-  options: AgentRunOptions = {}
+  options: AgentRunOptions
 ): Promise<AgentRunResult> {
   const profile = await getAgentProfile(root, role)
   const systemPrompt = await readPrompt(root, profile.systemPromptPath)
@@ -185,6 +188,7 @@ export async function runAgent(
   const config = (await readConfig(root)) as EpicConfig
   const timeoutMs = profile.timeoutMs ?? config.agentTimeoutMs ?? 300_000
   const invocation = getPiInvocation(args)
+  const stdoutLog = createAgentRunStdoutLog(options.agentRunDirectory, role)
   return new Promise((resolve, reject) => {
     const child = spawn(invocation.command, invocation.args, {
       cwd: root,
@@ -205,6 +209,7 @@ export async function runAgent(
     const cleanup = () => {
       clearTimeout(timer)
       clearInterval(heartbeat)
+      stdoutLog.close()
       void fs.rm(promptDir, { recursive: true, force: true })
     }
     const fail = (error: Error) => {
@@ -214,7 +219,14 @@ export async function runAgent(
       reject(error)
     }
     child.stdout.on('data', (chunk: Buffer) => {
-      stdout += chunk.toString()
+      try {
+        stdoutLog.append(chunk)
+        stdout += chunk.toString()
+      } catch (error) {
+        fail(error instanceof Error ? error : new Error(String(error)))
+        child.kill('SIGTERM')
+        return
+      }
       if (!progressNotified) {
         progressNotified = true
         options.onProgress?.(`${role} started producing output.`)
@@ -279,6 +291,7 @@ export async function runAgent(
         exitCode: exitCode ?? 1,
         output: output || redactSecrets(stdout).slice(-100_000),
         stderr: redactSecrets(stderr).slice(-20_000),
+        stdoutLogPath: stdoutLog.filePath,
         usage: agentEnd?.usage as Record<string, unknown> | undefined,
       })
     })

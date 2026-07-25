@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
@@ -16,6 +16,7 @@ import {
   logEpic,
   epicLogPath,
 } from '../pi/extensions/epic/logger.ts'
+import { createAgentRunStdoutLog } from '../pi/extensions/epic/agent-runs.ts'
 import {
   extractReviewInstructions,
   hashPlan,
@@ -172,6 +173,33 @@ test('task execution stage follows the invoked child actor', () => {
     }),
     'escalating'
   )
+})
+
+test('agent stdout is persisted to a unique per-run log before close', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-agent-runs-'))
+  try {
+    const directory = join(root, 'agent-runs')
+    const first = createAgentRunStdoutLog(directory, 'planner')
+    first.append(Buffer.from('{"type":"message_start"}\n'))
+    assert.equal(
+      await readFile(first.filePath, 'utf8'),
+      '{"type":"message_start"}\n'
+    )
+    first.close()
+
+    const second = createAgentRunStdoutLog(directory, 'planner')
+    second.append(Buffer.from('{"type":"agent_end"}\n'))
+    second.close()
+
+    assert.notEqual(first.filePath, second.filePath)
+    assert.deepEqual((await readdir(directory)).sort(), [
+      first.filePath.split('/').pop(),
+      second.filePath.split('/').pop(),
+    ].sort())
+    assert.equal(await readFile(second.filePath, 'utf8'), '{"type":"agent_end"}\n')
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('task execution actor exposes final output to its invoking parent', async () => {

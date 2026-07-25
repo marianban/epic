@@ -4,6 +4,7 @@ import type { AgentRole } from '../types.ts'
 
 interface AgentActorInput {
   repositoryRoot: string
+  agentRunDirectory: string
   role: Exclude<AgentRole, 'orchestrator'>
   prompt: string
   signal?: AbortSignal
@@ -12,6 +13,7 @@ interface AgentActorInput {
 
 const agentActor = fromPromise<AgentRunResult, AgentActorInput>(({ input }) =>
   runAgent(input.repositoryRoot, input.role, input.prompt, {
+    agentRunDirectory: input.agentRunDirectory,
     signal: input.signal,
     onProgress: input.onProgress,
   })

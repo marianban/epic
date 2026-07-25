@@ -39,7 +39,7 @@ After approval, the Planner writes a persisted task manifest and one artifact pe
 
 ## Persistence and checks
 
-Runs are stored under `.pi/epics/runs/<epic-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `epic.log`, `Epic.md`, task, and plan revisions. `epic.log` contains timestamped structured records for state changes, agent lifecycle/output, progress, and verification commands; secrets are redacted before writing. `.pi/epics/` is ignored; `plan.md` is intentionally not ignored.
+Runs are stored under `.pi/epics/runs/<epic-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `epic.log`, per-invocation raw stdout files under `agent-runs/`, `Epic.md`, task, and plan revisions. Agent stdout is written incrementally to a new private file for every role invocation so it remains available if the parent process crashes. `.pi/epics/` is ignored; `plan.md` is intentionally not ignored.
 
 `state.json` contains a versioned hierarchical XState persisted snapshot together with durable epic context and artifact references. The current schema/machine version is `3/5`. Older or malformed snapshots, including snapshots from before this domain rename and partial-migration snapshots, are reported as incompatible and are not silently migrated; start a new epic unless an explicit migration is added later.
 
