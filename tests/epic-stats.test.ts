@@ -12,6 +12,23 @@ const identityTheme = {
   bold: (text: string) => text,
 } as unknown as Theme
 
+function stripTerminalControls(value: string): string {
+  const escape = String.fromCharCode(27)
+  const sequenceStart = `${escape}]8;;`
+  const sequenceEnd = `${escape}\\`
+  let result = ''
+  let cursor = 0
+  while (cursor < value.length) {
+    const start = value.indexOf(sequenceStart, cursor)
+    if (start === -1) return result + value.slice(cursor)
+    result += value.slice(cursor, start)
+    const end = value.indexOf(sequenceEnd, start + sequenceStart.length)
+    if (end === -1) return result + value.slice(start)
+    cursor = end + sequenceEnd.length
+  }
+  return result
+}
+
 function task(index: number): EpicTask {
   return {
     id: 'task-1',
@@ -70,10 +87,18 @@ function dashboard(name = 'Arkanoid Phaser Migration'): DashboardState {
 test('renders the wide epic stats layout and representative metrics', () => {
   const lines = new EpicStats(dashboard(), identityTheme).render(100)
   const output = lines.join('\n')
+  const visibleOutput = stripTerminalControls(output)
 
   assert.match(output, /EPIC/)
-  assert.match(output, /Arkanoid Phaser Migration ⚠ ESCALATING/)
-  assert.match(output, /20260724164024-b3195daa/)
+  assert.match(visibleOutput, /Prompt: Arkanoid Phaser Migration/)
+  assert.match(visibleOutput, /Run ID: 20260724164024-b3195daa/)
+  assert.doesNotMatch(visibleOutput, /ESCALATING/)
+  const escape = String.fromCharCode(27)
+  assert.ok(
+    output.includes(
+      `${escape}]8;;file:///repo/.pi/epics/runs/20260724164024-b3195daa${escape}\\`
+    )
+  )
   const taskLine = lines.find((line) => line.includes('Tasks'))
   const criteriaLine = lines.find((line) => line.includes('Criteria'))
   assert.ok(taskLine)
@@ -127,37 +152,4 @@ test('truncates long labels and keeps every line within the requested width', ()
 
   assert.ok(lines.some((line) => line.includes('…')))
   assert.ok(lines.every((line) => visibleWidth(line) <= 32))
-})
-
-test('uses semantic theme colors for dashboard statuses', () => {
-  const colors: string[] = []
-  const theme = {
-    fg: (color: string, text: string) => {
-      colors.push(color)
-      return text
-    },
-    bold: (text: string) => text,
-  } as unknown as Theme
-
-  const cases = [
-    ['completed', 'success'],
-    ['failed', 'error'],
-    ['awaiting_plan_review', 'warning'],
-    ['implementing', 'accent'],
-  ] as const
-
-  for (const [stage, expectedColor] of cases) {
-    const state = createEpicState('/repo', 'Status test')
-    state.stage = stage
-    const dashboardState = DashboardState.fromRun({
-      state,
-      events: [],
-      ...(stage === 'completed' || stage === 'failed'
-        ? { completedAt: state.updatedAt }
-        : {}),
-    })
-    colors.length = 0
-    new EpicStats(dashboardState, theme).render(100)
-    assert.ok(colors.includes(expectedColor), `${stage} should use ${expectedColor}`)
-  }
 })

@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import type { EpicEvent, EpicStage, EpicState, EpicTask } from '../types.ts'
 import {
   type DashboardAction,
@@ -426,6 +427,13 @@ export function projectDashboardState(
 
   const epic: EpicDashboardState = {
     id: input.state.epicId,
+    runDirectory: join(
+      input.state.repositoryRoot,
+      '.pi',
+      'epics',
+      'runs',
+      input.state.epicId
+    ),
     name: input.state.epic,
     status: dashboardStatus(input.state),
     startedAt: input.state.createdAt,

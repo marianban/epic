@@ -45,6 +45,7 @@ export interface DashboardActionRequest {
 
 export interface EpicDashboardState {
   readonly id: string
+  readonly runDirectory: string
   readonly name: string
   readonly status: EpicDashboardStatus
   readonly startedAt?: string

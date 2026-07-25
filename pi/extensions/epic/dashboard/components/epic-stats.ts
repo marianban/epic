@@ -1,14 +1,17 @@
 import type { Component } from '@earendil-works/pi-tui'
-import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
+import {
+  hyperlink,
+  truncateToWidth,
+  visibleWidth,
+} from '@earendil-works/pi-tui'
 import type { Theme } from '@earendil-works/pi-coding-agent'
+import { pathToFileURL } from 'node:url'
 import { DashboardState } from '../state.ts'
 import type { EpicDashboardState, ProgressMetric } from '../types.ts'
 
 const COMPACT_BREAKPOINT = 80
 const WIDE_BAR_WIDTH = 20
 const COMPACT_BAR_WIDTH = 10
-
-type Color = (text: string) => string
 
 function pad(value: number): string {
   return String(value).padStart(2, '0')
@@ -41,24 +44,6 @@ function formatTokens(total: number): string {
   }
   const value = total / 1_000_000
   return `${value.toFixed(value < 10 ? 1 : 0).replace(/\.0$/, '')}M`
-}
-
-function statusColor(
-  status: EpicDashboardState['status'],
-  theme: Theme
-): Color {
-  switch (status) {
-    case 'completed':
-      return (text) => theme.fg('success', text)
-    case 'failed':
-      return (text) => theme.fg('error', text)
-    case 'escalating':
-    case 'review':
-    case 'refinement':
-      return (text) => theme.fg('warning', text)
-    default:
-      return (text) => theme.fg('accent', text)
-  }
 }
 
 function progressBar(
@@ -148,12 +133,22 @@ function titleLine(
   width: number,
   theme: Theme
 ): string {
-  const color = statusColor(epic.status, theme)
-  const status = `${epic.status === 'escalating' ? '⚠ ' : ''}${epic.status.toUpperCase()}`
-  const suffix = ` ${status}`
-  const nameWidth = Math.max(0, width - visibleWidth(suffix))
-  const name = truncateToWidth(epic.name, nameWidth, '…')
-  return theme.bold(theme.fg('text', name)) + color(suffix)
+  const prefix = 'Prompt: '
+  const name = truncateToWidth(epic.name, Math.max(0, width - prefix.length), '…')
+  return theme.bold(theme.fg('text', `${prefix}${name}`))
+}
+
+function runIdLine(
+  epic: EpicDashboardState,
+  width: number,
+  theme: Theme
+): string {
+  const runId = hyperlink(epic.id, pathToFileURL(epic.runDirectory).toString())
+  return truncateToWidth(
+    `${theme.fg('muted', 'Run ID:')} ${theme.fg('dim', runId)}`,
+    width,
+    '…'
+  )
 }
 
 function attemptsLine(epic: EpicDashboardState, theme: Theme): string {
@@ -226,7 +221,7 @@ export class EpicStats implements Component {
     return [
       framedTop(width, theme),
       framedLine(titleLine(epic, innerWidth, theme), width, theme),
-      framedLine(theme.fg('dim', epic.id), width, theme),
+      framedLine(runIdLine(epic, innerWidth, theme), width, theme),
       framedLine('', width, theme),
       ...progressRows.map((row) => framedLine(row, width, theme)),
       framedLine(attemptsLine(epic, theme), width, theme),
@@ -253,7 +248,7 @@ export class EpicStats implements Component {
     return [
       framedTop(width, theme),
       framedLine(titleLine(epic, innerWidth, theme), width, theme),
-      framedLine(theme.fg('dim', epic.id), width, theme),
+      framedLine(runIdLine(epic, innerWidth, theme), width, theme),
       framedLine('', width, theme),
       ...progressRows.map((row) => framedLine(row, width, theme)),
       framedLine(attemptsLine(epic, theme), width, theme),
