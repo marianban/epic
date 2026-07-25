@@ -73,27 +73,47 @@ function progressBar(
   return completed + remaining
 }
 
-function progressRow(
-  label: string,
-  metric: ProgressMetric,
+function progressGrid(
+  rows: readonly { label: string; metric: ProgressMetric }[],
   width: number,
   preferredBarWidth: number,
   theme: Theme,
-  suffix = ''
-): string {
-  const count = `${metric.completed} / ${metric.total}`
-  const percent = `${Math.round(metric.percent)}%`
-  const prefix = `${label} ${count}`
-  const tail = `${percent}${suffix ? ` ${suffix}` : ''}`
-  const availableBarWidth = Math.max(
-    0,
-    width - visibleWidth(prefix) - visibleWidth(tail) - 2
+  agentTime?: string
+): string[] {
+  const labelWidth = Math.max(
+    ...rows.map(({ label }) => visibleWidth(label))
   )
-  const barWidth = Math.min(preferredBarWidth, availableBarWidth)
-  const bar = progressBar(metric, barWidth, theme)
-  return [theme.fg('muted', prefix), bar, theme.fg('text', tail)]
-    .filter((part) => part.length > 0)
-    .join(' ')
+  const countWidth = Math.max(
+    ...rows.map(({ metric }) =>
+      visibleWidth(`${metric.completed} / ${metric.total}`)
+    )
+  )
+  const percentWidth = Math.max(
+    ...rows.map(({ metric }) => visibleWidth(`${Math.round(metric.percent)}%`))
+  )
+  const agentTimeWidth = agentTime === undefined ? 0 : visibleWidth(agentTime)
+  const fixedWidth = labelWidth + countWidth + percentWidth + 3
+  const reservedAgentTimeWidth = agentTime === undefined ? 0 : agentTimeWidth + 1
+  const barWidth = Math.min(
+    preferredBarWidth,
+    Math.max(0, width - fixedWidth - reservedAgentTimeWidth)
+  )
+
+  return rows.map(({ label, metric }, index) => {
+    const count = `${metric.completed} / ${metric.total}`
+    const percent = `${Math.round(metric.percent)}%`
+    const row = [
+      theme.fg('muted', label.padEnd(labelWidth)),
+      theme.fg('muted', count.padStart(countWidth)),
+      progressBar(metric, barWidth, theme),
+      theme.fg('text', percent.padStart(percentWidth)),
+    ].join(' ')
+
+    if (index !== 0 || agentTime === undefined) return row
+
+    const gap = Math.max(1, width - visibleWidth(row) - agentTimeWidth)
+    return `${row}${' '.repeat(gap)}${theme.fg('muted', agentTime)}`
+  })
 }
 
 function framedLine(content: string, width: number, theme: Theme): string {
@@ -194,45 +214,23 @@ export class EpicStats implements Component {
     width: number
   ): string[] {
     const theme = this.theme
+    const progressRows = progressGrid(
+      [
+        { label: 'Tasks', metric: epic.tasks },
+        { label: 'Criteria', metric: epic.criteria },
+        { label: 'Checks', metric: epic.checks },
+      ],
+      innerWidth,
+      WIDE_BAR_WIDTH,
+      theme,
+      `Agent time ${formatDuration(epic.agentTimeMs)}`
+    )
     return [
       framedTop(width, theme),
       framedLine(titleLine(epic, innerWidth, theme), width, theme),
       framedLine(theme.fg('dim', epic.id), width, theme),
       framedLine('', width, theme),
-      framedLine(
-        progressRow(
-          'Tasks',
-          epic.tasks,
-          innerWidth,
-          WIDE_BAR_WIDTH,
-          theme
-        ),
-        width,
-        theme
-      ),
-      framedLine(
-        progressRow(
-          'Criteria',
-          epic.criteria,
-          innerWidth,
-          WIDE_BAR_WIDTH,
-          theme,
-          `Agent time ${formatDuration(epic.agentTimeMs)}`
-        ),
-        width,
-        theme
-      ),
-      framedLine(
-        progressRow(
-          'Checks',
-          epic.checks,
-          innerWidth,
-          WIDE_BAR_WIDTH,
-          theme
-        ),
-        width,
-        theme
-      ),
+      ...progressRows.map((row) => framedLine(row, width, theme)),
       framedLine(attemptsLine(epic, theme), width, theme),
       framedBottom(width, theme),
     ]
@@ -244,46 +242,23 @@ export class EpicStats implements Component {
     width: number
   ): string[] {
     const theme = this.theme
+    const progressRows = progressGrid(
+      [
+        { label: 'Tasks', metric: epic.tasks },
+        { label: 'Criteria', metric: epic.criteria },
+        { label: 'Checks', metric: epic.checks },
+      ],
+      innerWidth,
+      COMPACT_BAR_WIDTH,
+      theme,
+      `Agent time ${formatDuration(epic.agentTimeMs)}`
+    )
     return [
       framedTop(width, theme),
       framedLine(titleLine(epic, innerWidth, theme), width, theme),
       framedLine(theme.fg('dim', epic.id), width, theme),
       framedLine('', width, theme),
-      framedLine(
-        progressRow('Tasks', epic.tasks, innerWidth, COMPACT_BAR_WIDTH, theme),
-        width,
-        theme
-      ),
-      framedLine(
-        progressRow(
-          'Criteria',
-          epic.criteria,
-          innerWidth,
-          COMPACT_BAR_WIDTH,
-          theme
-        ),
-        width,
-        theme
-      ),
-      framedLine(
-        progressRow(
-          'Checks',
-          epic.checks,
-          innerWidth,
-          COMPACT_BAR_WIDTH,
-          theme
-        ),
-        width,
-        theme
-      ),
-      framedLine(
-        theme.fg(
-          'muted',
-          `Agent time ${formatDuration(epic.agentTimeMs)}`
-        ),
-        width,
-        theme
-      ),
+      ...progressRows.map((row) => framedLine(row, width, theme)),
       framedLine(attemptsLine(epic, theme), width, theme),
       framedBottom(width, theme),
     ]

@@ -75,21 +75,59 @@ test('renders the wide epic stats layout and representative metrics', () => {
   assert.match(output, /EPIC/)
   assert.match(output, /Arkanoid Phaser Migration ⚠ ESCALATING/)
   assert.match(output, /20260724164024-b3195daa/)
-  assert.match(output, /Tasks 2 \/ 9 .*22%/)
-  assert.match(output, /Criteria 0 \/ 40 .*0%.*Agent time 06:48/)
-  assert.match(output, /Checks 0 \/ 25 .*0%/)
+  const taskLine = lines.find((line) => line.includes('Tasks'))
+  const criteriaLine = lines.find((line) => line.includes('Criteria'))
+  const checksLine = lines.find((line) => line.includes('Checks'))
+  assert.ok(taskLine)
+  assert.ok(criteriaLine)
+  assert.ok(checksLine)
+  assert.equal(
+    taskLine.indexOf('2 / 9') + '2 / 9'.length,
+    criteriaLine.indexOf('0 / 40') + '0 / 40'.length
+  )
+  assert.equal(
+    taskLine.indexOf('2 / 9') + '2 / 9'.length,
+    checksLine.indexOf('0 / 25') + '0 / 25'.length
+  )
+  assert.equal(taskLine.search(/[█░]/), criteriaLine.search(/[█░]/))
+  assert.equal(taskLine.search(/[█░]/), checksLine.search(/[█░]/))
+  assert.equal(
+    taskLine.lastIndexOf('22%') + '22%'.length,
+    criteriaLine.lastIndexOf('0%') + '0%'.length
+  )
+  assert.equal(
+    taskLine.lastIndexOf('22%') + '22%'.length,
+    checksLine.lastIndexOf('0%') + '0%'.length
+  )
+  assert.match(taskLine, /Agent time 06:48 │$/)
+  assert.doesNotMatch(criteriaLine, /Agent time/)
+  assert.doesNotMatch(checksLine, /Agent time/)
   assert.match(output, /Tokens 43.8k Attempts 1 impl \/ 0 fix/)
 })
 
 test('uses compact rendering below the fixed breakpoint', () => {
   const lines = new EpicStats(dashboard(), identityTheme).render(60)
-  const output = lines.join('\n')
 
-  assert.equal(lines.length, 10)
-  assert.match(output, /Tasks 2 \/ 9/)
-  assert.match(output, /Criteria 0 \/ 40/)
-  assert.match(output, /Checks 0 \/ 25/)
-  assert.match(output, /Agent time 06:48/)
+  assert.equal(lines.length, 9)
+  const taskLine = lines.find((line) => line.includes('Tasks'))
+  const criteriaLine = lines.find((line) => line.includes('Criteria'))
+  const checksLine = lines.find((line) => line.includes('Checks'))
+  assert.ok(taskLine)
+  assert.ok(criteriaLine)
+  assert.ok(checksLine)
+  assert.equal(
+    taskLine.indexOf('2 / 9') + '2 / 9'.length,
+    criteriaLine.indexOf('0 / 40') + '0 / 40'.length
+  )
+  assert.equal(
+    taskLine.indexOf('2 / 9') + '2 / 9'.length,
+    checksLine.indexOf('0 / 25') + '0 / 25'.length
+  )
+  assert.equal(taskLine.search(/[█░]/), criteriaLine.search(/[█░]/))
+  assert.equal(taskLine.search(/[█░]/), checksLine.search(/[█░]/))
+  assert.match(taskLine, /Agent time 06:48 │$/)
+  assert.doesNotMatch(criteriaLine, /Agent time/)
+  assert.doesNotMatch(checksLine, /Agent time/)
 })
 
 test('updates output after an explicit state replacement', () => {
