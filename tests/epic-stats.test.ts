@@ -65,8 +65,6 @@ function dashboard(name = 'Arkanoid Phaser Migration'): DashboardState {
       },
     ],
     checkResults: [],
-    humanWaitMs: 122_000,
-    now: '2026-01-01T00:08:50.000Z',
   })
 }
 
@@ -77,9 +75,9 @@ test('renders the wide epic stats layout and representative metrics', () => {
   assert.match(output, /EPIC/)
   assert.match(output, /Arkanoid Phaser Migration ⚠ ESCALATING/)
   assert.match(output, /20260724164024-b3195daa/)
-  assert.match(output, /Tasks 2 \/ 9 .*22%.*Elapsed 08:50/)
+  assert.match(output, /Tasks 2 \/ 9 .*22%/)
   assert.match(output, /Criteria 0 \/ 40 .*0%.*Agent time 06:48/)
-  assert.match(output, /Checks 0 \/ 25 .*0%.*Human wait 02:02/)
+  assert.match(output, /Checks 0 \/ 25 .*0%/)
   assert.match(output, /Tokens 43.8k Attempts 1 impl \/ 0 fix/)
 })
 
@@ -91,7 +89,7 @@ test('uses compact rendering below the fixed breakpoint', () => {
   assert.match(output, /Tasks 2 \/ 9/)
   assert.match(output, /Criteria 0 \/ 40/)
   assert.match(output, /Checks 0 \/ 25/)
-  assert.match(output, /Elapsed 08:50 · Agent 06:48 · Human wait 02:02/)
+  assert.match(output, /Agent time 06:48/)
 })
 
 test('updates output after an explicit state replacement', () => {
@@ -138,11 +136,9 @@ test('uses semantic theme colors for dashboard statuses', () => {
       state,
       events: [],
       checkResults: [],
-      humanWaitMs: 0,
       ...(stage === 'completed' || stage === 'failed'
         ? { completedAt: state.updatedAt }
         : {}),
-      now: state.updatedAt,
     })
     colors.length = 0
     new EpicStats(dashboardState, theme).render(100)

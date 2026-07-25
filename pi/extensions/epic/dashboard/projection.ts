@@ -8,6 +8,7 @@ import type {
 import {
   type DashboardAction,
   type DashboardActionRequest,
+  type ActiveAgentRun,
   type DashboardProjection,
   type DashboardProjectionInput,
   type EpicDashboardState,
@@ -54,15 +55,8 @@ function timestampMs(value: string, field: string): number {
 }
 
 function nonNegativeInteger(value: number, field: string): number {
-  if (!Number.isInteger(value) || value < 0) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     throw new Error(`${field} must be a non-negative integer.`)
-  }
-  return value
-}
-
-function nonNegativeNumber(value: number, field: string): number {
-  if (!Number.isFinite(value) || value < 0) {
-    throw new Error(`${field} must be a finite non-negative number.`)
   }
   return value
 }
@@ -219,6 +213,15 @@ function eventKey(event: EpicEvent): string {
   return `${role}:${actionName}`
 }
 
+function agentDurationMs(event: EpicEvent): number | undefined {
+  const value = event.payload.durationMs
+  if (value === undefined) return undefined
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Event ${event.id} has an invalid agent duration.`)
+  }
+  return value
+}
+
 interface OrderedEvent {
   readonly event: EpicEvent
   readonly timestampMs: number
@@ -233,16 +236,13 @@ function orderedEvents(events: readonly EpicEvent[]): readonly OrderedEvent[] {
     .sort((left, right) => left.timestampMs - right.timestampMs)
 }
 
-function durationMs(startMs: number, endMs: number, description: string): number {
-  if (endMs < startMs) {
-    throw new Error(`${description} ends before it starts.`)
-  }
-  return endMs - startMs
-}
-
-function agentTimeMs(events: readonly EpicEvent[], endMs: number): number {
-  const active = new Map<string, number[]>()
-  let total = 0
+function agentTimeMs(
+  events: readonly EpicEvent[],
+  activeAgentRuns: readonly ActiveAgentRun[],
+  nowMs: number
+): number {
+  const active = new Map<string, number>()
+  const intervals: (readonly [number, number])[] = []
 
   for (const { event, timestampMs: eventMs } of orderedEvents(events)) {
     if (event.type !== 'agent_started' && event.type !== 'agent_finished') {
@@ -251,24 +251,57 @@ function agentTimeMs(events: readonly EpicEvent[], endMs: number): number {
 
     const key = eventKey(event)
     if (event.type === 'agent_started') {
-      const starts = active.get(key) ?? []
-      starts.push(eventMs)
-      active.set(key, starts)
+      // A repeated start means the previous invocation was abandoned before
+      // it could write its finish event. It must not keep contributing time
+      // forever while the dashboard refreshes.
+      active.set(key, eventMs)
       continue
     }
 
-    const starts = active.get(key)
-    if (!starts || starts.length === 0) {
+    const startedAt = active.get(key)
+    if (startedAt === undefined) {
       throw new Error(`Agent event ${event.id} finished without a matching start.`)
     }
-    total += durationMs(starts.shift() as number, eventMs, `Agent event ${event.id}`)
-    if (starts.length === 0) active.delete(key)
+    if (eventMs < startedAt) {
+      throw new Error(`Agent event ${event.id} ends before it starts.`)
+    }
+    const duration = agentDurationMs(event)
+    const finishedAt = startedAt + (duration ?? eventMs - startedAt)
+    intervals.push([startedAt, finishedAt])
+    active.delete(key)
   }
 
-  for (const [key, starts] of active) {
-    for (const startedAt of starts) {
-      total += durationMs(startedAt, endMs, `Agent activity ${key}`)
+  for (const run of activeAgentRuns) {
+    if (!Number.isInteger(run.startedAtMs) || run.startedAtMs < 0) {
+      throw new Error('Active agent runs require non-negative integer timestamps.')
     }
+    if (run.startedAtMs > nowMs) {
+      throw new Error('Active agent runs cannot start after now.')
+    }
+    intervals.push([run.startedAtMs, nowMs])
+  }
+
+  // Agent time is the wall-clock time covered by completed or currently
+  // running agent calls. Merge overlaps so parallel or duplicated lifecycle
+  // events cannot double-count time.
+  intervals.sort(([left], [right]) => left - right)
+  let total = 0
+  let mergedStart: number | undefined
+  let mergedEnd: number | undefined
+  for (const [start, end] of intervals) {
+    if (mergedStart === undefined || mergedEnd === undefined) {
+      mergedStart = start
+      mergedEnd = end
+    } else if (start <= mergedEnd) {
+      mergedEnd = Math.max(mergedEnd, end)
+    } else {
+      total += mergedEnd - mergedStart
+      mergedStart = start
+      mergedEnd = end
+    }
+  }
+  if (mergedStart !== undefined && mergedEnd !== undefined) {
+    total += mergedEnd - mergedStart
   }
   return total
 }
@@ -378,18 +411,10 @@ function completedTaskCount(
   return currentTaskIndex
 }
 
-function elapsedMs(createdAt: string, endMs: number): number {
-  return durationMs(
-    timestampMs(createdAt, 'state.createdAt'),
-    endMs,
-    'Epic elapsed time'
-  )
-}
-
 export function projectDashboardState(
   input: DashboardProjectionInput
 ): DashboardProjection {
-  const nowMs = timestampMs(input.now, 'now')
+  const nowMs = timestampMs(input.now ?? input.state.updatedAt, 'now')
   const terminal = ['completed', 'failed', 'cancelled'].includes(input.state.stage)
   if (terminal && input.completedAt === undefined) {
     throw new Error('Terminal epics require completedAt.')
@@ -399,8 +424,9 @@ export function projectDashboardState(
   }
 
   const completedAt = input.completedAt
-  const endMs =
-    completedAt === undefined ? nowMs : timestampMs(completedAt, 'completedAt')
+  if (completedAt !== undefined) {
+    timestampMs(completedAt, 'completedAt')
+  }
   const tasks = input.state.tasks ?? []
   const criteriaTotal = tasks.reduce(
     (total, task) => total + task.acceptanceCriteria.length,
@@ -414,7 +440,6 @@ export function projectDashboardState(
     completedCheckCount(input.checkResults),
     declaredCheckCount(input.state)
   )
-  const humanWaitMs = nonNegativeNumber(input.humanWaitMs, 'humanWaitMs')
   const implementationAttempt = nonNegativeInteger(
     input.state.implementationAttempt,
     'implementationAttempt'
@@ -433,9 +458,7 @@ export function projectDashboardState(
     status: dashboardStatus(input.state),
     startedAt: input.state.createdAt,
     ...(completedAt === undefined ? {} : { completedAt }),
-    elapsedMs: elapsedMs(input.state.createdAt, endMs),
-    agentTimeMs: agentTimeMs(input.events, endMs),
-    humanWaitMs,
+    agentTimeMs: agentTimeMs(input.events, input.activeAgentRuns ?? [], nowMs),
     tasks: taskProgress,
     criteria: progress(0, criteriaTotal),
     checks: checkProgress,

@@ -1,4 +1,5 @@
 import * as fs from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import {
@@ -31,6 +32,7 @@ import {
 } from './prompts.ts'
 import { applyPrerequisites, discoverPrerequisites } from './prerequisites.ts'
 import { runAgentActor } from './machines/actors.ts'
+import { finishAgentRun, startAgentRun } from './agent-activity.ts'
 import { getCurrentDiff } from './diff.ts'
 import { runCheckSuite } from './checks.ts'
 import type {
@@ -103,15 +105,42 @@ export function createEpicServices(
       agentRunDirectory,
     })
     notify(`${role} started: ${action}.`)
-    const result = await runAgentActor({
-      repositoryRoot: state.repositoryRoot,
-      agentRunDirectory,
-      role,
-      prompt,
-      signal: ctx.signal,
-      onProgress: (message) =>
-        ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
-    })
+    const runId = randomUUID()
+    const runStartedAt = Date.now()
+    startAgentRun(runId, state.repositoryRoot, state.epicId, runStartedAt)
+    let result: AgentRunResult | undefined
+    let failure: unknown
+    let failed = false
+    try {
+      result = await runAgentActor({
+        repositoryRoot: state.repositoryRoot,
+        agentRunDirectory,
+        role,
+        prompt,
+        signal: ctx.signal,
+        onProgress: (message) =>
+          ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
+      })
+    } catch (error) {
+      failed = true
+      failure = error
+    }
+    const durationMs = Math.max(0, Date.now() - runStartedAt)
+    finishAgentRun(runId)
+    if (failed) {
+      await appendEvent(state, 'agent_finished', {
+        role,
+        action,
+        exitCode: 1,
+        failureReason:
+          failure instanceof Error ? failure.message : String(failure),
+        durationMs,
+      })
+      throw failure
+    }
+    if (result === undefined) {
+      throw new Error(`${role} agent finished without a result.`)
+    }
     await appendEvent(state, 'agent_finished', {
       role,
       action,
@@ -119,6 +148,7 @@ export function createEpicServices(
       stdoutLogPath: result.stdoutLogPath,
       failureReason: result.failureReason,
       usage: result.usage,
+      durationMs,
     })
     return result
   }

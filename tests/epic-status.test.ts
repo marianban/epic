@@ -124,7 +124,7 @@ test('dashboard loader feeds the projection from persisted epic data', async () 
   try {
     const dashboard = await loadActiveDashboardState(
       fixture.root,
-      new Date(Date.now() + 1_000).toISOString()
+      new Date().toISOString()
     )
 
     assert.ok(dashboard)
@@ -138,7 +138,6 @@ test('dashboard loader feeds the projection from persisted epic data', async () 
       input: 100,
       output: 25,
     })
-    assert.equal(dashboard.epic.humanWaitMs, 0)
   } finally {
     await rm(fixture.root, { recursive: true, force: true })
   }
@@ -148,7 +147,7 @@ test('dashboard loader returns no active dashboard without an active pointer', a
   const root = await mkdtemp(join(tmpdir(), 'pi-epic-status-empty-'))
   try {
     assert.equal(
-      await loadActiveDashboardState(root, '2026-01-01T00:00:00.000Z'),
+      await loadActiveDashboardState(root, new Date().toISOString()),
       undefined
     )
   } finally {
@@ -189,7 +188,7 @@ test('dashboard loader uses persisted updatedAt for terminal completion time', a
     const loaded = await loadActiveEpic(fixture.root)
     const dashboard = await loadActiveDashboardState(
       fixture.root,
-      new Date(Date.now() + 1_000).toISOString()
+      new Date().toISOString()
     )
     assert.ok(dashboard)
     assert.equal(dashboard.epic.status, 'failed')
@@ -205,10 +204,7 @@ test('dashboard loader rejects malformed event data', async () => {
     await appendFile(fixture.eventsPath, '{not-json}\n')
     await assert.rejects(
       () =>
-        loadActiveDashboardState(
-          fixture.root,
-          new Date(Date.now() + 1_000).toISOString()
-        ),
+        loadActiveDashboardState(fixture.root, new Date().toISOString()),
       /Invalid event journal entry/
     )
   } finally {
@@ -222,10 +218,7 @@ test('dashboard loader rejects malformed latest check data', async () => {
     await writeFile(fixture.checkPath, '{not-json}\n')
     await assert.rejects(
       () =>
-        loadActiveDashboardState(
-          fixture.root,
-          new Date(Date.now() + 1_000).toISOString()
-        ),
+        loadActiveDashboardState(fixture.root, new Date().toISOString()),
       /Invalid latest check result/
     )
   } finally {
@@ -241,15 +234,11 @@ test('live widget updates its EpicStats and requests a redraw', async () => {
       state: firstState,
       events: [],
       checkResults: [],
-      humanWaitMs: 0,
-      now: firstState.createdAt,
     }),
     DashboardState.fromRun({
       state: secondState,
       events: [],
       checkResults: [],
-      humanWaitMs: 0,
-      now: secondState.createdAt,
     }),
   ]
   let index = 0

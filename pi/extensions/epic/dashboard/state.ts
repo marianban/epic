@@ -25,7 +25,7 @@ export class DashboardState {
     return new DashboardState(
       projection.epic,
       projection.actionRequired,
-      input.now
+      input.state.updatedAt
     )
   }
 }

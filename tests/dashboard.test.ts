@@ -59,8 +59,6 @@ test('progress metrics report valid counts and reject invalid state', () => {
     state,
     events: [],
     checkResults: [],
-    humanWaitMs: 0,
-    now: '2026-01-01T00:00:01.000Z',
   })
 
   assert.equal(dashboard.epic.tasks.completed, 2)
@@ -75,8 +73,6 @@ test('progress metrics report valid counts and reject invalid state', () => {
         state,
         events: [],
         checkResults: [],
-        humanWaitMs: 0,
-        now: state.updatedAt,
       }),
     /currentTaskIndex/
   )
@@ -88,8 +84,6 @@ test('progress metrics report valid counts and reject invalid state', () => {
         state,
         events: [],
         checkResults: [],
-        humanWaitMs: 0,
-        now: state.updatedAt,
       }),
     /currentTaskIndex/
   )
@@ -100,8 +94,6 @@ test('progress metrics report valid counts and reject invalid state', () => {
     state,
     events: [],
     checkResults: [],
-    humanWaitMs: 0,
-    now: state.updatedAt,
   })
   assert.deepEqual(empty.epic.tasks, { completed: 0, total: 0, percent: 0 })
 })
@@ -127,11 +119,9 @@ test('status mapping hides internal workflow stage names', () => {
         state,
         events: [],
         checkResults: [],
-        humanWaitMs: 0,
         ...(stage === 'completed' || stage === 'failed'
           ? { completedAt: state.updatedAt }
           : {}),
-        now: state.updatedAt,
       }).epic.status,
       expected,
       stage
@@ -156,8 +146,6 @@ test('task, check, attempts, and timing values use independent sources', () => {
     state,
     events: [],
     checkResults: [checkResult(), checkResult(true)],
-    humanWaitMs: 120_000,
-    now: '2026-01-01T00:10:00.000Z',
   })
 
   assert.equal(dashboard.epic.tasks.completed, 1)
@@ -165,9 +153,7 @@ test('task, check, attempts, and timing values use independent sources', () => {
   assert.equal(dashboard.epic.criteria.total, 4)
   assert.equal(dashboard.epic.checks.total, 3)
   assert.equal(dashboard.epic.checks.completed, 1)
-  assert.equal(dashboard.epic.elapsedMs, 600_000)
   assert.equal(dashboard.epic.agentTimeMs, 0)
-  assert.equal(dashboard.epic.humanWaitMs, 120_000)
   assert.deepEqual(dashboard.epic.attempts, { implementation: 1, repair: 6 })
 })
 
@@ -176,8 +162,6 @@ test('agent events provide execution time and token usage without text inference
   const dashboard = DashboardState.fromRun({
     state,
     checkResults: [],
-    humanWaitMs: 0,
-    now: '2026-01-01T00:00:10.000Z',
     events: [
       {
         id: 'start',
@@ -194,6 +178,7 @@ test('agent events provide execution time and token usage without text inference
         type: 'agent_finished',
         stage: 'implementing',
         payload: {
+          durationMs: 3_000,
           role: 'implementer',
           action: 'implementation',
           usage: { inputTokens: 100, outputTokens: 25, cached: 5 },
@@ -214,10 +199,96 @@ test('agent events provide execution time and token usage without text inference
     state,
     events: [],
     checkResults: [],
-    humanWaitMs: 0,
-    now: state.updatedAt,
   })
   assert.deepEqual(missing.epic.tokens, { total: 0 })
+})
+
+test('agent time ignores abandoned starts and merges overlapping runs', () => {
+  const state = createEpicState('/repo', 'epic', '2026-01-01T00:00:00.000Z')
+  const event = (
+    id: string,
+    timestamp: string,
+    type: 'agent_started' | 'agent_finished',
+    role: string
+  ) => ({
+    id,
+    epicId: state.epicId,
+    timestamp,
+    type,
+    stage: 'implementing' as const,
+    payload: { role, action: 'implementation' },
+  })
+
+  const dashboard = DashboardState.fromRun({
+    state,
+    checkResults: [],
+    events: [
+      event('stale-start', '2026-01-01T00:00:01.000Z', 'agent_started', 'planner'),
+      event('real-start', '2026-01-01T00:00:05.000Z', 'agent_started', 'planner'),
+      event('real-finish', '2026-01-01T00:00:08.000Z', 'agent_finished', 'planner'),
+      event('other-start', '2026-01-01T00:00:04.000Z', 'agent_started', 'scout'),
+      event('other-finish', '2026-01-01T00:00:10.000Z', 'agent_finished', 'scout'),
+    ],
+  })
+
+  assert.equal(dashboard.epic.agentTimeMs, 6_000)
+
+  const idle = DashboardState.fromRun({
+    state,
+    checkResults: [],
+    events: [
+      event(
+        'unfinished-start',
+        '2026-01-01T00:00:01.000Z',
+        'agent_started',
+        'implementer'
+      ),
+    ],
+  })
+  assert.equal(idle.epic.agentTimeMs, 0)
+})
+
+test('agent time uses the measured runAgent duration', () => {
+  const state = createEpicState('/repo', 'epic')
+  const dashboard = DashboardState.fromRun({
+    state,
+    checkResults: [],
+    events: [
+      {
+        id: 'start',
+        epicId: state.epicId,
+        timestamp: '2026-01-01T00:00:01.000Z',
+        type: 'agent_started',
+        stage: 'implementing',
+        payload: { role: 'implementer', action: 'implementation' },
+      },
+      {
+        id: 'finish',
+        epicId: state.epicId,
+        timestamp: '2026-01-01T00:00:10.000Z',
+        type: 'agent_finished',
+        stage: 'implementing',
+        payload: {
+          role: 'implementer',
+          action: 'implementation',
+          durationMs: 3_000,
+        },
+      },
+    ],
+  })
+
+  assert.equal(dashboard.epic.agentTimeMs, 3_000)
+
+  const active = DashboardState.fromRun({
+    state,
+    events: [],
+    checkResults: [],
+    activeAgentRuns: [{
+      startedAtMs: Date.parse('2026-01-01T00:00:05.000Z'),
+    }],
+    now: '2026-01-01T00:00:08.000Z',
+  })
+  assert.equal(active.epic.agentTimeMs, 3_000)
 })
 
 test('action-required projection uses registered commands', () => {
@@ -228,8 +299,6 @@ test('action-required projection uses registered commands', () => {
     state,
     events: [],
     checkResults: [],
-    humanWaitMs: 0,
-    now: state.updatedAt,
   }).actionRequired
   assert.equal(planReview?.id, 'plan-review-required')
   assert.deepEqual(
@@ -242,8 +311,6 @@ test('action-required projection uses registered commands', () => {
     state,
     events: [],
     checkResults: [],
-    humanWaitMs: 0,
-    now: state.updatedAt,
   }).actionRequired
   assert.deepEqual(
     taskReview?.actions.map((item) => item.command),
@@ -256,8 +323,6 @@ test('action-required projection uses registered commands', () => {
     state,
     events: [],
     checkResults: [],
-    humanWaitMs: 0,
-    now: state.updatedAt,
   }).actionRequired
   assert.equal(escalation?.severity, 'critical')
   assert.equal(escalation?.message, state.failureReason)
@@ -268,8 +333,6 @@ test('action-required projection uses registered commands', () => {
       state,
       events: [],
       checkResults: [],
-      humanWaitMs: 0,
-      now: state.updatedAt,
     }).actionRequired,
     undefined
   )

@@ -205,8 +205,7 @@ export class EpicStats implements Component {
           epic.tasks,
           innerWidth,
           WIDE_BAR_WIDTH,
-          theme,
-          `Elapsed ${formatDuration(epic.elapsedMs)}`
+          theme
         ),
         width,
         theme
@@ -229,8 +228,7 @@ export class EpicStats implements Component {
           epic.checks,
           innerWidth,
           WIDE_BAR_WIDTH,
-          theme,
-          `Human wait ${formatDuration(epic.humanWaitMs)}`
+          theme
         ),
         width,
         theme
@@ -281,7 +279,7 @@ export class EpicStats implements Component {
       framedLine(
         theme.fg(
           'muted',
-          `Elapsed ${formatDuration(epic.elapsedMs)} · Agent ${formatDuration(epic.agentTimeMs)} · Human wait ${formatDuration(epic.humanWaitMs)}`
+          `Agent time ${formatDuration(epic.agentTimeMs)}`
         ),
         width,
         theme
