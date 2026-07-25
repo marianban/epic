@@ -3,6 +3,7 @@ import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createActor } from 'xstate'
 import type {
+  CheckSuiteResult,
   ScoutReport,
   EpicEvent,
   EpicState,
@@ -121,6 +122,63 @@ export async function loadActiveEpic(root: string): Promise<EpicState> {
   if (!active.epicId)
     throw new Error('Active epic pointer is missing epicId.')
   return loadState(root, active.epicId)
+}
+
+export async function loadOptionalActiveEpic(
+  root: string
+): Promise<EpicState | undefined> {
+  let activeRaw: string
+  try {
+    activeRaw = await fs.readFile(
+      path.join(root, '.pi', 'epics', 'active.json'),
+      'utf8'
+    )
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+    throw error
+  }
+
+  const active = JSON.parse(activeRaw) as { epicId?: string }
+  if (!active.epicId)
+    throw new Error('Active epic pointer is missing epicId.')
+  return loadState(root, active.epicId)
+}
+
+export async function loadEpicEvents(
+  state: EpicState
+): Promise<readonly EpicEvent[]> {
+  const filePath = path.join(
+    runDirectory(state.repositoryRoot, state.epicId),
+    'events.jsonl'
+  )
+  const contents = await fs.readFile(filePath, 'utf8')
+  return contents.split('\n').flatMap((line, index) => {
+    if (line.trim().length === 0) return []
+    try {
+      return [JSON.parse(line) as EpicEvent]
+    } catch (error) {
+      throw new Error(
+        `Invalid event journal entry ${index + 1} in ${filePath}.`,
+        { cause: error }
+      )
+    }
+  })
+}
+
+export async function loadLatestCheckResult(
+  state: EpicState
+): Promise<CheckSuiteResult | undefined> {
+  if (state.lastCheckResultPath === undefined) return undefined
+  try {
+    return JSON.parse(
+      await fs.readFile(state.lastCheckResultPath, 'utf8')
+    ) as CheckSuiteResult
+  } catch (error) {
+    throw new Error(
+      `Invalid latest check result at ${state.lastCheckResultPath}.`,
+      { cause: error }
+    )
+  }
 }
 
 export async function appendEvent(

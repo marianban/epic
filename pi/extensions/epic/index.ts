@@ -10,8 +10,14 @@ import {
   approveTask,
   reviseTask,
 } from './epic.ts'
+import {
+  EPIC_STATUS_REFRESH_INTERVAL_MS,
+  registerEpicStatusWidget,
+} from './dashboard/widget-lifecycle.ts'
 
 export default function epicExtension(pi: ExtensionAPI): void {
+  registerEpicStatusWidget(pi, EPIC_STATUS_REFRESH_INTERVAL_MS)
+
   pi.registerCommand('epic', {
     description: 'Start a deterministic human-gated epic',
     handler: async (args, ctx) => startEpic(args, ctx),
