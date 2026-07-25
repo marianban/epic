@@ -917,7 +917,8 @@ test('implementer sandbox is restricted to macOS and Linux', () => {
   ])
   assert.ok(config.filesystem.denyWrite.includes('/repo/.git'))
   assert.ok(config.filesystem.denyWrite.includes('/repo/plan.md'))
-  assert.ok(config.network.allowedDomains.includes('registry.npmjs.org'))
+  assert.equal(config.network.allowedDomains, undefined)
+  assert.equal(config.network.deniedDomains, undefined)
   const invocation = quoteProcessInvocation('/usr/bin/node', [
     '--eval',
     "console.log('ok')",

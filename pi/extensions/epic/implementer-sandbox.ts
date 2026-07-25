@@ -6,16 +6,6 @@ import {
   type SandboxRuntimeConfig,
 } from '@anthropic-ai/sandbox-runtime'
 
-const IMPLEMENTER_NETWORK_DOMAINS = [
-  'registry.npmjs.org',
-  '*.npmjs.org',
-  'registry.yarnpkg.com',
-  'github.com',
-  '*.github.com',
-  'api.github.com',
-  'raw.githubusercontent.com',
-]
-
 let initializedRoot: string | undefined
 
 export function isImplementerSandboxSupported(
@@ -27,10 +17,10 @@ export function isImplementerSandboxSupported(
 export function implementerSandboxConfig(root: string): SandboxRuntimeConfig {
   const repositoryRoot = path.resolve(root)
   return {
-    network: {
-      allowedDomains: IMPLEMENTER_NETWORK_DOMAINS,
-      deniedDomains: [],
-    },
+    // sandbox-runtime treats an omitted allowedDomains field as filesystem-only
+    // isolation. Its public type currently requires the allowlist fields even
+    // though the runtime supports unrestricted network access in this mode.
+    network: {} as SandboxRuntimeConfig['network'],
     filesystem: {
       denyRead: [
         '~/.ssh',
