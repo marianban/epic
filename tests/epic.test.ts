@@ -27,6 +27,7 @@ import {
   runCheckSuite,
 } from '../pi/extensions/epic/checks.ts'
 import {
+  AgentOutputCollector,
   parsePlannerResponse,
   parseTaskDecomposition,
 } from '../pi/extensions/epic/agents.ts'
@@ -200,6 +201,32 @@ test('agent stdout is persisted to a unique per-run log before close', async () 
   } finally {
     await rm(root, { recursive: true, force: true })
   }
+})
+
+test('agent output extraction does not retain the complete JSONL stream', () => {
+  const collector = new AgentOutputCollector()
+  const finalMessage = JSON.stringify({
+    type: 'message_end',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'text', text: '{"tasks":[{"id":"task-001"}]}' }],
+    },
+  })
+  const usage = JSON.stringify({
+    type: 'agent_end',
+    usage: { input: 10, output: 20 },
+  })
+  const irrelevantOutput = `${'x'.repeat(150_000)}\n`
+  const stream = `${irrelevantOutput}${finalMessage}\n${usage}\n`
+  const bytes = Buffer.from(stream)
+  for (let offset = 0; offset < bytes.length; offset += 17)
+    collector.append(bytes.subarray(offset, offset + 17))
+
+  const result = collector.finish()
+  assert.equal(result.output, '{"tasks":[{"id":"task-001"}]}')
+  assert.deepEqual(result.usage, { input: 10, output: 20 })
+  assert.equal(result.diagnosticTail.length, 100_000)
+  assert.match(result.diagnosticTail, /task-001/)
 })
 
 test('task execution actor exposes final output to its invoking parent', async () => {

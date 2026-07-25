@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { tmpdir } from 'node:os'
+import { StringDecoder } from 'node:string_decoder'
 import { fileURLToPath } from 'node:url'
 import type {
   AgentProfile,
@@ -102,6 +103,109 @@ export interface AgentRunOptions {
   onProgress?: (message: string) => void
 }
 
+const MAX_STDOUT_DIAGNOSTIC_CHARS = 100_000
+const MAX_STDERR_CHARS = 20_000
+
+function appendTail(current: string, incoming: string, maxChars: number): string {
+  if (incoming.length >= maxChars) return incoming.slice(-maxChars)
+  const overflow = current.length + incoming.length - maxChars
+  if (overflow <= 0) return current + incoming
+  return current.slice(overflow) + incoming
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function assistantText(event: Record<string, unknown>): string | undefined {
+  if (event.type !== 'message_end' || !isRecord(event.message)) return undefined
+  if (event.message.role !== 'assistant') return undefined
+  if (!Array.isArray(event.message.content)) return undefined
+
+  const output = event.message.content
+    .filter(isRecord)
+    .filter((part) => part.type === 'text' && typeof part.text === 'string')
+    .map((part) => part.text as string)
+    .join('\n')
+    .trim()
+  return output || undefined
+}
+
+export interface AgentOutputSummary {
+  output: string
+  diagnosticTail: string
+  usage?: Record<string, unknown>
+}
+
+/**
+ * Extracts the small part of Pi's JSONL stream needed by the parent process.
+ * The complete stream is persisted separately by createAgentRunStdoutLog.
+ */
+export class AgentOutputCollector {
+  private readonly decoder = new StringDecoder('utf8')
+  private pendingLine = ''
+  private latestAssistantText = ''
+  private diagnosticTail = ''
+  private usage: Record<string, unknown> | undefined
+
+  append(chunk: Buffer): void {
+    const text = chunk.toString('utf8')
+    this.diagnosticTail = appendTail(
+      this.diagnosticTail,
+      text,
+      MAX_STDOUT_DIAGNOSTIC_CHARS
+    )
+    this.consume(this.decoder.write(chunk))
+  }
+
+  finish(): AgentOutputSummary {
+    this.consume(this.decoder.end())
+    if (this.pendingLine) {
+      this.processLine(this.pendingLine)
+      this.pendingLine = ''
+    }
+    return {
+      output: this.latestAssistantText,
+      diagnosticTail: this.diagnosticTail,
+      usage: this.usage,
+    }
+  }
+
+  private consume(text: string): void {
+    let offset = 0
+    while (offset < text.length) {
+      const newline = text.indexOf('\n', offset)
+      if (newline === -1) {
+        this.pendingLine += text.slice(offset)
+        return
+      }
+      const line = `${this.pendingLine}${text.slice(offset, newline)}`.replace(
+        /\r$/,
+        ''
+      )
+      this.pendingLine = ''
+      this.processLine(line)
+      offset = newline + 1
+    }
+  }
+
+  private processLine(line: string): void {
+    if (!line.trim()) return
+    let event: unknown
+    try {
+      event = JSON.parse(line)
+    } catch {
+      return
+    }
+    if (!isRecord(event)) return
+
+    const output = assistantText(event)
+    if (output) this.latestAssistantText = output
+    if (event.type === 'agent_end' && isRecord(event.usage))
+      this.usage = event.usage
+  }
+}
+
 /**
  * Resolve the Pi executable the same way Pi's bundled subagent extension does.
  * This keeps packaged/runtime-launched extensions on the same CLI version and
@@ -197,7 +301,7 @@ export async function runAgent(
       env: { ...process.env, PI_EPIC_ROLE: role },
       signal: options.signal,
     })
-    let stdout = ''
+    const outputCollector = new AgentOutputCollector()
     let stderr = ''
     let settled = false
     let progressNotified = false
@@ -221,7 +325,7 @@ export async function runAgent(
     child.stdout.on('data', (chunk: Buffer) => {
       try {
         stdoutLog.append(chunk)
-        stdout += chunk.toString()
+        outputCollector.append(chunk)
       } catch (error) {
         fail(error instanceof Error ? error : new Error(String(error)))
         child.kill('SIGTERM')
@@ -234,7 +338,7 @@ export async function runAgent(
     })
     child.stderr.on('data', (chunk: Buffer) => {
       const text = chunk.toString()
-      stderr += text
+      stderr = appendTail(stderr, text, MAX_STDERR_CHARS)
       if (!stderrNotified && text.trim()) {
         stderrNotified = true
         options.onProgress?.(
@@ -258,41 +362,15 @@ export async function runAgent(
     child.on('close', (exitCode) => {
       if (settled) return
       settled = true
+      const output = outputCollector.finish()
       cleanup()
-      const parsed = stdout.split(/\r?\n/).flatMap((line) => {
-        try {
-          return [JSON.parse(line) as Record<string, unknown>]
-        } catch {
-          return []
-        }
-      })
-      const assistantMessages = parsed.filter(
-        (event) =>
-          event.type === 'message_end' &&
-          (event.message as Record<string, unknown> | undefined)?.role ===
-            'assistant'
-      )
-      const message = assistantMessages[assistantMessages.length - 1]
-      const content =
-        (
-          message?.message as
-            { content?: { type: string; text?: string }[] } | undefined
-        )?.content ?? []
-      const output = content
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text ?? '')
-        .join('\n')
-        .trim()
-      const agentEnd = [...parsed]
-        .reverse()
-        .find((event) => event.type === 'agent_end')
       resolve({
         role,
         exitCode: exitCode ?? 1,
-        output: output || redactSecrets(stdout).slice(-100_000),
-        stderr: redactSecrets(stderr).slice(-20_000),
+        output: output.output || redactSecrets(output.diagnosticTail),
+        stderr: redactSecrets(stderr),
         stdoutLogPath: stdoutLog.filePath,
-        usage: agentEnd?.usage as Record<string, unknown> | undefined,
+        usage: output.usage,
       })
     })
   })
