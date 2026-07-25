@@ -99,7 +99,7 @@ test('status mapping hides internal workflow stage names', () => {
   }
 })
 
-test('task, attempts, and timing values use independent sources', () => {
+test('task and timing values use independent sources', () => {
   const state = createEpicState('/repo', 'epic', '2026-01-01T00:00:00.000Z')
   state.tasks = [
     task({ acceptanceCriteria: ['a', 'b'], requiredChecks: ['typecheck'] }),
@@ -107,10 +107,6 @@ test('task, attempts, and timing values use independent sources', () => {
     task({ acceptanceCriteria: ['d'], requiredChecks: ['lint'] }),
   ]
   state.currentTaskIndex = 1
-  state.implementationAttempt = 1
-  state.fastRepairAttempt = 2
-  state.fullRepairAttempt = 1
-  state.semanticRepairAttempt = 3
 
   const dashboard = DashboardState.fromRun({
     state,
@@ -121,7 +117,6 @@ test('task, attempts, and timing values use independent sources', () => {
   assert.equal(dashboard.epic.criteria.completed, 2)
   assert.equal(dashboard.epic.criteria.total, 4)
   assert.equal(dashboard.epic.agentTimeMs, 0)
-  assert.deepEqual(dashboard.epic.attempts, { implementation: 1, repair: 6 })
 })
 
 test('agent events provide execution time and token usage without text inference', () => {

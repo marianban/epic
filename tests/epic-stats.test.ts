@@ -53,10 +53,6 @@ function dashboard(name = 'Arkanoid Phaser Migration'): DashboardState {
   state.failureReason = 'A retry is required.'
   state.tasks = Array.from({ length: 9 }, (_, index) => task(index))
   state.currentTaskIndex = 2
-  state.implementationAttempt = 1
-  state.fastRepairAttempt = 0
-  state.fullRepairAttempt = 0
-  state.semanticRepairAttempt = 0
   return DashboardState.fromRun({
     state,
     events: [
@@ -114,7 +110,8 @@ test('renders the wide epic stats layout and representative metrics', () => {
   )
   assert.match(taskLine, /Agent time 06:48 │$/)
   assert.doesNotMatch(criteriaLine, /Agent time/)
-  assert.match(output, /Tokens 43.8k Attempts 1 impl \/ 0 fix/)
+  assert.match(output, /Tokens 43.8k/)
+  assert.doesNotMatch(output, /Attempts|impl|fix/)
 })
 
 test('uses compact rendering below the fixed breakpoint', () => {

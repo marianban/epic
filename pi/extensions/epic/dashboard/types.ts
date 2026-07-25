@@ -54,10 +54,6 @@ export interface EpicDashboardState {
   readonly tasks: ProgressMetric
   readonly criteria: ProgressMetric
   readonly tokens: TokenUsage
-  readonly attempts: {
-    readonly implementation: number
-    readonly repair: number
-  }
 }
 
 export interface DashboardProjectionInput {

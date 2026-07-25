@@ -417,18 +417,6 @@ export function projectDashboardState(
     completedTasks,
     tasks.length
   )
-  const implementationAttempt = nonNegativeInteger(
-    input.state.implementationAttempt,
-    'implementationAttempt'
-  )
-  const repairAttempt =
-    nonNegativeInteger(input.state.fastRepairAttempt, 'fastRepairAttempt') +
-    nonNegativeInteger(input.state.fullRepairAttempt, 'fullRepairAttempt') +
-    nonNegativeInteger(
-      input.state.semanticRepairAttempt,
-      'semanticRepairAttempt'
-    )
-
   const epic: EpicDashboardState = {
     id: input.state.epicId,
     runDirectory: join(
@@ -446,10 +434,6 @@ export function projectDashboardState(
     tasks: taskProgress,
     criteria: progress(criteriaCompleted, criteriaTotal),
     tokens: tokenUsage(input.events),
-    attempts: {
-      implementation: implementationAttempt,
-      repair: repairAttempt,
-    },
   }
 
   return {

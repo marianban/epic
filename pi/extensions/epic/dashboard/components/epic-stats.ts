@@ -151,15 +151,10 @@ function runIdLine(
   )
 }
 
-function attemptsLine(epic: EpicDashboardState, theme: Theme): string {
+function tokensLine(epic: EpicDashboardState, theme: Theme): string {
   return [
     theme.fg('muted', 'Tokens'),
     theme.fg('text', formatTokens(epic.tokens.total)),
-    theme.fg('muted', 'Attempts'),
-    theme.fg(
-      'text',
-      `${epic.attempts.implementation} impl / ${epic.attempts.repair} fix`
-    ),
   ].join(' ')
 }
 
@@ -224,7 +219,7 @@ export class EpicStats implements Component {
       framedLine(runIdLine(epic, innerWidth, theme), width, theme),
       framedLine('', width, theme),
       ...progressRows.map((row) => framedLine(row, width, theme)),
-      framedLine(attemptsLine(epic, theme), width, theme),
+      framedLine(tokensLine(epic, theme), width, theme),
       framedBottom(width, theme),
     ]
   }
@@ -251,7 +246,7 @@ export class EpicStats implements Component {
       framedLine(runIdLine(epic, innerWidth, theme), width, theme),
       framedLine('', width, theme),
       ...progressRows.map((row) => framedLine(row, width, theme)),
-      framedLine(attemptsLine(epic, theme), width, theme),
+      framedLine(tokensLine(epic, theme), width, theme),
       framedBottom(width, theme),
     ]
   }
