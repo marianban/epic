@@ -111,7 +111,15 @@ export default function epicToolGuard(pi: ExtensionAPI): void {
     }
     if (event.toolName === 'bash') {
       const command = String(input.command ?? '')
-      if (!isSafeReadOnlyCommand(command))
+      if (
+        role === 'implementer' &&
+        process.env.PI_EPIC_SANDBOX !== '1'
+      )
+        return {
+          block: true,
+          reason: 'implementer bash requires the OS sandbox.',
+        }
+      if (role !== 'implementer' && !isSafeReadOnlyCommand(command))
         return {
           block: true,
           reason: `${role} may only run read-only commands.`,

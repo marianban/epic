@@ -14,6 +14,7 @@ import type {
 } from './types.ts'
 import { createAgentRunStdoutLog } from './agent-runs.ts'
 import { readConfig, redactSecrets } from './tools.ts'
+import { wrapImplementerInvocation } from './implementer-sandbox.ts'
 
 const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
   orchestrator: {
@@ -314,13 +315,33 @@ export async function runAgent(
   const config = (await readConfig(root)) as EpicConfig
   const timeoutMs = profile.timeoutMs ?? config.agentTimeoutMs ?? 300_000
   const invocation = getPiInvocation(args)
+  let childCommand = invocation.command
+  let childArgs = invocation.args
+  const childEnv: NodeJS.ProcessEnv = { ...process.env, PI_EPIC_ROLE: role }
+  if (role === 'implementer') {
+    try {
+      const sandboxedInvocation = await wrapImplementerInvocation(
+        root,
+        invocation.command,
+        invocation.args,
+        options.signal
+      )
+      childCommand = '/bin/bash'
+      childArgs = ['-c', sandboxedInvocation]
+      childEnv.PI_EPIC_SANDBOX = '1'
+      childEnv.npm_config_cache = path.join(promptDir, 'npm-cache')
+    } catch (error) {
+      await fs.rm(promptDir, { recursive: true, force: true })
+      throw error
+    }
+  }
   const stdoutLog = createAgentRunStdoutLog(options.agentRunDirectory, role)
   return new Promise((resolve, reject) => {
-    const child = spawn(invocation.command, invocation.args, {
+    const child = spawn(childCommand, childArgs, {
       cwd: root,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PI_EPIC_ROLE: role },
+      env: childEnv,
       signal: options.signal,
     })
     const outputCollector = new AgentOutputCollector()

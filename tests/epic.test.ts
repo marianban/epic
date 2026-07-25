@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
+import { getAgentDir } from '@earendil-works/pi-coding-agent'
 import {
   appendEvent,
   loadActiveEpic,
@@ -38,6 +39,11 @@ import {
   assertRepositoryPath,
   isSafeReadOnlyCommand,
 } from '../pi/extensions/epic/tools.ts'
+import {
+  implementerSandboxConfig,
+  isImplementerSandboxSupported,
+  quoteProcessInvocation,
+} from '../pi/extensions/epic/implementer-sandbox.ts'
 import { discoverPrerequisites } from '../pi/extensions/epic/prerequisites.ts'
 import { formatEscalationMessage } from '../pi/extensions/epic/epic.ts'
 import {
@@ -890,11 +896,35 @@ test('unsupported persisted epic versions are rejected without migration', async
 test('path and read-only command guards block unsafe operations', () => {
   assert.equal(isSafeReadOnlyCommand('git diff --check'), true)
   assert.equal(isSafeReadOnlyCommand('git commit -am bad'), false)
+  assert.equal(isSafeReadOnlyCommand('npm install'), false)
   assert.throws(
     () => assertRepositoryPath('/repo', '../secret.txt'),
     /outside repository/
   )
   assert.throws(() => assertRepositoryPath('/repo', '.env'), /sensitive path/)
+})
+
+test('implementer sandbox is restricted to macOS and Linux', () => {
+  assert.equal(isImplementerSandboxSupported('darwin'), true)
+  assert.equal(isImplementerSandboxSupported('linux'), true)
+  assert.equal(isImplementerSandboxSupported('win32'), false)
+
+  const config = implementerSandboxConfig('/repo')
+  assert.deepEqual(config.filesystem.allowWrite, [
+    '/repo',
+    tmpdir(),
+    getAgentDir(),
+  ])
+  assert.ok(config.filesystem.denyWrite.includes('/repo/.git'))
+  assert.ok(config.filesystem.denyWrite.includes('/repo/plan.md'))
+  assert.ok(config.network.allowedDomains.includes('registry.npmjs.org'))
+  const invocation = quoteProcessInvocation('/usr/bin/node', [
+    '--eval',
+    "console.log('ok')",
+  ])
+  assert.match(invocation, /^'\/usr\/bin\/node'/)
+  assert.match(invocation, /console\.log/)
+  assert.ok(invocation.includes("\\'"))
 })
 
 test('prerequisite discovery proposes git initialization and dependency installation', async () => {

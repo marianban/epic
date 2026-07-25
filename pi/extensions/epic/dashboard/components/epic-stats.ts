@@ -80,9 +80,7 @@ function progressGrid(
   theme: Theme,
   agentTime?: string
 ): string[] {
-  const labelWidth = Math.max(
-    ...rows.map(({ label }) => visibleWidth(label))
-  )
+  const labelWidth = Math.max(...rows.map(({ label }) => visibleWidth(label)))
   const countWidth = Math.max(
     ...rows.map(({ metric }) =>
       visibleWidth(`${metric.completed} / ${metric.total}`)
@@ -93,7 +91,8 @@ function progressGrid(
   )
   const agentTimeWidth = agentTime === undefined ? 0 : visibleWidth(agentTime)
   const fixedWidth = labelWidth + countWidth + percentWidth + 3
-  const reservedAgentTimeWidth = agentTime === undefined ? 0 : agentTimeWidth + 1
+  const reservedAgentTimeWidth =
+    agentTime === undefined ? 0 : agentTimeWidth + 1
   const barWidth = Math.min(
     preferredBarWidth,
     Math.max(0, width - fixedWidth - reservedAgentTimeWidth)
