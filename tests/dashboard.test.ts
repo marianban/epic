@@ -48,7 +48,7 @@ function checkResult(skipped = false): CheckSuiteResult {
   }
 }
 
-test('progress metrics normalize counts and clamp percentages', () => {
+test('progress metrics report valid counts and reject invalid state', () => {
   const state = createEpicState('/repo', 'epic', '2026-01-01T00:00:00.000Z')
   state.tasks = Array.from({ length: 9 }, (_, index) =>
     task({ acceptanceCriteria: index < 4 ? ['criterion'] : [] })
@@ -57,6 +57,9 @@ test('progress metrics normalize counts and clamp percentages', () => {
 
   const dashboard = DashboardState.fromRun({
     state,
+    events: [],
+    checkResults: [],
+    humanWaitMs: 0,
     now: '2026-01-01T00:00:01.000Z',
   })
 
@@ -66,17 +69,40 @@ test('progress metrics normalize counts and clamp percentages', () => {
   assert.equal(dashboard.epic.criteria.total, 4)
 
   state.currentTaskIndex = -2
-  const normalized = DashboardState.fromRun({ state, now: state.updatedAt })
-  assert.equal(normalized.epic.tasks.completed, 0)
-  assert.equal(normalized.epic.tasks.percent, 0)
+  assert.throws(
+    () =>
+      DashboardState.fromRun({
+        state,
+        events: [],
+        checkResults: [],
+        humanWaitMs: 0,
+        now: state.updatedAt,
+      }),
+    /currentTaskIndex/
+  )
 
   state.currentTaskIndex = 10
-  const clamped = DashboardState.fromRun({ state, now: state.updatedAt })
-  assert.equal(clamped.epic.tasks.completed, 10)
-  assert.equal(clamped.epic.tasks.percent, 100)
+  assert.throws(
+    () =>
+      DashboardState.fromRun({
+        state,
+        events: [],
+        checkResults: [],
+        humanWaitMs: 0,
+        now: state.updatedAt,
+      }),
+    /currentTaskIndex/
+  )
 
   state.tasks = []
-  const empty = DashboardState.fromRun({ state, now: state.updatedAt })
+  state.currentTaskIndex = 0
+  const empty = DashboardState.fromRun({
+    state,
+    events: [],
+    checkResults: [],
+    humanWaitMs: 0,
+    now: state.updatedAt,
+  })
   assert.deepEqual(empty.epic.tasks, { completed: 0, total: 0, percent: 0 })
 })
 
@@ -95,8 +121,18 @@ test('status mapping hides internal workflow stage names', () => {
 
   for (const [stage, expected] of cases) {
     state.stage = stage
+    if (stage === 'escalating') state.failureReason = 'A retry is required.'
     assert.equal(
-      DashboardState.fromRun({ state }).epic.status,
+      DashboardState.fromRun({
+        state,
+        events: [],
+        checkResults: [],
+        humanWaitMs: 0,
+        ...(stage === 'completed' || stage === 'failed'
+          ? { completedAt: state.updatedAt }
+          : {}),
+        now: state.updatedAt,
+      }).epic.status,
       expected,
       stage
     )
@@ -118,9 +154,10 @@ test('task, check, attempts, and timing values use independent sources', () => {
 
   const dashboard = DashboardState.fromRun({
     state,
-    now: '2026-01-01T00:10:00.000Z',
-    timing: { humanWaitMs: 120_000 },
+    events: [],
     checkResults: [checkResult(), checkResult(true)],
+    humanWaitMs: 120_000,
+    now: '2026-01-01T00:10:00.000Z',
   })
 
   assert.equal(dashboard.epic.tasks.completed, 1)
@@ -138,6 +175,8 @@ test('agent events provide execution time and token usage without text inference
   const state = createEpicState('/repo', 'epic', '2026-01-01T00:00:00.000Z')
   const dashboard = DashboardState.fromRun({
     state,
+    checkResults: [],
+    humanWaitMs: 0,
     now: '2026-01-01T00:00:10.000Z',
     events: [
       {
@@ -171,7 +210,13 @@ test('agent events provide execution time and token usage without text inference
     cached: 5,
   })
 
-  const missing = DashboardState.fromRun({ state })
+  const missing = DashboardState.fromRun({
+    state,
+    events: [],
+    checkResults: [],
+    humanWaitMs: 0,
+    now: state.updatedAt,
+  })
   assert.deepEqual(missing.epic.tokens, { total: 0 })
 })
 
@@ -179,7 +224,13 @@ test('action-required projection uses registered commands', () => {
   const state = createEpicState('/repo', 'epic')
 
   state.stage = 'awaiting_plan_review'
-  const planReview = DashboardState.fromRun({ state }).actionRequired
+  const planReview = DashboardState.fromRun({
+    state,
+    events: [],
+    checkResults: [],
+    humanWaitMs: 0,
+    now: state.updatedAt,
+  }).actionRequired
   assert.equal(planReview?.id, 'plan-review-required')
   assert.deepEqual(
     planReview?.actions.map((item) => item.command),
@@ -187,7 +238,13 @@ test('action-required projection uses registered commands', () => {
   )
 
   state.stage = 'awaiting_task_approval'
-  const taskReview = DashboardState.fromRun({ state }).actionRequired
+  const taskReview = DashboardState.fromRun({
+    state,
+    events: [],
+    checkResults: [],
+    humanWaitMs: 0,
+    now: state.updatedAt,
+  }).actionRequired
   assert.deepEqual(
     taskReview?.actions.map((item) => item.command),
     ['/task-review', '/task-approve', '/epic-cancel']
@@ -195,10 +252,25 @@ test('action-required projection uses registered commands', () => {
 
   state.stage = 'escalating'
   state.failureReason = 'A retry is required.'
-  const escalation = DashboardState.fromRun({ state }).actionRequired
+  const escalation = DashboardState.fromRun({
+    state,
+    events: [],
+    checkResults: [],
+    humanWaitMs: 0,
+    now: state.updatedAt,
+  }).actionRequired
   assert.equal(escalation?.severity, 'critical')
   assert.equal(escalation?.message, state.failureReason)
 
   state.stage = 'implementing'
-  assert.equal(DashboardState.fromRun({ state }).actionRequired, undefined)
+  assert.equal(
+    DashboardState.fromRun({
+      state,
+      events: [],
+      checkResults: [],
+      humanWaitMs: 0,
+      now: state.updatedAt,
+    }).actionRequired,
+    undefined
+  )
 })

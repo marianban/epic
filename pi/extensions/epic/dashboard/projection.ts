@@ -1,79 +1,104 @@
-import type { EpicStage, EpicState, EpicEvent, CheckSuiteResult } from '../types.ts'
+import type {
+  CheckSuiteResult,
+  EpicEvent,
+  EpicStage,
+  EpicState,
+  EpicTask,
+} from '../types.ts'
 import {
   type DashboardAction,
   type DashboardActionRequest,
   type DashboardProjection,
   type DashboardProjectionInput,
+  type EpicDashboardState,
   type EpicDashboardStatus,
   type ProgressMetric,
   type TokenUsage,
 } from './types.ts'
 
-const HUMAN_REVIEW_STAGES = new Set<EpicStage>([
-  'awaiting_plan_review',
-  'awaiting_plan_approval',
-  'awaiting_prerequisite_approval',
-  'awaiting_task_approval',
-  'awaiting_task_review',
-])
-
-const REFINEMENT_STAGES = new Set<EpicStage>([
-  'revising_plan',
-  'revising_task',
-])
-
-function finiteNumber(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+const STAGE_STATUS: Record<EpicStage, EpicDashboardStatus> = {
+  idle: 'in-progress',
+  classifying: 'in-progress',
+  scouting: 'in-progress',
+  planning: 'in-progress',
+  awaiting_plan_review: 'review',
+  revising_plan: 'refinement',
+  awaiting_plan_approval: 'review',
+  decomposing_tasks: 'decomposing',
+  awaiting_task_approval: 'review',
+  awaiting_task_review: 'review',
+  revising_task: 'refinement',
+  checking_prerequisites: 'decomposed',
+  awaiting_prerequisite_approval: 'review',
+  preparing_prerequisites: 'decomposed',
+  implementing: 'in-progress',
+  running_fast_checks: 'in-progress',
+  repairing_fast_checks: 'in-progress',
+  running_full_checks: 'in-progress',
+  repairing_full_checks: 'in-progress',
+  reviewing: 'in-progress',
+  repairing_review: 'in-progress',
+  escalating: 'escalating',
+  final_verification: 'in-progress',
+  completed: 'completed',
+  failed: 'failed',
+  cancelled: 'failed',
 }
 
-function count(value: unknown): number {
-  const numeric = finiteNumber(value)
-  return numeric === undefined ? 0 : Math.max(0, Math.floor(numeric))
-}
-
-function timestampMs(value: string | undefined): number | undefined {
-  if (!value) return undefined
+function timestampMs(value: string, field: string): number {
   const parsed = Date.parse(value)
-  return Number.isNaN(parsed) ? undefined : parsed
+  if (Number.isNaN(parsed)) {
+    throw new Error(`Invalid ${field} timestamp: ${value}`)
+  }
+  return parsed
 }
 
-function progress(completed: unknown, total: unknown): ProgressMetric {
-  const normalizedCompleted = count(completed)
-  const normalizedTotal = count(total)
-  const percent =
-    normalizedTotal <= 0
-      ? 0
-      : Math.min(
-          100,
-          Math.max(0, (normalizedCompleted / normalizedTotal) * 100)
-        )
+function nonNegativeInteger(value: number, field: string): number {
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`${field} must be a non-negative integer.`)
+  }
+  return value
+}
+
+function nonNegativeNumber(value: number, field: string): number {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${field} must be a finite non-negative number.`)
+  }
+  return value
+}
+
+function requiredPayloadString(
+  event: EpicEvent,
+  field: string
+): string {
+  const value = event.payload[field]
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(
+      `Event ${event.id} has an invalid ${field}; agent events require a non-empty string.`
+    )
+  }
+  return value
+}
+
+function progress(completed: number, total: number): ProgressMetric {
+  if (completed > total) {
+    throw new Error(
+      `Progress cannot exceed its total: completed=${completed}, total=${total}.`
+    )
+  }
   return {
-    completed: normalizedCompleted,
-    total: normalizedTotal,
-    percent,
+    completed,
+    total,
+    percent: total === 0 ? 0 : (completed / total) * 100,
   }
 }
 
 function dashboardStatus(state: EpicState): EpicDashboardStatus {
-  if (HUMAN_REVIEW_STAGES.has(state.stage)) return 'review'
-  if (REFINEMENT_STAGES.has(state.stage)) return 'refinement'
-
-  switch (state.stage) {
-    case 'decomposing_tasks':
-      return 'decomposing'
-    case 'checking_prerequisites':
-    case 'preparing_prerequisites':
-      return 'decomposed'
-    case 'completed':
-      return 'completed'
-    case 'failed':
-    case 'cancelled':
-      return 'failed'
-    case 'escalating':
-      return 'escalating'
-    default:
-      return 'in-progress'
+  const status = STAGE_STATUS[state.stage]
+  if (status === undefined) {
+    throw new Error(`Unsupported epic stage: ${String(state.stage)}`)
   }
+  return status
 }
 
 function action(
@@ -149,6 +174,12 @@ function actionRequired(state: EpicState): DashboardActionRequest | undefined {
         actions: taskReviewActions(),
       }
     case 'escalating':
+      if (
+        typeof state.failureReason !== 'string' ||
+        state.failureReason.length === 0
+      ) {
+        throw new Error('Escalating epics must have a failure reason.')
+      }
       return {
         id: 'epic-escalation',
         severity: 'critical',
@@ -173,9 +204,9 @@ function declaredCheckCount(state: EpicState): number {
 }
 
 function completedCheckCount(
-  checkResults: readonly CheckSuiteResult[] | undefined
+  checkResults: readonly CheckSuiteResult[]
 ): number {
-  return (checkResults ?? []).reduce(
+  return checkResults.reduce(
     (total, result) =>
       total + result.checks.filter((check) => !check.skipped).length,
     0
@@ -183,26 +214,41 @@ function completedCheckCount(
 }
 
 function eventKey(event: EpicEvent): string {
-  const role = event.payload.role
-  const actionName = event.payload.action
-  return `${typeof role === 'string' ? role : ''}:${typeof actionName === 'string' ? actionName : ''}`
+  const role = requiredPayloadString(event, 'role')
+  const actionName = requiredPayloadString(event, 'action')
+  return `${role}:${actionName}`
 }
 
-function agentTimeMs(
-  events: readonly EpicEvent[] | undefined,
-  endMs: number
-): number {
+interface OrderedEvent {
+  readonly event: EpicEvent
+  readonly timestampMs: number
+}
+
+function orderedEvents(events: readonly EpicEvent[]): readonly OrderedEvent[] {
+  return events
+    .map((event) => ({
+      event,
+      timestampMs: timestampMs(event.timestamp, `event ${event.id}`),
+    }))
+    .sort((left, right) => left.timestampMs - right.timestampMs)
+}
+
+function durationMs(startMs: number, endMs: number, description: string): number {
+  if (endMs < startMs) {
+    throw new Error(`${description} ends before it starts.`)
+  }
+  return endMs - startMs
+}
+
+function agentTimeMs(events: readonly EpicEvent[], endMs: number): number {
   const active = new Map<string, number[]>()
   let total = 0
-  const ordered = [...(events ?? [])].sort(
-    (left, right) =>
-      (timestampMs(left.timestamp) ?? Number.MAX_SAFE_INTEGER) -
-      (timestampMs(right.timestamp) ?? Number.MAX_SAFE_INTEGER)
-  )
 
-  for (const event of ordered) {
-    const eventMs = timestampMs(event.timestamp)
-    if (eventMs === undefined) continue
+  for (const { event, timestampMs: eventMs } of orderedEvents(events)) {
+    if (event.type !== 'agent_started' && event.type !== 'agent_finished') {
+      continue
+    }
+
     const key = eventKey(event)
     if (event.type === 'agent_started') {
       const starts = active.get(key) ?? []
@@ -210,159 +256,193 @@ function agentTimeMs(
       active.set(key, starts)
       continue
     }
-    if (event.type !== 'agent_finished') continue
 
     const starts = active.get(key)
-    const startedAt = starts?.shift()
-    if (startedAt !== undefined) total += Math.max(0, eventMs - startedAt)
-    if (starts?.length === 0) active.delete(key)
+    if (!starts || starts.length === 0) {
+      throw new Error(`Agent event ${event.id} finished without a matching start.`)
+    }
+    total += durationMs(starts.shift() as number, eventMs, `Agent event ${event.id}`)
+    if (starts.length === 0) active.delete(key)
   }
 
-  for (const starts of active.values()) {
-    for (const startedAt of starts) total += Math.max(0, endMs - startedAt)
+  for (const [key, starts] of active) {
+    for (const startedAt of starts) {
+      total += durationMs(startedAt, endMs, `Agent activity ${key}`)
+    }
   }
-  return count(total)
+  return total
 }
 
-function usageNumber(
+function usageValue(
   usage: Record<string, unknown>,
-  keys: readonly string[]
+  keys: readonly string[],
+  event: EpicEvent
 ): number | undefined {
-  for (const key of keys) {
-    const value = finiteNumber(usage[key])
-    if (value !== undefined) return Math.max(0, value)
+  const key = keys.find((candidate) => candidate in usage)
+  if (key === undefined) return undefined
+  const value = usage[key]
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 0
+  ) {
+    throw new Error(`Event ${event.id} has an invalid ${key} token count.`)
   }
-  return undefined
+  return value
 }
 
-function tokenUsage(events: readonly EpicEvent[] | undefined): TokenUsage {
-  let total = 0
-  let input = 0
-  let output = 0
-  let cached = 0
-  let reasoning = 0
-  let hasInput = false
-  let hasOutput = false
-  let hasCached = false
-  let hasReasoning = false
-
-  for (const event of events ?? []) {
-    if (event.type !== 'agent_finished') continue
-    const usage = event.payload.usage
-    if (!usage || typeof usage !== 'object' || Array.isArray(usage)) continue
-    const record = usage as Record<string, unknown>
-    const inputValue = usageNumber(record, ['input', 'inputTokens', 'promptTokens'])
-    const outputValue = usageNumber(record, [
-      'output',
-      'outputTokens',
-      'completionTokens',
-    ])
-    const cachedValue = usageNumber(record, [
-      'cached',
-      'cachedTokens',
-      'cacheRead',
-      'cacheReadTokens',
-    ])
-    const reasoningValue = usageNumber(record, [
-      'reasoning',
-      'reasoningTokens',
-    ])
-    const explicitTotal = usageNumber(record, [
-      'total',
-      'totalTokens',
-      'tokens',
-    ])
-
-    if (inputValue !== undefined) {
-      input += inputValue
-      hasInput = true
-    }
-    if (outputValue !== undefined) {
-      output += outputValue
-      hasOutput = true
-    }
-    if (cachedValue !== undefined) {
-      cached += cachedValue
-      hasCached = true
-    }
-    if (reasoningValue !== undefined) {
-      reasoning += reasoningValue
-      hasReasoning = true
-    }
-    total +=
-      explicitTotal ??
-      (inputValue ?? 0) +
-        (outputValue ?? 0) +
-        (cachedValue ?? 0) +
-        (reasoningValue ?? 0)
+function tokenUsageForEvent(event: EpicEvent): TokenUsage {
+  const usage = event.payload.usage
+  if (usage === undefined) return { total: 0 }
+  if (typeof usage !== 'object' || usage === null || Array.isArray(usage)) {
+    throw new Error(`Event ${event.id} has invalid token usage.`)
   }
+  const record = usage as Record<string, unknown>
+  const input = usageValue(record, ['input', 'inputTokens', 'promptTokens'], event)
+  const output = usageValue(
+    record,
+    ['output', 'outputTokens', 'completionTokens'],
+    event
+  )
+  const cached = usageValue(
+    record,
+    ['cached', 'cachedTokens', 'cacheRead', 'cacheReadTokens'],
+    event
+  )
+  const reasoning = usageValue(
+    record,
+    ['reasoning', 'reasoningTokens'],
+    event
+  )
+  const explicitTotal = usageValue(
+    record,
+    ['total', 'totalTokens', 'tokens'],
+    event
+  )
 
   return {
-    total: count(total),
-    ...(hasInput ? { input: count(input) } : {}),
-    ...(hasOutput ? { output: count(output) } : {}),
-    ...(hasCached ? { cached: count(cached) } : {}),
-    ...(hasReasoning ? { reasoning: count(reasoning) } : {}),
+    total:
+      explicitTotal ??
+      (input ?? 0) + (output ?? 0) + (cached ?? 0) + (reasoning ?? 0),
+    ...(input === undefined ? {} : { input }),
+    ...(output === undefined ? {} : { output }),
+    ...(cached === undefined ? {} : { cached }),
+    ...(reasoning === undefined ? {} : { reasoning }),
   }
 }
 
-function completedTaskCount(state: EpicState): number {
-  if (!state.tasks?.length) return 0
-  if (state.stage === 'completed') return state.tasks.length
-  return count(state.currentTaskIndex)
+function addOptional(left: number | undefined, right: number | undefined): number | undefined {
+  if (left === undefined && right === undefined) return undefined
+  return (left ?? 0) + (right ?? 0)
 }
 
-function elapsedMs(
+function addTokenUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
+  const input = addOptional(left.input, right.input)
+  const output = addOptional(left.output, right.output)
+  const cached = addOptional(left.cached, right.cached)
+  const reasoning = addOptional(left.reasoning, right.reasoning)
+  return {
+    total: left.total + right.total,
+    ...(input === undefined ? {} : { input }),
+    ...(output === undefined ? {} : { output }),
+    ...(cached === undefined ? {} : { cached }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+  }
+}
+
+function tokenUsage(events: readonly EpicEvent[]): TokenUsage {
+  return events
+    .filter((event) => event.type === 'agent_finished')
+    .map(tokenUsageForEvent)
+    .reduce(addTokenUsage, { total: 0 })
+}
+
+function completedTaskCount(
   state: EpicState,
-  completedAt: string | undefined,
-  now: string
+  tasks: readonly EpicTask[]
 ): number {
-  const started = timestampMs(state.createdAt)
-  const end = timestampMs(completedAt ?? now)
-  if (started === undefined || end === undefined) return 0
-  return count(Math.max(0, end - started))
+  const currentTaskIndex = nonNegativeInteger(
+    state.currentTaskIndex,
+    'currentTaskIndex'
+  )
+  if (state.stage === 'completed') return tasks.length
+  if (tasks.length === 0) {
+    if (currentTaskIndex !== 0) {
+      throw new Error('An epic without tasks must have currentTaskIndex 0.')
+    }
+    return 0
+  }
+  if (currentTaskIndex >= tasks.length) {
+    throw new Error('currentTaskIndex must refer to an existing task.')
+  }
+  return currentTaskIndex
+}
+
+function elapsedMs(createdAt: string, endMs: number): number {
+  return durationMs(
+    timestampMs(createdAt, 'state.createdAt'),
+    endMs,
+    'Epic elapsed time'
+  )
 }
 
 export function projectDashboardState(
   input: DashboardProjectionInput
 ): DashboardProjection {
-  const updatedAt = input.now ?? new Date().toISOString()
+  const nowMs = timestampMs(input.now, 'now')
   const terminal = ['completed', 'failed', 'cancelled'].includes(input.state.stage)
-  const completedAt = terminal
-    ? input.completedAt ?? input.state.updatedAt
-    : undefined
-  const endMs = timestampMs(completedAt ?? updatedAt) ?? Date.now()
+  if (terminal && input.completedAt === undefined) {
+    throw new Error('Terminal epics require completedAt.')
+  }
+  if (!terminal && input.completedAt !== undefined) {
+    throw new Error('Only terminal epics may have completedAt.')
+  }
+
+  const completedAt = input.completedAt
+  const endMs =
+    completedAt === undefined ? nowMs : timestampMs(completedAt, 'completedAt')
   const tasks = input.state.tasks ?? []
   const criteriaTotal = tasks.reduce(
     (total, task) => total + task.acceptanceCriteria.length,
     0
   )
-  const taskProgress = progress(completedTaskCount(input.state), tasks.length)
+  const taskProgress = progress(
+    completedTaskCount(input.state, tasks),
+    tasks.length
+  )
   const checkProgress = progress(
     completedCheckCount(input.checkResults),
     declaredCheckCount(input.state)
   )
+  const humanWaitMs = nonNegativeNumber(input.humanWaitMs, 'humanWaitMs')
+  const implementationAttempt = nonNegativeInteger(
+    input.state.implementationAttempt,
+    'implementationAttempt'
+  )
+  const repairAttempt =
+    nonNegativeInteger(input.state.fastRepairAttempt, 'fastRepairAttempt') +
+    nonNegativeInteger(input.state.fullRepairAttempt, 'fullRepairAttempt') +
+    nonNegativeInteger(
+      input.state.semanticRepairAttempt,
+      'semanticRepairAttempt'
+    )
 
-  const epic = {
+  const epic: EpicDashboardState = {
     id: input.state.epicId,
     name: input.state.epic,
     status: dashboardStatus(input.state),
     startedAt: input.state.createdAt,
-    ...(completedAt ? { completedAt } : {}),
-    elapsedMs: elapsedMs(input.state, completedAt, updatedAt),
+    ...(completedAt === undefined ? {} : { completedAt }),
+    elapsedMs: elapsedMs(input.state.createdAt, endMs),
     agentTimeMs: agentTimeMs(input.events, endMs),
-    humanWaitMs: count(input.timing?.humanWaitMs),
+    humanWaitMs,
     tasks: taskProgress,
     criteria: progress(0, criteriaTotal),
     checks: checkProgress,
     tokens: tokenUsage(input.events),
     attempts: {
-      implementation: count(input.state.implementationAttempt),
-      repair: count(
-        input.state.fastRepairAttempt +
-          input.state.fullRepairAttempt +
-          input.state.semanticRepairAttempt
-      ),
+      implementation: implementationAttempt,
+      repair: repairAttempt,
     },
   }
 

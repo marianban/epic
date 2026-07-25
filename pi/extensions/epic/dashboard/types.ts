@@ -58,17 +58,13 @@ export interface EpicDashboardState {
   }
 }
 
-export interface DashboardTimingEvidence {
-  readonly humanWaitMs?: number
-}
-
 export interface DashboardProjectionInput {
   readonly state: EpicState
-  readonly events?: readonly EpicEvent[]
-  readonly checkResults?: readonly CheckSuiteResult[]
-  readonly timing?: DashboardTimingEvidence
+  readonly events: readonly EpicEvent[]
+  readonly checkResults: readonly CheckSuiteResult[]
+  readonly humanWaitMs: number
   readonly completedAt?: string
-  readonly now?: string
+  readonly now: string
 }
 
 export interface DashboardProjection {

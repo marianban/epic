@@ -21,12 +21,11 @@ export class DashboardState {
   }
 
   static fromRun(input: DashboardProjectionInput): DashboardState {
-    const updatedAt = input.now ?? new Date().toISOString()
     const projection = projectDashboardState(input)
     return new DashboardState(
       projection.epic,
       projection.actionRequired,
-      updatedAt
+      input.now
     )
   }
 }
