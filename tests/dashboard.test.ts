@@ -118,7 +118,7 @@ test('task, attempts, and timing values use independent sources', () => {
   })
 
   assert.equal(dashboard.epic.tasks.completed, 1)
-  assert.equal(dashboard.epic.criteria.completed, 0)
+  assert.equal(dashboard.epic.criteria.completed, 2)
   assert.equal(dashboard.epic.criteria.total, 4)
   assert.equal(dashboard.epic.agentTimeMs, 0)
   assert.deepEqual(dashboard.epic.attempts, { implementation: 1, repair: 6 })

@@ -409,8 +409,12 @@ export function projectDashboardState(
     (total, task) => total + task.acceptanceCriteria.length,
     0
   )
+  const completedTasks = completedTaskCount(input.state, tasks)
+  const criteriaCompleted = tasks
+    .slice(0, completedTasks)
+    .reduce((total, task) => total + task.acceptanceCriteria.length, 0)
   const taskProgress = progress(
-    completedTaskCount(input.state, tasks),
+    completedTasks,
     tasks.length
   )
   const implementationAttempt = nonNegativeInteger(
@@ -440,7 +444,7 @@ export function projectDashboardState(
     ...(completedAt === undefined ? {} : { completedAt }),
     agentTimeMs: agentTimeMs(input.events, input.activeAgentRuns ?? [], nowMs),
     tasks: taskProgress,
-    criteria: progress(0, criteriaTotal),
+    criteria: progress(criteriaCompleted, criteriaTotal),
     tokens: tokenUsage(input.events),
     attempts: {
       implementation: implementationAttempt,

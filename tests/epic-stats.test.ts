@@ -105,12 +105,12 @@ test('renders the wide epic stats layout and representative metrics', () => {
   assert.ok(criteriaLine)
   assert.equal(
     taskLine.indexOf('2 / 9') + '2 / 9'.length,
-    criteriaLine.indexOf('0 / 40') + '0 / 40'.length
+    criteriaLine.indexOf('10 / 40') + '10 / 40'.length
   )
   assert.equal(taskLine.search(/[█░]/), criteriaLine.search(/[█░]/))
   assert.equal(
     taskLine.lastIndexOf('22%') + '22%'.length,
-    criteriaLine.lastIndexOf('0%') + '0%'.length
+    criteriaLine.lastIndexOf('25%') + '25%'.length
   )
   assert.match(taskLine, /Agent time 06:48 │$/)
   assert.doesNotMatch(criteriaLine, /Agent time/)
@@ -127,7 +127,7 @@ test('uses compact rendering below the fixed breakpoint', () => {
   assert.ok(criteriaLine)
   assert.equal(
     taskLine.indexOf('2 / 9') + '2 / 9'.length,
-    criteriaLine.indexOf('0 / 40') + '0 / 40'.length
+    criteriaLine.indexOf('10 / 40') + '10 / 40'.length
   )
   assert.equal(taskLine.search(/[█░]/), criteriaLine.search(/[█░]/))
   assert.match(taskLine, /Agent time 06:48 │$/)
