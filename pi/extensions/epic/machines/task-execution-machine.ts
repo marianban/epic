@@ -38,6 +38,12 @@ function formatActorError(error: unknown): string {
   return String(error)
 }
 
+type RepairKind = 'fast checks' | 'full checks' | 'semantic review'
+
+function repairLimitReason(kind: RepairKind): string {
+  return `${kind} repair limit exhausted.`
+}
+
 export function createTaskExecutionMachine(services: EpicServices) {
   const implementation = fromPromise<
     EpicState,
@@ -76,6 +82,27 @@ export function createTaskExecutionMachine(services: EpicServices) {
       captureFailureReason: assign({
         failureReason: ({ event }) =>
           formatActorError((event as { error?: unknown }).error),
+      }),
+      markFastRepairEscalation: assign(({ context }) => {
+        const failureReason = repairLimitReason('fast checks')
+        return {
+          failureReason,
+          state: { ...context.state, failureReason },
+        }
+      }),
+      markFullRepairEscalation: assign(({ context }) => {
+        const failureReason = repairLimitReason('full checks')
+        return {
+          failureReason,
+          state: { ...context.state, failureReason },
+        }
+      }),
+      markSemanticRepairEscalation: assign(({ context }) => {
+        const failureReason = repairLimitReason('semantic review')
+        return {
+          failureReason,
+          state: { ...context.state, failureReason },
+        }
       }),
       markTaskApproved: assign({
         state: ({ context }) => ({
@@ -170,7 +197,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
               fastRepairAttempt: ({ context }) => context.fastRepairAttempt + 1,
             }),
           },
-          { target: 'escalating' },
+          { target: 'escalating', actions: 'markFastRepairEscalation' },
         ],
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -224,7 +251,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
               fullRepairAttempt: ({ context }) => context.fullRepairAttempt + 1,
             }),
           },
-          { target: 'escalating' },
+          { target: 'escalating', actions: 'markFullRepairEscalation' },
         ],
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -279,7 +306,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
                 context.semanticRepairAttempt + 1,
             }),
           },
-          { target: 'escalating' },
+          { target: 'escalating', actions: 'markSemanticRepairEscalation' },
         ],
         on: { 'EPIC.CANCEL': 'cancelled' },
       },

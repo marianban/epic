@@ -417,6 +417,10 @@ test('task child snapshots synchronize approval and repair counters to the root'
   assert.equal(childSnapshot?.value, 'escalating')
   assert.equal(snapshot.context.state.stage, 'escalating')
   assert.equal(snapshot.context.state.taskApproved, true)
+  assert.equal(
+    snapshot.context.state.failureReason,
+    'semantic review repair limit exhausted.'
+  )
   assert.equal(snapshot.context.state.implementationAttempt, 1)
   assert.equal(snapshot.context.state.semanticRepairAttempt, 2)
   assert.equal(childSnapshot?.context?.semanticRepairAttempt, 2)
@@ -425,6 +429,10 @@ test('task child snapshots synchronize approval and repair counters to the root'
     context: { state: EpicState }
   }
   assert.equal(persisted.context.state.taskApproved, true)
+  assert.equal(
+    persisted.context.state.failureReason,
+    'semantic review repair limit exhausted.'
+  )
   assert.equal(persisted.context.state.semanticRepairAttempt, 2)
   actor.stop()
 })
