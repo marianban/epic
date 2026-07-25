@@ -229,6 +229,59 @@ test('agent output extraction does not retain the complete JSONL stream', () => 
   assert.match(result.diagnosticTail, /task-001/)
 })
 
+test('agent output extraction detects protocol failures independently of exit code', () => {
+  const collector = new AgentOutputCollector()
+  collector.append(
+    Buffer.from(
+      `${JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [],
+          stopReason: 'error',
+        },
+        errorMessage: 'upstream connection terminated',
+      })}\n`
+    )
+  )
+  collector.append(
+    Buffer.from(`${JSON.stringify({
+      type: 'message_start',
+      errorMessage: 'Service Unavailable',
+    })}\n`)
+  )
+
+  const result = collector.finish()
+  assert.equal(result.failureReason, 'Service Unavailable')
+})
+
+test('agent output extraction clears a transient provider failure after a successful retry', () => {
+  const collector = new AgentOutputCollector()
+  collector.append(
+    Buffer.from(
+      `${JSON.stringify({
+        type: 'message_start',
+        errorMessage: 'Service Unavailable',
+      })}\n`
+    )
+  )
+  collector.append(
+    Buffer.from(
+      `${JSON.stringify({
+        type: 'message_end',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'completed' }],
+        },
+      })}\n`
+    )
+  )
+
+  const result = collector.finish()
+  assert.equal(result.output, 'completed')
+  assert.equal(result.failureReason, undefined)
+})
+
 test('task execution actor exposes final output to its invoking parent', async () => {
   const state = createEpicState('/repo', 'task')
   const services = createTestEpicServices()
@@ -307,6 +360,7 @@ test('task escalation keeps durable root and snapshot stages aligned', async () 
   assert.equal(snapshot.value, 'escalating')
   assert.equal(snapshot.context.state.stage, 'escalating')
   assert.equal(snapshot.context.state.pendingHumanAction, 'resolve_escalation')
+  assert.equal(snapshot.context.state.failureReason, 'full checks unavailable')
   assert.equal(persisted.value, 'escalating')
   assert.equal(persisted.context.state.stage, 'escalating')
   actor.stop()

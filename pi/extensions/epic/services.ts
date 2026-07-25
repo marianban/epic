@@ -81,6 +81,8 @@ export function createEpicServices(
     message: string,
     level: 'info' | 'warning' | 'error' = 'info'
   ) => ctx.ui.notify(message, level)
+  const agentFailure = (run: AgentRunResult): string =>
+    run.failureReason || run.stderr || run.output.slice(-2_000)
   const runRole = async (
     state: EpicState,
     role: Parameters<typeof runAgentActor>[0]['role'],
@@ -115,6 +117,7 @@ export function createEpicServices(
       action,
       exitCode: result.exitCode,
       stdoutLogPath: result.stdoutLogPath,
+      failureReason: result.failureReason,
       usage: result.usage,
     })
     return result
@@ -161,9 +164,7 @@ export function createEpicServices(
         questions.length ? 'focused discovery' : 'repository discovery'
       )
       if (run.exitCode !== 0)
-        throw new Error(
-          `Scout failed: ${run.stderr || run.output.slice(-2_000)}`
-        )
+        throw new Error(`Scout failed: ${agentFailure(run)}`)
       const report = parseJsonResponse<ScoutReport>(run.output, 'scout')
       next.scoutReportPath = await persistScoutReport(next, report)
       return { state: next, report }
@@ -176,9 +177,7 @@ export function createEpicServices(
         'planning'
       )
       if (run.exitCode !== 0)
-        throw new Error(
-          `Planner failed: ${run.stderr || run.output.slice(-2_000)}`
-        )
+        throw new Error(`Planner failed: ${agentFailure(run)}`)
       const result = parsePlannerResponse(run.output)
       if (typeof result !== 'string') {
         const max =
@@ -239,9 +238,7 @@ export function createEpicServices(
         'plan revision'
       )
       if (run.exitCode !== 0)
-        throw new Error(
-          `Plan reviewer failed: ${run.stderr || run.output.slice(-2_000)}`
-        )
+        throw new Error(`Plan reviewer failed: ${agentFailure(run)}`)
       const revised = parseMarkdownResponse(run.output, 'plan-reviewer')
       validatePlanRevision(current, revised, instructions)
       const next = {
@@ -263,9 +260,7 @@ export function createEpicServices(
         'task decomposition'
       )
       if (run.exitCode !== 0)
-        throw new Error(
-          `Task decomposition failed: ${run.stderr || run.output.slice(-2_000)}`
-        )
+        throw new Error(`Task decomposition failed: ${agentFailure(run)}`)
       const tasks = parseTaskDecomposition(run.output)
       const next = {
         ...state,
@@ -306,9 +301,7 @@ export function createEpicServices(
         feedback ? 'bounded repair' : 'implementation'
       )
       if (run.exitCode !== 0)
-        throw new Error(
-          `Implementer failed: ${run.stderr || run.output.slice(-2_000)}`
-        )
+        throw new Error(`Implementer failed: ${agentFailure(run)}`)
       const next = {
         ...state,
         implementationAttempt: state.implementationAttempt + (feedback ? 0 : 1),
@@ -348,9 +341,7 @@ export function createEpicServices(
         'semantic review'
       )
       if (run.exitCode !== 0)
-        throw new Error(
-          `Reviewer failed: ${run.stderr || run.output.slice(-2_000)}`
-        )
+        throw new Error(`Reviewer failed: ${agentFailure(run)}`)
       const result = parseJsonResponse<ReviewResult>(run.output, 'reviewer')
       if (typeof result.passed !== 'boolean' || !Array.isArray(result.findings))
         throw new Error('Reviewer returned an invalid review result.')
@@ -377,9 +368,7 @@ export function createEpicServices(
         'task revision'
       )
       if (run.exitCode !== 0)
-        throw new Error(
-          `Task reviewer failed: ${run.stderr || run.output.slice(-2_000)}`
-        )
+        throw new Error(`Task reviewer failed: ${agentFailure(run)}`)
       const revised = parseMarkdownResponse(run.output, 'task-reviewer')
       if (extractReviewInstructions(revised).length)
         throw new Error(

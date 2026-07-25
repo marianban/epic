@@ -95,6 +95,7 @@ export interface AgentRunResult {
   output: string
   stderr: string
   stdoutLogPath: string
+  failureReason?: string
   usage?: Record<string, unknown>
 }
 export interface AgentRunOptions {
@@ -134,7 +135,19 @@ function assistantText(event: Record<string, unknown>): string | undefined {
 export interface AgentOutputSummary {
   output: string
   diagnosticTail: string
+  failureReason?: string
   usage?: Record<string, unknown>
+}
+
+function protocolFailureReason(event: Record<string, unknown>): string | undefined {
+  if (typeof event.errorMessage === 'string' && event.errorMessage.trim())
+    return event.errorMessage.trim()
+
+  if (!isRecord(event.message)) return undefined
+  if (typeof event.message.errorMessage === 'string' && event.message.errorMessage.trim())
+    return event.message.errorMessage.trim()
+  if (event.message.stopReason === 'error') return 'Agent reported an error.'
+  return undefined
 }
 
 /**
@@ -146,6 +159,7 @@ export class AgentOutputCollector {
   private pendingLine = ''
   private latestAssistantText = ''
   private diagnosticTail = ''
+  private failureReason: string | undefined
   private usage: Record<string, unknown> | undefined
 
   append(chunk: Buffer): void {
@@ -167,6 +181,7 @@ export class AgentOutputCollector {
     return {
       output: this.latestAssistantText,
       diagnosticTail: this.diagnosticTail,
+      failureReason: this.failureReason,
       usage: this.usage,
     }
   }
@@ -199,8 +214,15 @@ export class AgentOutputCollector {
     }
     if (!isRecord(event)) return
 
+    const failureReason = protocolFailureReason(event)
+    if (failureReason) this.failureReason = failureReason
+
     const output = assistantText(event)
-    if (output) this.latestAssistantText = output
+    if (output) {
+      this.latestAssistantText = output
+      // A later successful retry supersedes an earlier provider error.
+      this.failureReason = undefined
+    }
     if (event.type === 'agent_end' && isRecord(event.usage))
       this.usage = event.usage
   }
@@ -364,12 +386,16 @@ export async function runAgent(
       settled = true
       const output = outputCollector.finish()
       cleanup()
+      const failureReason = output.failureReason
       resolve({
         role,
-        exitCode: exitCode ?? 1,
+        exitCode: failureReason ? 1 : (exitCode ?? 1),
         output: output.output || redactSecrets(output.diagnosticTail),
         stderr: redactSecrets(stderr),
         stdoutLogPath: stdoutLog.filePath,
+        failureReason: failureReason
+          ? redactSecrets(failureReason)
+          : undefined,
         usage: output.usage,
       })
     })

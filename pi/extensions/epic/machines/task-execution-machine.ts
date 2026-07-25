@@ -4,6 +4,7 @@ import type { EpicServices } from '../services.ts'
 
 interface TaskExecutionContext {
   state: EpicState
+  failureReason?: string
   fast?: CheckSuiteResult
   full?: CheckSuiteResult
   review?: ReviewResult
@@ -24,6 +25,17 @@ export interface TaskExecutionResult {
   kind: 'completed' | 'escalated' | 'cancelled'
   state: EpicState
   reason?: string
+}
+
+function formatActorError(error: unknown): string {
+  if (error == null) return 'Task actor failed.'
+  if (error instanceof Error) return error.message
+  if (typeof error === 'string') return error
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  return String(error)
 }
 
 export function createTaskExecutionMachine(services: EpicServices) {
@@ -61,6 +73,10 @@ export function createTaskExecutionMachine(services: EpicServices) {
         context.semanticRepairAttempt < context.state.maxSemanticRepairs,
     },
     actions: {
+      captureFailureReason: assign({
+        failureReason: ({ event }) =>
+          formatActorError((event as { error?: unknown }).error),
+      }),
       markTaskApproved: assign({
         state: ({ context }) => ({
           ...context.state,
@@ -103,7 +119,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
             target: 'awaitingApproval',
             actions: assign({ state: ({ event }) => event.output }),
           },
-          onError: 'failed',
+          onError: { target: 'failed', actions: 'captureFailureReason' },
         },
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -115,7 +131,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
             target: 'fastChecks',
             actions: assign({ state: ({ event }) => event.output }),
           },
-          onError: 'failed',
+          onError: { target: 'failed', actions: 'captureFailureReason' },
         },
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -140,7 +156,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
               }),
             },
           ],
-          onError: 'failed',
+          onError: { target: 'failed', actions: 'captureFailureReason' },
         },
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -169,7 +185,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
             target: 'fastChecks',
             actions: assign({ state: ({ event }) => event.output }),
           },
-          onError: 'failed',
+          onError: { target: 'failed', actions: 'captureFailureReason' },
         },
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -194,7 +210,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
               }),
             },
           ],
-          onError: 'failed',
+          onError: { target: 'failed', actions: 'captureFailureReason' },
         },
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -223,7 +239,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
             target: 'fullChecks',
             actions: assign({ state: ({ event }) => event.output }),
           },
-          onError: 'failed',
+          onError: { target: 'failed', actions: 'captureFailureReason' },
         },
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -248,7 +264,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
               }),
             },
           ],
-          onError: 'failed',
+          onError: { target: 'failed', actions: 'captureFailureReason' },
         },
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -278,7 +294,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
             target: 'fastChecks',
             actions: assign({ state: ({ event }) => event.output }),
           },
-          onError: 'failed',
+          onError: { target: 'failed', actions: 'captureFailureReason' },
         },
         on: { 'EPIC.CANCEL': 'cancelled' },
       },
@@ -318,7 +334,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
           ({
             kind: 'escalated',
             state: context.state,
-            reason: 'Task actor failed.',
+            reason: context.failureReason ?? 'Task actor failed.',
           }) as TaskExecutionResult,
       },
     },
