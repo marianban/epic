@@ -217,7 +217,6 @@ export class EpicStats implements Component {
       [
         { label: 'Tasks', metric: epic.tasks },
         { label: 'Criteria', metric: epic.criteria },
-        { label: 'Checks', metric: epic.checks },
       ],
       innerWidth,
       WIDE_BAR_WIDTH,
@@ -245,7 +244,6 @@ export class EpicStats implements Component {
       [
         { label: 'Tasks', metric: epic.tasks },
         { label: 'Criteria', metric: epic.criteria },
-        { label: 'Checks', metric: epic.checks },
       ],
       innerWidth,
       COMPACT_BAR_WIDTH,

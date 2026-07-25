@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { DashboardState } from '../pi/extensions/epic/dashboard/state.ts'
 import { createEpicState } from '../pi/extensions/epic/state.ts'
-import type { CheckSuiteResult, EpicTask } from '../pi/extensions/epic/types.ts'
+import type { EpicTask } from '../pi/extensions/epic/types.ts'
 
 function task(
   overrides: Partial<Pick<EpicTask, 'acceptanceCriteria' | 'requiredChecks' | 'deferredChecks'>> = {}
@@ -23,31 +23,6 @@ function task(
   }
 }
 
-function checkResult(skipped = false): CheckSuiteResult {
-  return {
-    suite: 'fast',
-    passed: true,
-    checks: [
-      {
-        name: 'typecheck',
-        command: 'npm run typecheck',
-        passed: true,
-        required: !skipped,
-        exitCode: 0,
-        durationMs: 10,
-        stdoutPreview: '',
-        stderrPreview: '',
-        findings: [],
-        outputTruncated: false,
-        ...(skipped ? { skipped: true } : {}),
-      },
-    ],
-    introducedFindings: [],
-    preExistingFindings: [],
-    deferredChecks: [],
-  }
-}
-
 test('progress metrics report valid counts and reject invalid state', () => {
   const state = createEpicState('/repo', 'epic', '2026-01-01T00:00:00.000Z')
   state.tasks = Array.from({ length: 9 }, (_, index) =>
@@ -58,7 +33,6 @@ test('progress metrics report valid counts and reject invalid state', () => {
   const dashboard = DashboardState.fromRun({
     state,
     events: [],
-    checkResults: [],
   })
 
   assert.equal(dashboard.epic.tasks.completed, 2)
@@ -72,7 +46,6 @@ test('progress metrics report valid counts and reject invalid state', () => {
       DashboardState.fromRun({
         state,
         events: [],
-        checkResults: [],
       }),
     /currentTaskIndex/
   )
@@ -83,7 +56,6 @@ test('progress metrics report valid counts and reject invalid state', () => {
       DashboardState.fromRun({
         state,
         events: [],
-        checkResults: [],
       }),
     /currentTaskIndex/
   )
@@ -93,7 +65,6 @@ test('progress metrics report valid counts and reject invalid state', () => {
   const empty = DashboardState.fromRun({
     state,
     events: [],
-    checkResults: [],
   })
   assert.deepEqual(empty.epic.tasks, { completed: 0, total: 0, percent: 0 })
 })
@@ -118,7 +89,6 @@ test('status mapping hides internal workflow stage names', () => {
       DashboardState.fromRun({
         state,
         events: [],
-        checkResults: [],
         ...(stage === 'completed' || stage === 'failed'
           ? { completedAt: state.updatedAt }
           : {}),
@@ -129,7 +99,7 @@ test('status mapping hides internal workflow stage names', () => {
   }
 })
 
-test('task, check, attempts, and timing values use independent sources', () => {
+test('task, attempts, and timing values use independent sources', () => {
   const state = createEpicState('/repo', 'epic', '2026-01-01T00:00:00.000Z')
   state.tasks = [
     task({ acceptanceCriteria: ['a', 'b'], requiredChecks: ['typecheck'] }),
@@ -145,14 +115,11 @@ test('task, check, attempts, and timing values use independent sources', () => {
   const dashboard = DashboardState.fromRun({
     state,
     events: [],
-    checkResults: [checkResult(), checkResult(true)],
   })
 
   assert.equal(dashboard.epic.tasks.completed, 1)
   assert.equal(dashboard.epic.criteria.completed, 0)
   assert.equal(dashboard.epic.criteria.total, 4)
-  assert.equal(dashboard.epic.checks.total, 3)
-  assert.equal(dashboard.epic.checks.completed, 1)
   assert.equal(dashboard.epic.agentTimeMs, 0)
   assert.deepEqual(dashboard.epic.attempts, { implementation: 1, repair: 6 })
 })
@@ -161,7 +128,6 @@ test('agent events provide execution time and token usage without text inference
   const state = createEpicState('/repo', 'epic', '2026-01-01T00:00:00.000Z')
   const dashboard = DashboardState.fromRun({
     state,
-    checkResults: [],
     events: [
       {
         id: 'start',
@@ -198,7 +164,6 @@ test('agent events provide execution time and token usage without text inference
   const missing = DashboardState.fromRun({
     state,
     events: [],
-    checkResults: [],
   })
   assert.deepEqual(missing.epic.tokens, { total: 0 })
 })
@@ -221,7 +186,6 @@ test('agent time ignores abandoned starts and merges overlapping runs', () => {
 
   const dashboard = DashboardState.fromRun({
     state,
-    checkResults: [],
     events: [
       event('stale-start', '2026-01-01T00:00:01.000Z', 'agent_started', 'planner'),
       event('real-start', '2026-01-01T00:00:05.000Z', 'agent_started', 'planner'),
@@ -235,7 +199,6 @@ test('agent time ignores abandoned starts and merges overlapping runs', () => {
 
   const idle = DashboardState.fromRun({
     state,
-    checkResults: [],
     events: [
       event(
         'unfinished-start',
@@ -252,7 +215,6 @@ test('agent time uses the measured runAgent duration', () => {
   const state = createEpicState('/repo', 'epic')
   const dashboard = DashboardState.fromRun({
     state,
-    checkResults: [],
     events: [
       {
         id: 'start',
@@ -282,7 +244,6 @@ test('agent time uses the measured runAgent duration', () => {
   const active = DashboardState.fromRun({
     state,
     events: [],
-    checkResults: [],
     activeAgentRuns: [{
       startedAtMs: Date.parse('2026-01-01T00:00:05.000Z'),
     }],
@@ -298,7 +259,6 @@ test('action-required projection uses registered commands', () => {
   const planReview = DashboardState.fromRun({
     state,
     events: [],
-    checkResults: [],
   }).actionRequired
   assert.equal(planReview?.id, 'plan-review-required')
   assert.deepEqual(
@@ -310,7 +270,6 @@ test('action-required projection uses registered commands', () => {
   const taskReview = DashboardState.fromRun({
     state,
     events: [],
-    checkResults: [],
   }).actionRequired
   assert.deepEqual(
     taskReview?.actions.map((item) => item.command),
@@ -322,7 +281,6 @@ test('action-required projection uses registered commands', () => {
   const escalation = DashboardState.fromRun({
     state,
     events: [],
-    checkResults: [],
   }).actionRequired
   assert.equal(escalation?.severity, 'critical')
   assert.equal(escalation?.message, state.failureReason)
@@ -332,7 +290,6 @@ test('action-required projection uses registered commands', () => {
     DashboardState.fromRun({
       state,
       events: [],
-      checkResults: [],
     }).actionRequired,
     undefined
   )

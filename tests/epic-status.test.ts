@@ -22,10 +22,7 @@ import {
 import { loadActiveDashboardState } from '../pi/extensions/epic/dashboard/data.ts'
 import { DashboardState } from '../pi/extensions/epic/dashboard/state.ts'
 import { createEpicState } from '../pi/extensions/epic/state.ts'
-import type {
-  CheckSuiteResult,
-  EpicTask,
-} from '../pi/extensions/epic/types.ts'
+import type { EpicTask } from '../pi/extensions/epic/types.ts'
 import {
   appendEvent,
   loadActiveEpic,
@@ -54,48 +51,14 @@ function task(): EpicTask {
   }
 }
 
-function checkResult(): CheckSuiteResult {
-  return {
-    suite: 'fast',
-    passed: true,
-    checks: [
-      {
-        name: 'typecheck',
-        command: 'npm run typecheck',
-        passed: true,
-        required: true,
-        exitCode: 0,
-        durationMs: 10,
-        stdoutPreview: '',
-        stderrPreview: '',
-        findings: [],
-        outputTruncated: false,
-      },
-    ],
-    introducedFindings: [],
-    preExistingFindings: [],
-    deferredChecks: [],
-  }
-}
-
 async function createDashboardFixture(): Promise<{
   root: string
-  checkPath: string
   eventsPath: string
 }> {
   const root = await mkdtemp(join(tmpdir(), 'pi-epic-status-'))
   const state = createEpicState(root, 'Live epic', '2026-01-01T00:00:00.000Z')
   state.tasks = [task(), task()]
   state.currentTaskIndex = 1
-  const checkPath = join(
-    root,
-    '.pi',
-    'epics',
-    'runs',
-    state.epicId,
-    'checks',
-    'latest.json'
-  )
   const eventsPath = join(
     root,
     '.pi',
@@ -104,7 +67,6 @@ async function createDashboardFixture(): Promise<{
     state.epicId,
     'events.jsonl'
   )
-  state.lastCheckResultPath = checkPath
   await saveState(state)
   await appendEvent(state, 'agent_started', {
     role: 'implementer',
@@ -115,8 +77,7 @@ async function createDashboardFixture(): Promise<{
     action: 'implementation',
     usage: { inputTokens: 100, outputTokens: 25 },
   })
-  await writeFile(checkPath, `${JSON.stringify(checkResult())}\n`)
-  return { root, checkPath, eventsPath }
+  return { root, eventsPath }
 }
 
 test('dashboard loader feeds the projection from persisted epic data', async () => {
@@ -131,8 +92,6 @@ test('dashboard loader feeds the projection from persisted epic data', async () 
     assert.equal(dashboard.epic.name, 'Live epic')
     assert.equal(dashboard.epic.tasks.completed, 1)
     assert.equal(dashboard.epic.tasks.total, 2)
-    assert.equal(dashboard.epic.checks.completed, 1)
-    assert.equal(dashboard.epic.checks.total, 2)
     assert.deepEqual(dashboard.epic.tokens, {
       total: 125,
       input: 100,
@@ -212,20 +171,6 @@ test('dashboard loader rejects malformed event data', async () => {
   }
 })
 
-test('dashboard loader rejects malformed latest check data', async () => {
-  const fixture = await createDashboardFixture()
-  try {
-    await writeFile(fixture.checkPath, '{not-json}\n')
-    await assert.rejects(
-      () =>
-        loadActiveDashboardState(fixture.root, new Date().toISOString()),
-      /Invalid latest check result/
-    )
-  } finally {
-    await rm(fixture.root, { recursive: true, force: true })
-  }
-})
-
 test('live widget updates its EpicStats and requests a redraw', async () => {
   const firstState = createEpicState('/repo', 'First epic')
   const secondState = createEpicState('/repo', 'Second epic')
@@ -233,12 +178,10 @@ test('live widget updates its EpicStats and requests a redraw', async () => {
     DashboardState.fromRun({
       state: firstState,
       events: [],
-      checkResults: [],
     }),
     DashboardState.fromRun({
       state: secondState,
       events: [],
-      checkResults: [],
     }),
   ]
   let index = 0

@@ -1,10 +1,4 @@
-import type {
-  CheckSuiteResult,
-  EpicEvent,
-  EpicStage,
-  EpicState,
-  EpicTask,
-} from '../types.ts'
+import type { EpicEvent, EpicStage, EpicState, EpicTask } from '../types.ts'
 import {
   type DashboardAction,
   type DashboardActionRequest,
@@ -187,24 +181,6 @@ function actionRequired(state: EpicState): DashboardActionRequest | undefined {
     default:
       return undefined
   }
-}
-
-function declaredCheckCount(state: EpicState): number {
-  return (state.tasks ?? []).reduce(
-    (total, task) =>
-      total + task.requiredChecks.length + task.deferredChecks.length,
-    0
-  )
-}
-
-function completedCheckCount(
-  checkResults: readonly CheckSuiteResult[]
-): number {
-  return checkResults.reduce(
-    (total, result) =>
-      total + result.checks.filter((check) => !check.skipped).length,
-    0
-  )
 }
 
 function eventKey(event: EpicEvent): string {
@@ -436,10 +412,6 @@ export function projectDashboardState(
     completedTaskCount(input.state, tasks),
     tasks.length
   )
-  const checkProgress = progress(
-    completedCheckCount(input.checkResults),
-    declaredCheckCount(input.state)
-  )
   const implementationAttempt = nonNegativeInteger(
     input.state.implementationAttempt,
     'implementationAttempt'
@@ -461,7 +433,6 @@ export function projectDashboardState(
     agentTimeMs: agentTimeMs(input.events, input.activeAgentRuns ?? [], nowMs),
     tasks: taskProgress,
     criteria: progress(0, criteriaTotal),
-    checks: checkProgress,
     tokens: tokenUsage(input.events),
     attempts: {
       implementation: implementationAttempt,

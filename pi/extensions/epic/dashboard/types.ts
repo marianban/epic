@@ -1,4 +1,4 @@
-import type { CheckSuiteResult, EpicEvent, EpicState } from '../types.ts'
+import type { EpicEvent, EpicState } from '../types.ts'
 
 export interface ActiveAgentRun {
   readonly startedAtMs: number
@@ -52,7 +52,6 @@ export interface EpicDashboardState {
   readonly agentTimeMs: number
   readonly tasks: ProgressMetric
   readonly criteria: ProgressMetric
-  readonly checks: ProgressMetric
   readonly tokens: TokenUsage
   readonly attempts: {
     readonly implementation: number
@@ -63,7 +62,6 @@ export interface EpicDashboardState {
 export interface DashboardProjectionInput {
   readonly state: EpicState
   readonly events: readonly EpicEvent[]
-  readonly checkResults: readonly CheckSuiteResult[]
   readonly activeAgentRuns?: readonly ActiveAgentRun[]
   readonly completedAt?: string
   readonly now?: string

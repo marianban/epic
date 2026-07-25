@@ -1,8 +1,4 @@
-import {
-  loadEpicEvents,
-  loadLatestCheckResult,
-  loadOptionalActiveEpic,
-} from '../persistence.ts'
+import { loadEpicEvents, loadOptionalActiveEpic } from '../persistence.ts'
 import { activeAgentRuns } from '../agent-activity.ts'
 import { DashboardState } from './state.ts'
 
@@ -15,11 +11,9 @@ export async function loadActiveDashboardState(
   const state = await loadOptionalActiveEpic(repositoryRoot)
   if (state === undefined) return undefined
 
-  const latestCheck = await loadLatestCheckResult(state)
   return DashboardState.fromRun({
     state,
     events: await loadEpicEvents(state),
-    checkResults: latestCheck === undefined ? [] : [latestCheck],
     activeAgentRuns: activeAgentRuns(repositoryRoot, state.epicId, Date.parse(now)),
     ...(TERMINAL_STAGES.has(state.stage)
       ? { completedAt: state.updatedAt }

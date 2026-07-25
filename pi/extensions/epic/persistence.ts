@@ -3,7 +3,6 @@ import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { createActor } from 'xstate'
 import type {
-  CheckSuiteResult,
   ScoutReport,
   EpicEvent,
   EpicState,
@@ -155,22 +154,6 @@ export async function loadEpicEvents(
       )
     }
   })
-}
-
-export async function loadLatestCheckResult(
-  state: EpicState
-): Promise<CheckSuiteResult | undefined> {
-  if (state.lastCheckResultPath === undefined) return undefined
-  try {
-    return JSON.parse(
-      await fs.readFile(state.lastCheckResultPath, 'utf8')
-    ) as CheckSuiteResult
-  } catch (error) {
-    throw new Error(
-      `Invalid latest check result at ${state.lastCheckResultPath}.`,
-      { cause: error }
-    )
-  }
 }
 
 export async function appendEvent(
