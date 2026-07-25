@@ -77,10 +77,7 @@ export async function saveState(state: EpicState): Promise<void> {
   })
 }
 
-async function loadState(
-  root: string,
-  epicId: string
-): Promise<EpicState> {
+async function loadState(root: string, epicId: string): Promise<EpicState> {
   const raw = await fs.readFile(epicStatePath(root, epicId), 'utf8')
   try {
     const state = JSON.parse(raw) as EpicState
@@ -114,13 +111,9 @@ async function loadState(
 
 export async function loadActiveEpic(root: string): Promise<EpicState> {
   const active = JSON.parse(
-    await fs.readFile(
-      path.join(root, '.pi', 'epics', 'active.json'),
-      'utf8'
-    )
+    await fs.readFile(path.join(root, '.pi', 'epics', 'active.json'), 'utf8')
   ) as { epicId?: string }
-  if (!active.epicId)
-    throw new Error('Active epic pointer is missing epicId.')
+  if (!active.epicId) throw new Error('Active epic pointer is missing epicId.')
   return loadState(root, active.epicId)
 }
 
@@ -139,8 +132,7 @@ export async function loadOptionalActiveEpic(
   }
 
   const active = JSON.parse(activeRaw) as { epicId?: string }
-  if (!active.epicId)
-    throw new Error('Active epic pointer is missing epicId.')
+  if (!active.epicId) throw new Error('Active epic pointer is missing epicId.')
   return loadState(root, active.epicId)
 }
 
@@ -195,20 +187,14 @@ export async function appendEvent(
     payload,
   }
   await fs.appendFile(
-    path.join(
-      runDirectory(state.repositoryRoot, state.epicId),
-      'events.jsonl'
-    ),
+    path.join(runDirectory(state.repositoryRoot, state.epicId), 'events.jsonl'),
     `${JSON.stringify(event)}\n`,
     'utf8'
   )
   await logEpic(state, 'info', type, { stage: state.stage, ...payload })
 }
 
-function incompatibleState(
-  state: Partial<EpicState>,
-  reason: string
-): Error {
+function incompatibleState(state: Partial<EpicState>, reason: string): Error {
   return new Error(
     `Epic ${state.epicId ?? 'unknown'} is incompatible with XState persistence: ${reason}. Required schema/machine version ${EPIC_SCHEMA_VERSION}/${EPIC_MACHINE_VERSION}; no compatibility migration was applied.`
   )
