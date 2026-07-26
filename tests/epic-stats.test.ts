@@ -108,16 +108,20 @@ test('renders the wide epic stats layout and representative metrics', () => {
     taskLine.lastIndexOf('22%') + '22%'.length,
     criteriaLine.lastIndexOf('25%') + '25%'.length
   )
-  assert.match(taskLine, /Agent time 06:48 │$/)
-  assert.doesNotMatch(criteriaLine, /Agent time/)
-  assert.match(output, /Tokens 43.8k/)
+  assert.match(taskLine, /Agent time 06:48/)
+  assert.match(criteriaLine, /Tokens\s+43.8k/)
+  assert.equal(taskLine.indexOf('Agent time'), criteriaLine.indexOf('Tokens'))
+  assert.equal(
+    taskLine.indexOf('06:48'),
+    criteriaLine.indexOf('43.8k')
+  )
   assert.doesNotMatch(output, /Attempts|impl|fix/)
 })
 
 test('uses compact rendering below the fixed breakpoint', () => {
   const lines = new EpicStats(dashboard(), identityTheme).render(60)
 
-  assert.equal(lines.length, 8)
+  assert.equal(lines.length, 7)
   const taskLine = lines.find((line) => line.includes('Tasks'))
   const criteriaLine = lines.find((line) => line.includes('Criteria'))
   assert.ok(taskLine)
@@ -127,8 +131,13 @@ test('uses compact rendering below the fixed breakpoint', () => {
     criteriaLine.indexOf('10 / 40') + '10 / 40'.length
   )
   assert.equal(taskLine.search(/[█░]/), criteriaLine.search(/[█░]/))
-  assert.match(taskLine, /Agent time 06:48 │$/)
-  assert.doesNotMatch(criteriaLine, /Agent time/)
+  assert.match(taskLine, /Agent time 06:48/)
+  assert.match(criteriaLine, /Tokens\s+43.8k/)
+  assert.equal(taskLine.indexOf('Agent time'), criteriaLine.indexOf('Tokens'))
+  assert.equal(
+    taskLine.indexOf('06:48'),
+    criteriaLine.indexOf('43.8k')
+  )
 })
 
 test('updates output after an explicit state replacement', () => {

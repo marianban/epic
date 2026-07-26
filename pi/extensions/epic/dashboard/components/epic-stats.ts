@@ -12,6 +12,12 @@ import type { EpicDashboardState, ProgressMetric } from '../types.ts'
 const COMPACT_BREAKPOINT = 80
 const WIDE_BAR_WIDTH = 20
 const COMPACT_BAR_WIDTH = 10
+const RIGHT_COLUMN_GAP = 2
+
+interface RightColumnRow {
+  readonly label: string
+  readonly value: string
+}
 
 function pad(value: number): string {
   return String(value).padStart(2, '0')
@@ -63,7 +69,7 @@ function progressGrid(
   width: number,
   preferredBarWidth: number,
   theme: Theme,
-  agentTime?: string
+  rightColumn: readonly RightColumnRow[] = []
 ): string[] {
   const labelWidth = Math.max(...rows.map(({ label }) => visibleWidth(label)))
   const countWidth = Math.max(
@@ -74,13 +80,18 @@ function progressGrid(
   const percentWidth = Math.max(
     ...rows.map(({ metric }) => visibleWidth(`${Math.round(metric.percent)}%`))
   )
-  const agentTimeWidth = agentTime === undefined ? 0 : visibleWidth(agentTime)
+  const rightColumnWidth = Math.max(
+    0,
+    ...rightColumn.map(
+      ({ label, value }) => visibleWidth(label) + 1 + visibleWidth(value)
+    )
+  )
   const fixedWidth = labelWidth + countWidth + percentWidth + 3
-  const reservedAgentTimeWidth =
-    agentTime === undefined ? 0 : agentTimeWidth + 1
+  const reservedRightColumnWidth =
+    rightColumn.length === 0 ? 0 : rightColumnWidth + RIGHT_COLUMN_GAP
   const barWidth = Math.min(
     preferredBarWidth,
-    Math.max(0, width - fixedWidth - reservedAgentTimeWidth)
+    Math.max(0, width - fixedWidth - reservedRightColumnWidth)
   )
 
   return rows.map(({ label, metric }, index) => {
@@ -93,10 +104,20 @@ function progressGrid(
       theme.fg('text', percent.padStart(percentWidth)),
     ].join(' ')
 
-    if (index !== 0 || agentTime === undefined) return row
+    const rightColumnRow = rightColumn[index]
+    if (rightColumnRow === undefined) return row
 
-    const gap = Math.max(1, width - visibleWidth(row) - agentTimeWidth)
-    return `${row}${' '.repeat(gap)}${theme.fg('muted', agentTime)}`
+    const rightLabelWidth = Math.max(
+      ...rightColumn.map(({ label }) => visibleWidth(label))
+    )
+    const rightColumnValue = [
+      rightColumnRow.label.padEnd(rightLabelWidth),
+      rightColumnRow.value,
+    ].join(' ')
+    return `${row}${' '.repeat(RIGHT_COLUMN_GAP)}${theme.fg(
+      'muted',
+      rightColumnValue
+    )}`
   })
 }
 
@@ -134,7 +155,11 @@ function titleLine(
   theme: Theme
 ): string {
   const prefix = 'Prompt: '
-  const name = truncateToWidth(epic.name, Math.max(0, width - prefix.length), '…')
+  const name = truncateToWidth(
+    epic.name,
+    Math.max(0, width - prefix.length),
+    '…'
+  )
   return theme.bold(theme.fg('text', `${prefix}${name}`))
 }
 
@@ -149,13 +174,6 @@ function runIdLine(
     width,
     '…'
   )
-}
-
-function tokensLine(epic: EpicDashboardState, theme: Theme): string {
-  return [
-    theme.fg('muted', 'Tokens'),
-    theme.fg('text', formatTokens(epic.tokens.total)),
-  ].join(' ')
 }
 
 /** Renders the epic summary shown above or below a Pi TUI view. */
@@ -211,7 +229,13 @@ export class EpicStats implements Component {
       innerWidth,
       WIDE_BAR_WIDTH,
       theme,
-      `Agent time ${formatDuration(epic.agentTimeMs)}`
+      [
+        {
+          label: 'Agent time',
+          value: formatDuration(epic.agentTimeMs),
+        },
+        { label: 'Tokens', value: formatTokens(epic.tokens.total) },
+      ]
     )
     return [
       framedTop(width, theme),
@@ -219,7 +243,6 @@ export class EpicStats implements Component {
       framedLine(runIdLine(epic, innerWidth, theme), width, theme),
       framedLine('', width, theme),
       ...progressRows.map((row) => framedLine(row, width, theme)),
-      framedLine(tokensLine(epic, theme), width, theme),
       framedBottom(width, theme),
     ]
   }
@@ -238,7 +261,13 @@ export class EpicStats implements Component {
       innerWidth,
       COMPACT_BAR_WIDTH,
       theme,
-      `Agent time ${formatDuration(epic.agentTimeMs)}`
+      [
+        {
+          label: 'Agent time',
+          value: formatDuration(epic.agentTimeMs),
+        },
+        { label: 'Tokens', value: formatTokens(epic.tokens.total) },
+      ]
     )
     return [
       framedTop(width, theme),
@@ -246,7 +275,6 @@ export class EpicStats implements Component {
       framedLine(runIdLine(epic, innerWidth, theme), width, theme),
       framedLine('', width, theme),
       ...progressRows.map((row) => framedLine(row, width, theme)),
-      framedLine(tokensLine(epic, theme), width, theme),
       framedBottom(width, theme),
     ]
   }
