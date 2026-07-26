@@ -4,6 +4,11 @@ import { hyperlink } from '@earendil-works/pi-tui'
 import type { EpicEvent, EpicStage, EpicState, EpicTask } from '../types.ts'
 import { currentTaskArtifactPath } from '../artifact-paths.ts'
 import {
+  EPIC_COMMANDS,
+  type EpicCommandName,
+  slashCommand,
+} from '../commands.ts'
+import {
   type DashboardAction,
   type DashboardActionRequest,
   type ActiveAgentRun,
@@ -96,23 +101,33 @@ function dashboardStatus(state: EpicState): EpicDashboardStatus {
 function action(
   id: string,
   label: string,
-  command: string,
+  command: EpicCommandName,
   kind: DashboardAction['kind']
 ): DashboardAction {
-  return { id, label, command, kind }
+  return { id, label, command: slashCommand(command), kind }
 }
 
 function planActions(): readonly DashboardAction[] {
   return [
-    action('plan-continue', 'Continue', '/plan-approve', 'primary'),
-    action('abort', 'Abort', '/epic-cancel', 'danger'),
+    action(
+      EPIC_COMMANDS.approvePlan,
+      'Continue',
+      EPIC_COMMANDS.approvePlan,
+      'primary'
+    ),
+    action(EPIC_COMMANDS.cancel, 'Abort', EPIC_COMMANDS.cancel, 'danger'),
   ]
 }
 
 function taskActions(): readonly DashboardAction[] {
   return [
-    action('task-continue', 'Continue', '/task-approve', 'primary'),
-    action('abort', 'Abort', '/epic-cancel', 'danger'),
+    action(
+      EPIC_COMMANDS.approveTask,
+      'Continue',
+      EPIC_COMMANDS.approveTask,
+      'primary'
+    ),
+    action(EPIC_COMMANDS.cancel, 'Abort', EPIC_COMMANDS.cancel, 'danger'),
   ]
 }
 
@@ -121,9 +136,9 @@ function linkedFile(filePath: string, label: string): string {
 }
 
 function planMessage(state: EpicState): string {
-  const plan = linkedFile(state.planPath, 'plan.md')
   const verb = state.planRevision > 1 ? 'refined' : 'created'
-  return `${plan} has been ${verb}. Comments marked with R: will be refined.`
+  const plan = linkedFile(state.planPath, `plan.md has been ${verb}`)
+  return `${plan}. Comments marked with R: will be refined.`
 }
 
 function taskMessage(state: EpicState): string {
@@ -159,12 +174,12 @@ function actionRequired(state: EpicState): DashboardActionRequest | undefined {
         title: 'Repository prerequisites require approval',
         actions: [
           action(
-            'approve-prerequisites',
+            EPIC_COMMANDS.approvePrerequisites,
             'Approve prerequisites',
-            '/epic-approve-prerequisites',
+            EPIC_COMMANDS.approvePrerequisites,
             'primary'
           ),
-          action('abort', 'Abort', '/epic-cancel', 'danger'),
+          action(EPIC_COMMANDS.cancel, 'Abort', EPIC_COMMANDS.cancel, 'danger'),
         ],
       }
     case 'awaiting_task_approval':
@@ -189,8 +204,8 @@ function actionRequired(state: EpicState): DashboardActionRequest | undefined {
         title: 'Epic requires intervention',
         message: state.failureReason,
         actions: [
-          action('resume', 'Resume', '/epic-resume', 'primary'),
-          action('abort', 'Abort', '/epic-cancel', 'danger'),
+          action(EPIC_COMMANDS.resume, 'Resume', EPIC_COMMANDS.resume, 'primary'),
+          action(EPIC_COMMANDS.cancel, 'Abort', EPIC_COMMANDS.cancel, 'danger'),
         ],
       }
     default:

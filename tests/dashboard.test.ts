@@ -1,11 +1,16 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import epicExtension from '../pi/extensions/epic/index.ts'
+import { EPIC_COMMANDS } from '../pi/extensions/epic/commands.ts'
 import { DashboardState } from '../pi/extensions/epic/dashboard/state.ts'
 import { createEpicState } from '../pi/extensions/epic/state.ts'
 import type { EpicTask } from '../pi/extensions/epic/types.ts'
 
 function task(
-  overrides: Partial<Pick<EpicTask, 'acceptanceCriteria' | 'requiredChecks' | 'deferredChecks'>> = {}
+  overrides: Partial<
+    Pick<EpicTask, 'acceptanceCriteria' | 'requiredChecks' | 'deferredChecks'>
+  > = {}
 ): EpicTask {
   return {
     id: 'task-1',
@@ -182,11 +187,36 @@ test('agent time ignores abandoned starts and merges overlapping runs', () => {
   const dashboard = DashboardState.fromRun({
     state,
     events: [
-      event('stale-start', '2026-01-01T00:00:01.000Z', 'agent_started', 'planner'),
-      event('real-start', '2026-01-01T00:00:05.000Z', 'agent_started', 'planner'),
-      event('real-finish', '2026-01-01T00:00:08.000Z', 'agent_finished', 'planner'),
-      event('other-start', '2026-01-01T00:00:04.000Z', 'agent_started', 'scout'),
-      event('other-finish', '2026-01-01T00:00:10.000Z', 'agent_finished', 'scout'),
+      event(
+        'stale-start',
+        '2026-01-01T00:00:01.000Z',
+        'agent_started',
+        'planner'
+      ),
+      event(
+        'real-start',
+        '2026-01-01T00:00:05.000Z',
+        'agent_started',
+        'planner'
+      ),
+      event(
+        'real-finish',
+        '2026-01-01T00:00:08.000Z',
+        'agent_finished',
+        'planner'
+      ),
+      event(
+        'other-start',
+        '2026-01-01T00:00:04.000Z',
+        'agent_started',
+        'scout'
+      ),
+      event(
+        'other-finish',
+        '2026-01-01T00:00:10.000Z',
+        'agent_finished',
+        'scout'
+      ),
     ],
   })
 
@@ -239,9 +269,11 @@ test('agent time uses the measured runAgent duration', () => {
   const active = DashboardState.fromRun({
     state,
     events: [],
-    activeAgentRuns: [{
-      startedAtMs: Date.parse('2026-01-01T00:00:05.000Z'),
-    }],
+    activeAgentRuns: [
+      {
+        startedAtMs: Date.parse('2026-01-01T00:00:05.000Z'),
+      },
+    ],
     now: '2026-01-01T00:00:08.000Z',
   })
   assert.equal(active.epic.agentTimeMs, 3_000)
@@ -265,11 +297,7 @@ test('action-required projection uses registered commands', () => {
     ['Continue', 'Abort']
   )
   assert.match(planReview?.message ?? '', /plan\.md/)
-  assert.ok(
-    planReview?.message?.includes(
-      '\x1b]8;;file:///repo/plan.md\x1b\\'
-    )
-  )
+  assert.ok(planReview?.message?.includes('\x1b]8;;file:///repo/plan.md\x1b\\'))
 
   state.planRevision = 2
   const refinedPlan = DashboardState.fromRun({
@@ -315,4 +343,16 @@ test('action-required projection uses registered commands', () => {
     }).actionRequired,
     undefined
   )
+})
+
+test('registered epic commands remain the action projection command set', () => {
+  const registered = new Set<string>()
+  const api = {
+    on: () => undefined,
+    registerCommand: (name: string) => registered.add(name),
+  } as unknown as ExtensionAPI
+
+  epicExtension(api)
+
+  assert.deepEqual(registered, new Set(Object.values(EPIC_COMMANDS)))
 })
