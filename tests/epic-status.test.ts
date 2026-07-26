@@ -32,6 +32,7 @@ import {
 const identityTheme = {
   fg: (_color: string, text: string) => text,
   bold: (text: string) => text,
+  inverse: (text: string) => text,
 } as unknown as Theme
 
 function task(): EpicTask {
@@ -193,6 +194,8 @@ test('live widget updates its EpicStats and requests a redraw', async () => {
     identityTheme,
     async () => states[Math.min(index++, states.length - 1)],
     () => undefined,
+    () => undefined,
+    () => () => undefined,
     60_000
   )
 
@@ -213,6 +216,8 @@ test('live widget renders an empty state without an active epic', async () => {
     identityTheme,
     async () => undefined,
     () => undefined,
+    () => undefined,
+    () => () => undefined,
     60_000
   )
 
@@ -220,6 +225,51 @@ test('live widget renders an empty state without an active epic', async () => {
   assert.match(widget.render(100).join('\n'), /No active epic\./)
   assert.ok(redraws >= 1)
   widget.dispose()
+})
+
+test('live widget renders and dispatches the focused action', async () => {
+  const actionState = createEpicState('/repo', 'Action epic')
+  actionState.stage = 'awaiting_plan_review'
+  const settledState = createEpicState('/repo', 'Action epic')
+  settledState.stage = 'implementing'
+  const states = [
+    DashboardState.fromRun({ state: actionState, events: [] }),
+    DashboardState.fromRun({ state: settledState, events: [] }),
+  ]
+  let index = 0
+  let redraws = 0
+  let inputHandler: ((data: string) => { consume?: boolean } | undefined) | undefined
+  let dispatched: string | undefined
+  const widget = new EpicStatusWidget(
+    '/repo',
+    { requestRender: () => redraws++ } as unknown as TUI,
+    identityTheme,
+    async () => states[Math.min(index++, states.length - 1)],
+    () => undefined,
+    (action) => {
+      dispatched = action.id
+    },
+    (handler) => {
+      inputHandler = handler
+      return () => {
+        inputHandler = undefined
+      }
+    },
+    60_000
+  )
+
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.match(widget.render(100).join('\n'), /ACTION REQUIRED/)
+  assert.equal(inputHandler?.('\x1b[C')?.consume, true)
+  assert.equal(inputHandler?.('\x1b[1;1:3C')?.consume, true)
+  assert.equal(inputHandler?.('\r')?.consume, true)
+  assert.equal(dispatched, 'plan-approve')
+
+  await widget.refresh()
+  assert.doesNotMatch(widget.render(100).join('\n'), /ACTION REQUIRED/)
+  assert.ok(redraws >= 2)
+  widget.dispose()
+  assert.equal(inputHandler, undefined)
 })
 
 test('lifecycle registers and clears the TUI epicstatus widget', () => {

@@ -268,7 +268,7 @@ test('action-required projection uses registered commands', () => {
   }).actionRequired
   assert.deepEqual(
     taskReview?.actions.map((item) => item.command),
-    ['/task-review', '/task-approve', '/epic-cancel']
+    ['/task-approve', '/task-review', '/epic-cancel']
   )
 
   state.stage = 'escalating'

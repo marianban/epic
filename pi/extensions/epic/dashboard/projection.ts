@@ -117,8 +117,8 @@ function planApprovalActions(): readonly DashboardAction[] {
 
 function taskReviewActions(): readonly DashboardAction[] {
   return [
-    action('task-review', 'Task review', '/task-review', 'primary'),
     action('task-approve', 'Approve task', '/task-approve', 'primary'),
+    action('task-review', 'Task review', '/task-review', 'secondary'),
     action('abort', 'Abort', '/epic-cancel', 'danger'),
   ]
 }

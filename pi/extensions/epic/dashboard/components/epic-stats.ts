@@ -8,6 +8,7 @@ import type { Theme } from '@earendil-works/pi-coding-agent'
 import { pathToFileURL } from 'node:url'
 import { DashboardState } from '../state.ts'
 import type { EpicDashboardState, ProgressMetric } from '../types.ts'
+import { framedBottom, framedLine, framedTop } from './panel.ts'
 
 const COMPACT_BREAKPOINT = 80
 const WIDE_BAR_WIDTH = 20
@@ -121,34 +122,6 @@ function progressGrid(
   })
 }
 
-function framedLine(content: string, width: number, theme: Theme): string {
-  if (width <= 0) return ''
-  if (width < 5) return truncateToWidth(content, width, '…', true)
-  const innerWidth = width - 4
-  return (
-    theme.fg('border', '│') +
-    ' ' +
-    truncateToWidth(content, innerWidth, '…', true) +
-    ' ' +
-    theme.fg('border', '│')
-  )
-}
-
-function framedTop(width: number, theme: Theme): string {
-  if (width <= 0) return ''
-  if (width < 3) return truncateToWidth('╭─ EPIC', width, '…', true)
-  const innerWidth = width - 2
-  const title = '─ EPIC '
-  const line = title + '─'.repeat(Math.max(0, innerWidth - visibleWidth(title)))
-  return theme.fg('border', `╭${line}╮`)
-}
-
-function framedBottom(width: number, theme: Theme): string {
-  if (width <= 0) return ''
-  if (width < 3) return truncateToWidth('╰─', width, '…', true)
-  return theme.fg('border', `╰${'─'.repeat(width - 2)}╯`)
-}
-
 function titleLine(
   epic: EpicDashboardState,
   width: number,
@@ -238,7 +211,7 @@ export class EpicStats implements Component {
       ]
     )
     return [
-      framedTop(width, theme),
+      framedTop(width, 'EPIC', theme),
       framedLine(titleLine(epic, innerWidth, theme), width, theme),
       framedLine(runIdLine(epic, innerWidth, theme), width, theme),
       framedLine('', width, theme),
@@ -270,7 +243,7 @@ export class EpicStats implements Component {
       ]
     )
     return [
-      framedTop(width, theme),
+      framedTop(width, 'EPIC', theme),
       framedLine(titleLine(epic, innerWidth, theme), width, theme),
       framedLine(runIdLine(epic, innerWidth, theme), width, theme),
       framedLine('', width, theme),
