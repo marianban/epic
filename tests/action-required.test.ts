@@ -68,6 +68,15 @@ test('Continue chooses approval or refinement from R: comments', () => {
   )
 })
 
+test('task review artifact without R: comments continues to approval', () => {
+  assert.equal(
+    humanContinuation(
+      '# Task 1: Implement the feature\n\n## Human Review Instructions\n'
+    ),
+    'approve'
+  )
+})
+
 test('renders the semantic icon for each severity', () => {
   for (const [severity, icon] of [
     ['info', '●'],

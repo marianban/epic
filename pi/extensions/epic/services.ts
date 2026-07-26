@@ -19,7 +19,7 @@ import {
 import {
   extractReviewInstructions,
   hashPlan,
-  validatePlanCompleteness,
+  validatePlanForApproval,
   validatePlanRevision,
 } from './plan-review.ts'
 import { currentTaskArtifactPath } from './artifact-paths.ts'
@@ -221,7 +221,7 @@ export function createEpicServices(
         throw new Error(
           'plan.md still contains unresolved R: comments. Run /plan-review first.'
         )
-      const validation = validatePlanCompleteness(plan)
+      const validation = validatePlanForApproval(plan)
       if (!validation.valid)
         throw new Error(`Cannot approve plan: ${validation.errors.join(' ')}`)
       const next = {

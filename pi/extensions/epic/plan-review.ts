@@ -15,6 +15,8 @@ const REQUIRED_PLAN_SECTIONS = [
   '## Open Questions',
   '## Revision Log',
 ]
+const PLANNER_APPROVAL_STATUS_ERROR =
+  'Planner cannot mark a plan approved or complete.'
 
 export function extractReviewInstructions(
   markdown: string
@@ -62,7 +64,7 @@ export function validatePlanCompleteness(
   if (!/### Create[\s\S]*?### Delete/.test(sectionBody(markdown, '## Scope')))
     errors.push('Scope must explicitly contain Create and Delete subsections.')
   if (/\b(?:Approved|Complete)\b/i.test(sectionBody(markdown, '## Status')))
-    errors.push('Planner cannot mark a plan approved or complete.')
+    errors.push(PLANNER_APPROVAL_STATUS_ERROR)
   if (
     /^\s*[-*]\s+(?:`)?(?:[/\\]|\.\.[/\\])/m.test(
       sectionBody(markdown, '## Scope')
@@ -79,6 +81,16 @@ export function validatePlanCompleteness(
       'Plan contains broad language; confirm its scope before approval.'
     )
   return { valid: errors.length === 0, errors, warnings }
+}
+
+export function validatePlanForApproval(
+  markdown: string
+): PlanValidationResult {
+  const validation = validatePlanCompleteness(markdown)
+  const errors = validation.errors.filter(
+    (error) => error !== PLANNER_APPROVAL_STATUS_ERROR
+  )
+  return { ...validation, errors, valid: errors.length === 0 }
 }
 
 export function validatePlanRevision(

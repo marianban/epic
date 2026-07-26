@@ -25,6 +25,7 @@ import {
   extractReviewInstructions,
   hashPlan,
   validatePlanCompleteness,
+  validatePlanForApproval,
 } from '../pi/extensions/epic/plan-review.ts'
 import {
   normalizeFallowDelta,
@@ -650,6 +651,15 @@ test('R comments can be appended to plan lines', () => {
 
 test('plan validation and approval hash are deterministic', () => {
   assert.deepEqual(validatePlanCompleteness(validPlan).valid, true)
+  assert.equal(
+    validatePlanForApproval(
+      validPlan.replace(
+        'Draft — awaiting human approval.',
+        'Approved — implementation authorized.'
+      )
+    ).valid,
+    true
+  )
   assert.equal(hashPlan(validPlan), hashPlan(validPlan))
   assert.notEqual(hashPlan(validPlan), hashPlan(`${validPlan}\nchanged`))
   assert.equal(
