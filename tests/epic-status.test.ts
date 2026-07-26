@@ -278,7 +278,7 @@ test('lifecycle registers and clears the TUI epicstatus widget', () => {
     on: (event: string, handler: (event: unknown, ctx: unknown) => void) =>
       handlers.set(event, handler),
   } as unknown as ExtensionAPI
-  registerEpicStatusWidget(api, 1_000)
+  registerEpicStatusWidget(api, 1_000, async () => undefined)
 
   let widgetKey: string | undefined
   let widgetContent: string[] | ((tui: TUI, theme: Theme) => Component) | undefined

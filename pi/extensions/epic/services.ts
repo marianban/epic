@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
-import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
   parseJsonResponse,
   parseMarkdownResponse,
@@ -46,7 +46,7 @@ import type {
 } from './types.ts'
 
 export interface EpicServices {
-  ctx: ExtensionCommandContext
+  ctx: ExtensionContext
   notify(message: string, level?: 'info' | 'warning' | 'error'): void
   classify(state: EpicState): EpicState
   scout(
@@ -91,7 +91,7 @@ async function readApprovedPlan(state: EpicState): Promise<string> {
 }
 
 export function createEpicServices(
-  ctx: ExtensionCommandContext
+  ctx: ExtensionContext
 ): EpicServices {
   const notify = (
     message: string,

@@ -1,4 +1,7 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from '@earendil-works/pi-coding-agent'
 import {
   cancelEpic,
   approvePlan,
@@ -12,12 +15,40 @@ import {
 } from './epic.ts'
 import {
   EPIC_STATUS_REFRESH_INTERVAL_MS,
+  type EpicStatusActionExecutor,
   registerEpicStatusWidget,
 } from './dashboard/widget-lifecycle.ts'
 import { EPIC_COMMANDS } from './commands.ts'
+import type { DashboardAction } from './dashboard/types.ts'
+
+export const executeEpicDashboardAction: EpicStatusActionExecutor = async (
+  action: DashboardAction,
+  ctx: ExtensionContext
+): Promise<void> => {
+  switch (action.id) {
+    case EPIC_COMMANDS.approvePlan:
+      await approvePlan(ctx)
+      return
+    case EPIC_COMMANDS.approvePrerequisites:
+      await approvePrerequisites(ctx)
+      return
+    case EPIC_COMMANDS.approveTask:
+      await approveTask(ctx)
+      return
+    case EPIC_COMMANDS.cancel:
+      await cancelEpic(ctx)
+      return
+    default:
+      throw new Error(`Unsupported dashboard action: ${action.id}`)
+  }
+}
 
 export default function epicExtension(pi: ExtensionAPI): void {
-  registerEpicStatusWidget(pi, EPIC_STATUS_REFRESH_INTERVAL_MS)
+  registerEpicStatusWidget(
+    pi,
+    EPIC_STATUS_REFRESH_INTERVAL_MS,
+    executeEpicDashboardAction
+  )
 
   pi.registerCommand(EPIC_COMMANDS.start, {
     description: 'Start a deterministic human-gated epic',

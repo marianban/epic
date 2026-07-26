@@ -1,5 +1,6 @@
 import type {
   ExtensionAPI,
+  ExtensionContext,
   Theme,
 } from '@earendil-works/pi-coding-agent'
 import type { Component, TUI } from '@earendil-works/pi-tui'
@@ -25,6 +26,11 @@ type TerminalInputListener = (data: string) =>
 type RegisterTerminalInput = (
   handler: TerminalInputListener
 ) => () => void
+
+export type EpicStatusActionExecutor = (
+  action: DashboardAction,
+  ctx: ExtensionContext
+) => Promise<void>
 
 export class EpicStatusWidget implements Component {
   private readonly repositoryRoot: string
@@ -163,7 +169,8 @@ export class EpicStatusWidget implements Component {
 
 export function registerEpicStatusWidget(
   pi: ExtensionAPI,
-  refreshIntervalMs: number
+  refreshIntervalMs: number,
+  executeAction: EpicStatusActionExecutor
 ): void {
   let installed = false
 
@@ -178,12 +185,14 @@ export function registerEpicStatusWidget(
         loadActiveDashboardState,
         (message) => ctx.ui.notify(message, 'error'),
         (action) => {
-          if (action.command === undefined) {
-            throw new Error(
-              `Dashboard action ${action.id} is missing an executable command.`
+          void executeAction(action, ctx).catch((error: unknown) => {
+            ctx.ui.notify(
+              `Epic action ${action.id} failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+              'error'
             )
-          }
-          pi.sendUserMessage(action.command)
+          })
         },
         (handler) => ctx.ui.onTerminalInput(handler),
         refreshIntervalMs

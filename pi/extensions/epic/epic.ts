@@ -1,6 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
   appendEvent,
   loadActiveEpic,
@@ -16,7 +16,7 @@ import type { EpicState } from './types.ts'
 
 async function dispatch(
   state: EpicState,
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
   event: EpicMachineEvent
 ): Promise<void> {
   const runtime = await createEpicRuntime(state, ctx)
@@ -39,7 +39,7 @@ export function formatEscalationMessage(
 }
 
 function notifyNextAction(
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
   state: EpicState,
   messages: { completed: string; next?: string }
 ): void {
@@ -52,7 +52,7 @@ function notifyNextAction(
 
 export async function startEpic(
   epic: string,
-  ctx: ExtensionCommandContext
+  ctx: ExtensionContext
 ): Promise<void> {
   if (!epic.trim()) throw new Error('Usage: /epic <epic>')
   const root = path.resolve(ctx.cwd)
@@ -84,7 +84,7 @@ export async function startEpic(
 }
 
 export async function reviewPlan(
-  ctx: ExtensionCommandContext,
+  ctx: ExtensionContext,
   force = false
 ): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
@@ -102,7 +102,7 @@ export async function reviewPlan(
           : undefined,
   })
 }
-export async function approvePlan(ctx: ExtensionCommandContext): Promise<void> {
+export async function approvePlan(ctx: ExtensionContext): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
   const plan = await fs.readFile(state.planPath, 'utf8')
   const continuation = humanContinuation(plan)
@@ -123,7 +123,7 @@ export async function approvePlan(ctx: ExtensionCommandContext): Promise<void> {
   })
 }
 export async function approvePrerequisites(
-  ctx: ExtensionCommandContext
+  ctx: ExtensionContext
 ): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, { type: 'PREREQUISITES.APPROVE' })
@@ -136,7 +136,7 @@ export async function approvePrerequisites(
   })
 }
 export async function resumeEpic(
-  ctx: ExtensionCommandContext
+  ctx: ExtensionContext
 ): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, { type: 'EPIC.RESUME' })
@@ -153,13 +153,13 @@ export async function resumeEpic(
   })
 }
 export async function cancelEpic(
-  ctx: ExtensionCommandContext
+  ctx: ExtensionContext
 ): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, { type: 'EPIC.CANCEL' })
   ctx.ui.notify(`Epic ${state.epicId} cancelled.`)
 }
-export async function approveTask(ctx: ExtensionCommandContext): Promise<void> {
+export async function approveTask(ctx: ExtensionContext): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
   const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
   const continuation = humanContinuation(artifact)
@@ -181,7 +181,7 @@ export async function approveTask(ctx: ExtensionCommandContext): Promise<void> {
             : undefined,
   })
 }
-export async function reviseTask(ctx: ExtensionCommandContext): Promise<void> {
+export async function reviseTask(ctx: ExtensionContext): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
   await dispatch(state, ctx, { type: 'TASK.REVIEW' })
   notifyNextAction(ctx, state, {
@@ -196,7 +196,7 @@ export async function reviseTask(ctx: ExtensionCommandContext): Promise<void> {
 }
 
 export async function epicStatus(
-  ctx: ExtensionCommandContext
+  ctx: ExtensionContext
 ): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
   const runtime = await createEpicRuntime(state, ctx)

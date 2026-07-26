@@ -1,5 +1,5 @@
 import { assign, fromPromise, sendTo, setup } from 'xstate'
-import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import type {
   PlannerContextRequest,
   ScoutReport,
@@ -557,7 +557,7 @@ export function machineStage(snapshot: {
   }
   return snapshot.context.state.stage
 }
-export function createServices(ctx: ExtensionCommandContext): EpicServices {
+export function createServices(ctx: ExtensionContext): EpicServices {
   return createEpicServices(ctx)
 }
 

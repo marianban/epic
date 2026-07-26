@@ -7,7 +7,7 @@ import {
 } from 'xstate'
 import { createWebSocketInspector } from '@statelyai/inspect'
 import { createInspectorServer } from '@statelyai/inspect/server'
-import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
   createServices,
   createEpicMachine,
@@ -67,7 +67,7 @@ function createEpicInspector(config: EpicConfig['inspector']):
 
 export async function createEpicRuntime(
   state: EpicState,
-  ctx?: ExtensionCommandContext
+  ctx?: ExtensionContext
 ): Promise<EpicRuntime> {
   const machine = createEpicMachine(
     ctx ? createServices(ctx) : createServices(undefined as never)
