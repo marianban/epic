@@ -148,6 +148,14 @@ function taskMessage(state: EpicState): string {
   return `${task} is ready. Comments marked with R: will be refined.`
 }
 
+function implementedTaskMessage(state: EpicState): string {
+  const task = linkedFile(
+    currentTaskArtifactPath(state),
+    `task-${String(state.currentTaskIndex + 1).padStart(3, '0')}.md`
+  )
+  return `Implemented ${task}. Manually verify the acceptance criteria, then leave comments marked with R: in case of an issue.`
+}
+
 function actionRequired(
   state: EpicState,
   activeOperation: boolean
@@ -187,12 +195,19 @@ function actionRequired(
         ],
       }
     case 'awaiting_task_approval':
-    case 'awaiting_task_review':
       return {
         id: 'task-action-required',
         severity: 'warning',
         title: 'Task is ready',
         message: taskMessage(state),
+        actions: taskActions(),
+      }
+    case 'awaiting_task_review':
+      return {
+        id: 'task-action-required',
+        severity: 'warning',
+        title: 'Task implementation completed',
+        message: implementedTaskMessage(state),
         actions: taskActions(),
       }
     case 'escalating':

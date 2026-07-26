@@ -330,6 +330,17 @@ test('action-required projection uses registered commands', () => {
     )
   )
 
+  state.stage = 'awaiting_task_review'
+  const implementationReview = DashboardState.fromRun({
+    state,
+    events: [],
+  }).actionRequired
+  assert.equal(implementationReview?.title, 'Task implementation completed')
+  assert.match(
+    implementationReview?.message ?? '',
+    /Implemented .*task-001\.md.*Manually verify the acceptance criteria.*R:/
+  )
+
   state.stage = 'awaiting_prerequisite_approval'
   const prerequisites = DashboardState.fromRun({
     state,

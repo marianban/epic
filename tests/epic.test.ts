@@ -146,6 +146,30 @@ test('root actor accepts domain events only in valid states', () => {
   actor.stop()
 })
 
+test('root actor accepts resume from the persisted planning review state', async () => {
+  const state = createEpicState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const services = createTestEpicServices()
+  const actor = createActor(createEpicMachine(services), { input: { state } })
+  actor.start()
+  actor.send({ type: 'EPIC.START' })
+  for (
+    let i = 0;
+    i < 20 && JSON.stringify(actor.getSnapshot().value) !==
+      JSON.stringify({ planning: 'awaitingReview' });
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(actor.getSnapshot().can({ type: 'EPIC.RESUME' }), true)
+  const runtime = new EpicRuntime(state, actor as never)
+  runtime.send({ type: 'EPIC.RESUME' })
+  await runtime.settle(1_000)
+  await runtime.sync()
+  assert.deepEqual(actor.getSnapshot().value, { planning: 'awaitingReview' })
+  assert.equal(state.stage, 'awaiting_plan_review')
+  runtime.stop()
+})
+
 test('escalation notifications include the persisted failure reason', () => {
   assert.equal(
     formatEscalationMessage(
@@ -403,6 +427,15 @@ test('task escalation keeps durable root and snapshot stages aligned', async () 
   assert.equal(snapshot.context.state.failureReason, 'full checks unavailable')
   assert.equal(persisted.value, 'escalating')
   assert.equal(persisted.context.state.stage, 'escalating')
+  assert.equal(actor.getSnapshot().can({ type: 'EPIC.RESUME' }), true)
+  actor.send({ type: 'EPIC.RESUME' })
+  for (
+    let i = 0;
+    i < 10 && actor.getSnapshot().value !== 'taskExecution';
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(actor.getSnapshot().value, 'taskExecution')
   actor.stop()
 })
 

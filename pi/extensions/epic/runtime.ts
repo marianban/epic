@@ -104,7 +104,12 @@ export class EpicRuntime {
       throw new Error(
         `Epic event ${event.type} is not available in stage ${machineStage(machineSnapshot)}.`
       )
-    this.stageBeforeEvent = machineStage(machineSnapshot)
+    // Resume is also valid in human-waiting states where it intentionally
+    // leaves the machine in the same stage. settle() must not wait for a
+    // stage change in that case, or a harmless dashboard re-show becomes a
+    // five-minute timeout.
+    this.stageBeforeEvent =
+      event.type === 'EPIC.RESUME' ? undefined : machineStage(machineSnapshot)
     this.actor.send(event)
   }
   async settle(timeoutMs = 300_000): Promise<void> {

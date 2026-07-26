@@ -106,6 +106,7 @@ export function createEpicMachine(services: EpicServices) {
       task,
     },
     actions: {
+      acceptResume: () => undefined,
       forwardTask: sendTo(
         'task-execution',
         ({ event }) => event as unknown as TaskExecutionEvent
@@ -117,6 +118,12 @@ export function createEpicMachine(services: EpicServices) {
     context: ({ input }) => ({
       state: { ...input.state, machineSnapshot: undefined },
     }),
+    // Exiting the dashboard is UI-only. Keep resume available after an exit
+    // from every persisted workflow state; states with an explicit resume
+    // transition below retain their state-specific behavior.
+    on: {
+      'EPIC.RESUME': { actions: 'acceptResume' },
+    },
     states: {
       idle: { on: { 'EPIC.START': 'classifying' } },
       classifying: {
