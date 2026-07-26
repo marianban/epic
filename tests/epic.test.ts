@@ -235,6 +235,28 @@ test('agent output extraction does not retain the complete JSONL stream', () => 
   assert.match(result.diagnosticTail, /task-001/)
 })
 
+test('agent output extraction aggregates usage nested in agent_end messages', () => {
+  const collector = new AgentOutputCollector()
+  collector.append(
+    Buffer.from(
+      `${JSON.stringify({
+        type: 'agent_end',
+        messages: [
+          { usage: { input: 100, output: 25, cacheRead: 50, totalTokens: 175 } },
+          { usage: { input: 60, output: 15, cacheRead: 20, totalTokens: 95 } },
+        ],
+      })}\n`
+    )
+  )
+
+  assert.deepEqual(collector.finish().usage, {
+    input: 160,
+    output: 40,
+    cacheRead: 70,
+    totalTokens: 270,
+  })
+})
+
 test('agent output extraction detects protocol failures independently of exit code', () => {
   const collector = new AgentOutputCollector()
   collector.append(

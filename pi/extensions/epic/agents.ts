@@ -119,6 +119,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
+function mergeUsage(
+  current: Record<string, unknown> | undefined,
+  incoming: Record<string, unknown>
+): Record<string, unknown> {
+  if (current === undefined) return { ...incoming }
+
+  const merged = { ...current }
+  for (const [key, value] of Object.entries(incoming)) {
+    const existing = merged[key]
+    if (typeof existing === 'number' && typeof value === 'number') {
+      merged[key] = existing + value
+    } else if (!(key in merged)) {
+      merged[key] = value
+    }
+  }
+  return merged
+}
+
+function usageRecords(event: Record<string, unknown>): Record<string, unknown>[] {
+  if (isRecord(event.usage)) return [event.usage]
+  if (event.type !== 'agent_end' || !Array.isArray(event.messages)) return []
+
+  return event.messages.flatMap((message) =>
+    isRecord(message) && isRecord(message.usage) ? [message.usage] : []
+  )
+}
+
 function assistantText(event: Record<string, unknown>): string | undefined {
   if (event.type !== 'message_end' || !isRecord(event.message)) return undefined
   if (event.message.role !== 'assistant') return undefined
@@ -224,8 +251,8 @@ export class AgentOutputCollector {
       // A later successful retry supersedes an earlier provider error.
       this.failureReason = undefined
     }
-    if (event.type === 'agent_end' && isRecord(event.usage))
-      this.usage = event.usage
+    for (const usage of usageRecords(event))
+      this.usage = mergeUsage(this.usage, usage)
   }
 }
 
