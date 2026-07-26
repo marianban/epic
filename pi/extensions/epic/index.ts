@@ -39,7 +39,7 @@ export default function epicExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => cancelEpic(ctx),
   })
   pi.registerCommand('task-approve', {
-    description: 'Approve the current task after manual review',
+    description: 'Continue the current task review or approve it',
     handler: async (_args, ctx) => approveTask(ctx),
   })
   pi.registerCommand('task-review', {
@@ -51,7 +51,7 @@ export default function epicExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => reviewPlan(ctx),
   })
   pi.registerCommand('plan-approve', {
-    description: 'Approve plan.md and complete the planning phase',
+    description: 'Continue plan review or approve plan.md',
     handler: async (_args, ctx) => approvePlan(ctx),
   })
   pi.registerCommand('plan-revise', {

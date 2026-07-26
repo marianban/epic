@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import { visibleWidth } from '@earendil-works/pi-tui'
 import type { Theme } from '@earendil-works/pi-coding-agent'
 import { ActionRequired } from '../pi/extensions/epic/dashboard/components/action-required.ts'
+import { humanContinuation } from '../pi/extensions/epic/human-actions.ts'
 import type {
   DashboardAction,
   DashboardActionRequest,
@@ -14,17 +15,11 @@ const identityTheme = {
   inverse: (text: string) => text,
 } as unknown as Theme
 
-const reviewAction: DashboardAction = {
-  id: 'review',
-  label: 'Plan review',
+const continueAction: DashboardAction = {
+  id: 'continue',
+  label: 'Continue',
   kind: 'primary',
-  command: '/review',
-}
-const approveAction: DashboardAction = {
-  id: 'approve',
-  label: 'Approve plan',
-  kind: 'primary',
-  command: '/approve',
+  command: '/continue',
 }
 const abortAction: DashboardAction = {
   id: 'abort',
@@ -33,8 +28,7 @@ const abortAction: DashboardAction = {
   command: '/abort',
 }
 const actions: readonly DashboardAction[] = [
-  reviewAction,
-  approveAction,
+  continueAction,
   abortAction,
 ]
 
@@ -42,9 +36,9 @@ function request(
   overrides: Partial<DashboardActionRequest> = {}
 ): DashboardActionRequest {
   return {
-    id: 'plan-review-required',
+    id: 'plan-action-required',
     severity: 'warning',
-    title: 'Plan is ready for review',
+    title: 'Plan is ready',
     actions,
     ...overrides,
   }
@@ -59,10 +53,19 @@ test('renders severity, title, message, and every action', () => {
 
   const output = component.render(100).join('\n')
   assert.match(output, /ACTION REQUIRED/)
-  assert.match(output, /⚠ Plan is ready for review/)
+  assert.match(output, /⚠ Plan is ready/)
   assert.match(output, /Please inspect the generated plan\./)
   for (const action of actions) assert.match(output, new RegExp(action.label))
-  assert.match(output, /▸\[ Plan review \]/)
+  assert.match(output, /▸\[ Continue \]/)
+})
+
+test('Continue chooses approval or refinement from R: comments', () => {
+  assert.equal(humanContinuation('# Plan\nNo review comments.'), 'approve')
+  assert.equal(humanContinuation('# Plan\nR: clarify the rollout.'), 'review')
+  assert.equal(
+    humanContinuation('Keep this line. R: refine the acceptance criteria.'),
+    'review'
+  )
 })
 
 test('renders the semantic icon for each severity', () => {
@@ -76,7 +79,7 @@ test('renders the semantic icon for each severity', () => {
       identityTheme,
       () => undefined
     ).render(80).join('\n')
-    assert.match(output, new RegExp(`${icon} Plan is ready for review`))
+    assert.match(output, new RegExp(`${icon} Plan is ready`))
   }
 })
 
@@ -87,18 +90,16 @@ test('renders no panel when action state is absent', () => {
 
 test('navigates with wrapping in both directions', () => {
   const component = new ActionRequired(request(), identityTheme, () => undefined)
-  assert.equal(component.getFocusedActionId(), 'review')
+  assert.equal(component.getFocusedActionId(), 'continue')
 
   component.handleInput('\t')
-  assert.equal(component.getFocusedActionId(), 'approve')
-  component.handleInput('\x1b[C')
   assert.equal(component.getFocusedActionId(), 'abort')
   component.handleInput('\x1b[C')
-  assert.equal(component.getFocusedActionId(), 'review')
+  assert.equal(component.getFocusedActionId(), 'continue')
   component.handleInput('\x1b[Z')
   assert.equal(component.getFocusedActionId(), 'abort')
   component.handleInput('\x1b[D')
-  assert.equal(component.getFocusedActionId(), 'approve')
+  assert.equal(component.getFocusedActionId(), 'continue')
 })
 
 test('executes the focused action once on Enter', () => {
@@ -109,19 +110,18 @@ test('executes the focused action once on Enter', () => {
     (action) => selected.push(action)
   )
 
-  component.handleInput('\t')
   component.handleInput('\r')
-  assert.deepEqual(selected.map((action) => action.id), ['approve'])
+  assert.deepEqual(selected.map((action) => action.id), ['continue'])
 })
 
 test('preserves focus by action id and falls back when removed', () => {
   const component = new ActionRequired(request(), identityTheme, () => undefined)
   component.handleInput('\t')
-  component.setState(request({ actions: [abortAction, approveAction, reviewAction] }))
-  assert.equal(component.getFocusedActionId(), 'approve')
-
-  component.setState(request({ actions: [abortAction, reviewAction] }))
+  component.setState(request({ actions: [abortAction, continueAction] }))
   assert.equal(component.getFocusedActionId(), 'abort')
+
+  component.setState(request({ actions: [continueAction] }))
+  assert.equal(component.getFocusedActionId(), 'continue')
 })
 
 test('handles an empty action collection safely', () => {

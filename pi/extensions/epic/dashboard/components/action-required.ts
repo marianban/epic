@@ -5,17 +5,12 @@ import {
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui'
 import type { Component } from '@earendil-works/pi-tui'
-import type {
-  DashboardAction,
-  DashboardActionRequest,
-} from '../types.ts'
+import type { DashboardAction, DashboardActionRequest } from '../types.ts'
 import { framedBottom, framedLine, framedTop } from './panel.ts'
 
 const ACTION_GAP = 3
 
-function severityIcon(
-  severity: DashboardActionRequest['severity']
-): string {
+function severityIcon(severity: DashboardActionRequest['severity']): string {
   switch (severity) {
     case 'info':
       return '●'
@@ -193,10 +188,7 @@ export class ActionRequired implements Component {
     }
 
     for (const action of actions) {
-      const chunks = wrapTextWithAnsi(
-        action.label,
-        Math.max(1, innerWidth - 4)
-      )
+      const chunks = wrapTextWithAnsi(action.label, Math.max(1, innerWidth - 4))
       const buttonWidth = visibleWidth(`[ ${action.label} ]`) + 1
       if (chunks.length > 1 || buttonWidth > innerWidth) {
         flushInline()
@@ -207,23 +199,22 @@ export class ActionRequired implements Component {
       }
 
       const button = this.renderButton(action, action.label)
-      const nextWidth = inline.length === 0
-        ? visibleWidth(button)
-        : inlineWidth + ACTION_GAP + visibleWidth(button)
+      const nextWidth =
+        inline.length === 0
+          ? visibleWidth(button)
+          : inlineWidth + ACTION_GAP + visibleWidth(button)
       if (nextWidth > innerWidth) flushInline()
       inline.push(button)
-      inlineWidth = inline.length === 1
-        ? visibleWidth(button)
-        : inlineWidth + ACTION_GAP + visibleWidth(button)
+      inlineWidth =
+        inline.length === 1
+          ? visibleWidth(button)
+          : inlineWidth + ACTION_GAP + visibleWidth(button)
     }
     flushInline()
     return rows
   }
 
-  private renderButton(
-    action: DashboardAction,
-    label: string
-  ): string {
+  private renderButton(action: DashboardAction, label: string): string {
     const focused = action.id === this.focusedActionId
     const button = `${focused ? '▸' : ' '}[ ${label} ]`
     const colored = this.theme.fg(actionColor(action), button)

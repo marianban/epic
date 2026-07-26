@@ -31,9 +31,9 @@ The initial Scout is not necessarily the only discovery pass. A Planner may retu
 - `/epic-cancel` cancels without reverting repository changes.
 - `/plan-review` extracts standalone or trailing inline `R:` comments and asks the Planner to revise.
 - `/plan-revise` forces a Planner revision.
-- `/task-approve` approves the current task specification before implementation, or approves the completed implementation after following its manual review steps.
+- `/task-approve` continues the current task review: it refines `R:` findings automatically, or approves the task when no findings remain.
 - `/task-review` applies `R:` findings written into the current task artifact. Before implementation it invokes the task reviewer and pauses again for approval; after implementation it invokes the Implementer and reruns the task’s gates.
-- `/plan-approve` validates the plan, hashes it, and completes the planning phase. Unresolved `R:` lines are rejected.
+- `/plan-approve` continues plan review: it refines `R:` findings automatically, or validates, hashes, and approves the plan when no findings remain.
 
 Plan approval records a hash, then starts implementation. The approved plan hash remains in persisted state so implementation cannot be entered through an unapproved path.
 

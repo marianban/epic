@@ -1,3 +1,4 @@
+import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { ExtensionCommandContext } from '@earendil-works/pi-coding-agent'
 import {
@@ -8,6 +9,8 @@ import {
 } from './persistence.ts'
 import { createEpicState } from './state.ts'
 import { createEpicRuntime } from './runtime.ts'
+import { humanContinuation } from './human-actions.ts'
+import { currentTaskArtifactPath } from './artifact-paths.ts'
 import type { EpicMachineEvent } from './machines/epic-machine.ts'
 import type { EpicState } from './types.ts'
 
@@ -70,9 +73,9 @@ export async function startEpic(
   }
   const nextAction =
     state.stage === 'awaiting_plan_review'
-      ? 'Plan is ready for review. Use /plan-review or /plan-approve.'
+      ? 'Plan is ready. Use /plan-approve to continue; R: comments will be refined automatically.'
       : state.stage === 'awaiting_plan_approval'
-        ? 'Plan is ready for approval. Use /plan-approve.'
+        ? 'Plan is ready to continue. Use /plan-approve.'
         : undefined
   ctx.ui.notify(
     [`Epic ${state.epicId} started.`, nextAction].filter(Boolean).join(' '),
@@ -93,17 +96,24 @@ export async function reviewPlan(
     completed: `Plan review completed for epic ${state.epicId}.`,
     next:
       state.stage === 'awaiting_plan_review'
-        ? 'Review plan.md and run /plan-review, or run /plan-approve when satisfied.'
+        ? 'Review plan.md and use /plan-approve to continue; R: comments will be refined automatically.'
         : state.stage === 'awaiting_plan_approval'
-          ? 'Review plan.md and run /plan-approve when satisfied.'
+          ? 'Review plan.md and use /plan-approve when satisfied.'
           : undefined,
   })
 }
 export async function approvePlan(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
-  await dispatch(state, ctx, { type: 'PLAN.APPROVE' })
+  const plan = await fs.readFile(state.planPath, 'utf8')
+  const continuation = humanContinuation(plan)
+  await dispatch(state, ctx, {
+    type: continuation === 'review' ? 'PLAN.REVIEW' : 'PLAN.APPROVE',
+  })
   notifyNextAction(ctx, state, {
-    completed: `Plan approved for epic ${state.epicId}.`,
+    completed:
+      continuation === 'review'
+        ? `Plan refinement completed for epic ${state.epicId}.`
+        : `Plan approved for epic ${state.epicId}.`,
     next:
       state.stage === 'awaiting_prerequisite_approval'
         ? 'Review the proposed prerequisite commands and run /epic-approve-prerequisites to continue.'
@@ -151,9 +161,16 @@ export async function cancelEpic(
 }
 export async function approveTask(ctx: ExtensionCommandContext): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
-  await dispatch(state, ctx, { type: 'TASK.APPROVE' })
+  const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
+  const continuation = humanContinuation(artifact)
+  await dispatch(state, ctx, {
+    type: continuation === 'review' ? 'TASK.REVIEW' : 'TASK.APPROVE',
+  })
   notifyNextAction(ctx, state, {
-    completed: `Task approval processed for epic ${state.epicId}.`,
+    completed:
+      continuation === 'review'
+        ? `Task refinement completed for epic ${state.epicId}.`
+        : `Task approval processed for epic ${state.epicId}.`,
     next:
       state.stage === 'awaiting_task_review'
         ? `Review Task ${state.currentTaskIndex + 1}'s implementation and run /task-approve, or add R: findings and run /task-review.`

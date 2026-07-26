@@ -1,5 +1,8 @@
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { hyperlink } from '@earendil-works/pi-tui'
 import type { EpicEvent, EpicStage, EpicState, EpicTask } from '../types.ts'
+import { currentTaskArtifactPath } from '../artifact-paths.ts'
 import {
   type DashboardAction,
   type DashboardActionRequest,
@@ -99,45 +102,55 @@ function action(
   return { id, label, command, kind }
 }
 
-function planReviewActions(): readonly DashboardAction[] {
+function planActions(): readonly DashboardAction[] {
   return [
-    action('plan-review', 'Plan review', '/plan-review', 'primary'),
-    action('plan-approve', 'Approve plan', '/plan-approve', 'primary'),
+    action('plan-continue', 'Continue', '/plan-approve', 'primary'),
     action('abort', 'Abort', '/epic-cancel', 'danger'),
   ]
 }
 
-function planApprovalActions(): readonly DashboardAction[] {
+function taskActions(): readonly DashboardAction[] {
   return [
-    action('plan-approve', 'Approve plan', '/plan-approve', 'primary'),
-    action('plan-review', 'Plan review', '/plan-review', 'secondary'),
+    action('task-continue', 'Continue', '/task-approve', 'primary'),
     action('abort', 'Abort', '/epic-cancel', 'danger'),
   ]
 }
 
-function taskReviewActions(): readonly DashboardAction[] {
-  return [
-    action('task-approve', 'Approve task', '/task-approve', 'primary'),
-    action('task-review', 'Task review', '/task-review', 'secondary'),
-    action('abort', 'Abort', '/epic-cancel', 'danger'),
-  ]
+function linkedFile(filePath: string, label: string): string {
+  return hyperlink(label, pathToFileURL(filePath).toString())
+}
+
+function planMessage(state: EpicState): string {
+  const plan = linkedFile(state.planPath, 'plan.md')
+  const verb = state.planRevision > 1 ? 'refined' : 'created'
+  return `${plan} has been ${verb}. Comments marked with R: will be refined.`
+}
+
+function taskMessage(state: EpicState): string {
+  const task = linkedFile(
+    currentTaskArtifactPath(state),
+    `task-${String(state.currentTaskIndex + 1).padStart(3, '0')}.md`
+  )
+  return `${task} is ready. Comments marked with R: will be refined.`
 }
 
 function actionRequired(state: EpicState): DashboardActionRequest | undefined {
   switch (state.stage) {
     case 'awaiting_plan_review':
       return {
-        id: 'plan-review-required',
+        id: 'plan-action-required',
         severity: 'warning',
-        title: 'Plan is ready for review',
-        actions: planReviewActions(),
+        title: 'Plan is ready',
+        message: planMessage(state),
+        actions: planActions(),
       }
     case 'awaiting_plan_approval':
       return {
-        id: 'plan-approval-required',
+        id: 'plan-action-required',
         severity: 'warning',
-        title: 'Plan is ready for approval',
-        actions: planApprovalActions(),
+        title: 'Plan is ready',
+        message: planMessage(state),
+        actions: planActions(),
       }
     case 'awaiting_prerequisite_approval':
       return {
@@ -157,10 +170,11 @@ function actionRequired(state: EpicState): DashboardActionRequest | undefined {
     case 'awaiting_task_approval':
     case 'awaiting_task_review':
       return {
-        id: 'task-review-required',
+        id: 'task-action-required',
         severity: 'warning',
-        title: 'Task is ready for review',
-        actions: taskReviewActions(),
+        title: 'Task is ready',
+        message: taskMessage(state),
+        actions: taskActions(),
       }
     case 'escalating':
       if (

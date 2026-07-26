@@ -255,11 +255,28 @@ test('action-required projection uses registered commands', () => {
     state,
     events: [],
   }).actionRequired
-  assert.equal(planReview?.id, 'plan-review-required')
+  assert.equal(planReview?.id, 'plan-action-required')
   assert.deepEqual(
     planReview?.actions.map((item) => item.command),
-    ['/plan-review', '/plan-approve', '/epic-cancel']
+    ['/plan-approve', '/epic-cancel']
   )
+  assert.deepEqual(
+    planReview?.actions.map((item) => item.label),
+    ['Continue', 'Abort']
+  )
+  assert.match(planReview?.message ?? '', /plan\.md/)
+  assert.ok(
+    planReview?.message?.includes(
+      '\x1b]8;;file:///repo/plan.md\x1b\\'
+    )
+  )
+
+  state.planRevision = 2
+  const refinedPlan = DashboardState.fromRun({
+    state,
+    events: [],
+  }).actionRequired
+  assert.match(refinedPlan?.message ?? '', /plan\.md has been refined/)
 
   state.stage = 'awaiting_task_approval'
   const taskReview = DashboardState.fromRun({
@@ -268,7 +285,17 @@ test('action-required projection uses registered commands', () => {
   }).actionRequired
   assert.deepEqual(
     taskReview?.actions.map((item) => item.command),
-    ['/task-approve', '/task-review', '/epic-cancel']
+    ['/task-approve', '/epic-cancel']
+  )
+  assert.deepEqual(
+    taskReview?.actions.map((item) => item.label),
+    ['Continue', 'Abort']
+  )
+  assert.match(taskReview?.message ?? '', /task-001\.md/)
+  assert.ok(
+    taskReview?.message?.includes(
+      `\x1b]8;;file:///repo/.pi/epics/runs/${state.epicId}/tasks/task-001.md\x1b\\`
+    )
   )
 
   state.stage = 'escalating'

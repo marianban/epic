@@ -22,6 +22,7 @@ import {
   validatePlanCompleteness,
   validatePlanRevision,
 } from './plan-review.ts'
+import { currentTaskArtifactPath } from './artifact-paths.ts'
 import {
   implementerTask,
   plannerEpicPrompt,
@@ -152,16 +153,6 @@ export function createEpicServices(
     })
     return result
   }
-  const currentTaskPath = (state: EpicState) =>
-    path.join(
-      state.repositoryRoot,
-      '.pi',
-      'epics',
-      'runs',
-      state.epicId,
-      'tasks',
-      `task-${String(state.currentTaskIndex + 1).padStart(3, '0')}.md`
-    )
   const config = async (root: string): Promise<EpicConfig> => {
     try {
       return JSON.parse(
@@ -323,7 +314,7 @@ export function createEpicServices(
     },
     async implement(state, feedback = '') {
       const plan = await fs.readFile(state.planPath, 'utf8')
-      const artifact = await fs.readFile(currentTaskPath(state), 'utf8')
+      const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
       const run = await runRole(
         state,
         'implementer',
@@ -363,7 +354,7 @@ export function createEpicServices(
     async review(state, checks) {
       const plan = await fs.readFile(state.planPath, 'utf8')
       const diff = await getCurrentDiff(state.repositoryRoot)
-      const artifact = await fs.readFile(currentTaskPath(state), 'utf8')
+      const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
       const run = await runRole(
         state,
         'reviewer',
@@ -384,7 +375,7 @@ export function createEpicServices(
       return { state: next, result }
     },
     async reviseTask(state) {
-      const file = currentTaskPath(state)
+      const file = currentTaskArtifactPath(state)
       const markdown = await fs.readFile(file, 'utf8')
       const instructions = extractReviewInstructions(markdown)
       if (!instructions.length)
