@@ -22,6 +22,7 @@ import {
 import { loadActiveDashboardState } from '../pi/extensions/epic/dashboard/data.ts'
 import { DashboardState } from '../pi/extensions/epic/dashboard/state.ts'
 import { createEpicState } from '../pi/extensions/epic/state.ts'
+import { withActiveEpicOperation } from '../pi/extensions/epic/operation-status.ts'
 import type { EpicTask } from '../pi/extensions/epic/types.ts'
 import {
   appendEvent,
@@ -172,6 +173,52 @@ test('dashboard loader rejects malformed event data', async () => {
   }
 })
 
+test('dashboard loader hides stale approval while a slash-command operation is active', async () => {
+  const fixture = await createDashboardFixture()
+  try {
+    const state = await loadActiveEpic(fixture.root)
+    const statePath = join(
+      fixture.root,
+      '.pi',
+      'epics',
+      'runs',
+      state.epicId,
+      'state.json'
+    )
+    const persisted = JSON.parse(await readFile(statePath, 'utf8')) as {
+      stage: string
+      pendingHumanAction: string
+      machineSnapshot: {
+        value: unknown
+        context: { state: Record<string, unknown> }
+      }
+    }
+    persisted.stage = 'awaiting_plan_approval'
+    persisted.pendingHumanAction = 'approve_plan'
+    persisted.machineSnapshot.value = { planning: 'awaitingApproval' }
+    persisted.machineSnapshot.context.state = {
+      ...persisted.machineSnapshot.context.state,
+      stage: 'awaiting_plan_approval',
+      pendingHumanAction: 'approve_plan',
+    }
+    await writeFile(statePath, `${JSON.stringify(persisted)}\n`)
+
+    const hidden = await withActiveEpicOperation(state.epicId, () =>
+      loadActiveDashboardState(fixture.root, new Date().toISOString())
+    )
+    assert.ok(hidden)
+    assert.equal(hidden.actionRequired, undefined)
+
+    const visible = await loadActiveDashboardState(
+      fixture.root,
+      new Date().toISOString()
+    )
+    assert.equal(visible?.actionRequired?.id, 'plan-action-required')
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true })
+  }
+})
+
 test('live widget updates its EpicStats and requests a redraw', async () => {
   const firstState = createEpicState('/repo', 'First epic')
   const secondState = createEpicState('/repo', 'Second epic')
@@ -270,6 +317,38 @@ test('live widget renders and dispatches the focused action', async () => {
   assert.ok(redraws >= 2)
   widget.dispose()
   assert.equal(inputHandler, undefined)
+})
+
+test('live widget reappears when active execution reaches task approval', async () => {
+  const busyState = createEpicState('/repo', 'Action epic')
+  busyState.stage = 'awaiting_plan_approval'
+  const readyState = createEpicState('/repo', 'Action epic')
+  readyState.stage = 'awaiting_task_approval'
+  const states = [
+    DashboardState.fromRun({
+      state: busyState,
+      events: [],
+      activeOperation: true,
+    }),
+    DashboardState.fromRun({ state: readyState, events: [] }),
+  ]
+  let index = 0
+  const widget = new EpicStatusWidget(
+    '/repo',
+    { requestRender: () => undefined } as unknown as TUI,
+    identityTheme,
+    async () => states[Math.min(index++, states.length - 1)],
+    () => undefined,
+    () => undefined,
+    () => () => undefined,
+    60_000
+  )
+
+  await new Promise<void>((resolve) => setImmediate(resolve))
+  assert.doesNotMatch(widget.render(100).join('\n'), /ACTION REQUIRED/)
+  await widget.refresh()
+  assert.match(widget.render(100).join('\n'), /ACTION REQUIRED/)
+  widget.dispose()
 })
 
 test('lifecycle registers and clears the TUI epicstatus widget', () => {

@@ -115,7 +115,12 @@ export class ActionRequired implements Component {
         const action = this.state.actions.find(
           (candidate) => candidate.id === this.focusedActionId
         )
-        if (action !== undefined) this.executeAction(action)
+        if (action !== undefined) {
+          this.state = undefined
+          this.setFocused(false)
+          this.invalidate()
+          this.executeAction(action)
+        }
         return true
       }
       default:

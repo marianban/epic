@@ -1,5 +1,6 @@
 import { loadEpicEvents, loadOptionalActiveEpic } from '../persistence.ts'
 import { activeAgentRuns } from '../agent-activity.ts'
+import { isEpicOperationActive } from '../operation-status.ts'
 import { DashboardState } from './state.ts'
 
 const TERMINAL_STAGES = new Set(['completed', 'failed', 'cancelled'])
@@ -15,6 +16,7 @@ export async function loadActiveDashboardState(
     state,
     events: await loadEpicEvents(state),
     activeAgentRuns: activeAgentRuns(repositoryRoot, state.epicId, Date.parse(now)),
+    activeOperation: isEpicOperationActive(state.epicId),
     ...(TERMINAL_STAGES.has(state.stage)
       ? { completedAt: state.updatedAt }
       : {}),

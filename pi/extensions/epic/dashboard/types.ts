@@ -60,6 +60,7 @@ export interface DashboardProjectionInput {
   readonly state: EpicState
   readonly events: readonly EpicEvent[]
   readonly activeAgentRuns?: readonly ActiveAgentRun[]
+  readonly activeOperation?: boolean
   readonly completedAt?: string
   readonly now?: string
 }

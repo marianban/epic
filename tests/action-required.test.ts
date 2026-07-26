@@ -121,6 +121,7 @@ test('executes the focused action once on Enter', () => {
 
   component.handleInput('\r')
   assert.deepEqual(selected.map((action) => action.id), ['continue'])
+  assert.deepEqual(component.render(80), [])
 })
 
 test('preserves focus by action id and falls back when removed', () => {

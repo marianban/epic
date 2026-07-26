@@ -11,6 +11,7 @@ import { createEpicState } from './state.ts'
 import { createEpicRuntime } from './runtime.ts'
 import { humanContinuation } from './human-actions.ts'
 import { currentTaskArtifactPath } from './artifact-paths.ts'
+import { withActiveEpicOperation } from './operation-status.ts'
 import type { EpicMachineEvent } from './machines/epic-machine.ts'
 import type { EpicState } from './types.ts'
 
@@ -19,15 +20,17 @@ async function dispatch(
   ctx: ExtensionContext,
   event: EpicMachineEvent
 ): Promise<void> {
-  const runtime = await createEpicRuntime(state, ctx)
-  try {
-    runtime.send(event)
-    await runtime.settle()
-    await runtime.sync()
-    await saveState(state)
-  } finally {
-    runtime.stop()
-  }
+  await withActiveEpicOperation(state.epicId, async () => {
+    const runtime = await createEpicRuntime(state, ctx)
+    try {
+      runtime.send(event)
+      await runtime.settle()
+      await runtime.sync()
+      await saveState(state)
+    } finally {
+      runtime.stop()
+    }
+  })
 }
 
 export function formatEscalationMessage(
@@ -58,19 +61,21 @@ export async function startEpic(
   const root = path.resolve(ctx.cwd)
   await ensureNoActiveEpic(root)
   const state = createEpicState(root, epic.trim())
-  await persistEpic(state)
-  await appendEvent(state, 'epic_created', { epic: state.epic })
-  const runtime = await createEpicRuntime(state, ctx)
-  try {
-    await runtime.sync()
-    await saveState(state)
-    runtime.send({ type: 'EPIC.START' })
-    await runtime.settle()
-    await runtime.sync()
-    await saveState(state)
-  } finally {
-    runtime.stop()
-  }
+  await withActiveEpicOperation(state.epicId, async () => {
+    await persistEpic(state)
+    await appendEvent(state, 'epic_created', { epic: state.epic })
+    const runtime = await createEpicRuntime(state, ctx)
+    try {
+      await runtime.sync()
+      await saveState(state)
+      runtime.send({ type: 'EPIC.START' })
+      await runtime.settle()
+      await runtime.sync()
+      await saveState(state)
+    } finally {
+      runtime.stop()
+    }
+  })
   const nextAction =
     state.stage === 'awaiting_plan_review'
       ? 'Plan is ready. Use /plan-approve to continue; R: comments will be refined automatically.'

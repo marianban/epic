@@ -149,7 +149,12 @@ function taskMessage(state: EpicState): string {
   return `${task} is ready. Comments marked with R: will be refined.`
 }
 
-function actionRequired(state: EpicState): DashboardActionRequest | undefined {
+function actionRequired(
+  state: EpicState,
+  activeOperation: boolean
+): DashboardActionRequest | undefined {
+  if (activeOperation) return undefined
+
   switch (state.stage) {
     case 'awaiting_plan_review':
       return {
@@ -467,6 +472,6 @@ export function projectDashboardState(
 
   return {
     epic,
-    actionRequired: actionRequired(input.state),
+    actionRequired: actionRequired(input.state, input.activeOperation === true),
   }
 }

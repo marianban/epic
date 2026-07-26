@@ -5,6 +5,10 @@ import epicExtension from '../pi/extensions/epic/index.ts'
 import { EPIC_COMMANDS } from '../pi/extensions/epic/commands.ts'
 import { DashboardState } from '../pi/extensions/epic/dashboard/state.ts'
 import { createEpicState } from '../pi/extensions/epic/state.ts'
+import {
+  isEpicOperationActive,
+  withActiveEpicOperation,
+} from '../pi/extensions/epic/operation-status.ts'
 import type { EpicTask } from '../pi/extensions/epic/types.ts'
 
 function task(
@@ -342,6 +346,46 @@ test('action-required projection uses registered commands', () => {
       events: [],
     }).actionRequired,
     undefined
+  )
+
+  state.stage = 'decomposing_tasks'
+  assert.equal(
+    DashboardState.fromRun({
+      state,
+      events: [],
+    }).actionRequired,
+    undefined
+  )
+})
+
+test('active operations suppress stale action requests and release on failure', async () => {
+  const state = createEpicState('/repo', 'epic')
+  state.stage = 'awaiting_plan_approval'
+
+  await assert.rejects(
+    withActiveEpicOperation(state.epicId, async () => {
+      assert.equal(isEpicOperationActive(state.epicId), true)
+      assert.equal(
+        DashboardState.fromRun({
+          state,
+          events: [],
+          activeOperation: isEpicOperationActive(state.epicId),
+        }).actionRequired,
+        undefined
+      )
+      throw new Error('operation failed')
+    }),
+    /operation failed/
+  )
+
+  assert.equal(isEpicOperationActive(state.epicId), false)
+  assert.equal(
+    DashboardState.fromRun({
+      state,
+      events: [],
+      activeOperation: isEpicOperationActive(state.epicId),
+    }).actionRequired?.id,
+    'plan-action-required'
   )
 })
 
