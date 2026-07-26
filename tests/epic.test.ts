@@ -11,7 +11,10 @@ import {
   persistEpicTasks,
   saveState,
 } from '../pi/extensions/epic/persistence.ts'
-import { createEpicRuntime } from '../pi/extensions/epic/runtime.ts'
+import {
+  createEpicRuntime,
+  EpicRuntime,
+} from '../pi/extensions/epic/runtime.ts'
 import { createActor } from 'xstate'
 import {
   logEpic,
@@ -512,6 +515,60 @@ test('completed task re-enters task execution for the next task', async () => {
   assert.equal(actor.getSnapshot().context.state.currentTaskIndex, 1)
   assert.equal(childValue(), 'awaitingApproval')
   actor.stop()
+})
+
+test('command runtime waits for forwarded task approval before persisting', async () => {
+  const state = createEpicState('/repo', 'task')
+  state.tasks = [{ id: 'task-1' } as never, { id: 'task-2' } as never]
+  const actor = createActor(
+    createEpicMachine(createTestEpicServices()),
+    { input: { state } }
+  )
+  const childValue = () =>
+    (
+      actor.getSnapshot().children['task-execution']?.getSnapshot?.() as
+        | { value?: unknown }
+        | undefined
+    )?.value
+
+  actor.start()
+  actor.send({ type: 'EPIC.START' })
+  for (
+    let i = 0;
+    i < 10 && JSON.stringify(actor.getSnapshot().value) !==
+      JSON.stringify({ planning: 'awaitingReview' });
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'PLAN.APPROVE' })
+  for (let i = 0; i < 10 && childValue() !== 'awaitingApproval'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let i = 0; i < 10 && childValue() !== 'awaitingReview'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+  const queuedActor = {
+    getSnapshot: () => actor.getSnapshot(),
+    send: (event: { type: 'TASK.APPROVE' }) =>
+      queueMicrotask(() => actor.send(event)),
+    getPersistedSnapshot: () => actor.getPersistedSnapshot(),
+    stop: () => actor.stop(),
+  }
+  const runtime = new EpicRuntime(state, queuedActor as never)
+  runtime.send({ type: 'TASK.APPROVE' })
+  assert.equal(
+    machineStage(
+      actor.getSnapshot() as unknown as { context: EpicMachineContext }
+    ),
+    'awaiting_task_review'
+  )
+  await runtime.settle(1_000)
+  await runtime.sync()
+
+  assert.equal(state.currentTaskIndex, 1)
+  assert.equal(state.stage, 'awaiting_task_approval')
+  assert.equal(state.taskApproved, false)
+  runtime.stop()
 })
 
 test('implementer receives human R instructions from the task artifact', () => {

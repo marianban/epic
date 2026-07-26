@@ -85,22 +85,30 @@ export async function createEpicRuntime(
   return new EpicRuntime(state, actor)
 }
 
-class EpicRuntime {
+export class EpicRuntime {
   private readonly actor: EpicActor
   private readonly state: EpicState
+  private stageBeforeEvent?: EpicStage
   constructor(state: EpicState, actor: EpicActor) {
     this.state = state
     this.actor = actor
   }
   send(event: EpicMachineEvent): void {
-    if (!this.actor.getSnapshot().can(event))
+    const snapshot = this.actor.getSnapshot()
+    const machineSnapshot = snapshot as unknown as {
+      context: EpicMachineContext
+    }
+    if (!snapshot.can(event))
       throw new Error(
-        `Epic event ${event.type} is not available in stage ${machineStage(this.actor.getSnapshot() as { context: EpicMachineContext })}.`
+        `Epic event ${event.type} is not available in stage ${machineStage(machineSnapshot)}.`
       )
+    this.stageBeforeEvent = machineStage(machineSnapshot)
     this.actor.send(event)
   }
   async settle(timeoutMs = 300_000): Promise<void> {
     const started = Date.now()
+    const stageBeforeEvent = this.stageBeforeEvent
+    this.stageBeforeEvent = undefined
     const waiting = new Set([
       'awaiting_plan_review',
       'awaiting_plan_approval',
@@ -116,10 +124,17 @@ class EpicRuntime {
       const snapshot = this.actor.getSnapshot() as unknown as {
         context: EpicMachineContext
       }
-      // The machine owns the live stage. `context.state.stage` is only
-      // synchronized after settle() returns, so reading it here can leave
-      // every in-flight epic looking permanently idle.
-      if (waiting.has(machineStage(snapshot))) {
+      const stage = machineStage(snapshot)
+      // A command can be forwarded to an invoked child actor with sendTo().
+      // The parent may still report the pre-command human-waiting stage while
+      // that child event is queued. Do not persist that stage as the result of
+      // the command; first observe the machine leave the stage that existed
+      // before the event was sent.
+      if (stageBeforeEvent !== undefined && stage === stageBeforeEvent) {
+        await new Promise((resolve) => setTimeout(resolve, 0))
+        continue
+      }
+      if (waiting.has(stage)) {
         await this.sync()
         return
       }
