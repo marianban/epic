@@ -77,6 +77,19 @@ export interface EpicServices {
   reviseTask(state: EpicState): Promise<EpicState>
 }
 
+async function readApprovedPlan(state: EpicState): Promise<string> {
+  if (!state.planApproved)
+    throw new Error('The plan must be approved before this task phase.')
+  if (!state.approvedPlanHash)
+    throw new Error('Approved plan hash is missing from epic state.')
+  const plan = await fs.readFile(state.planPath, 'utf8')
+  if (hashPlan(plan) !== state.approvedPlanHash)
+    throw new Error(
+      'The approved plan changed after approval. Re-review and approve the plan again.'
+    )
+  return plan
+}
+
 export function createEpicServices(
   ctx: ExtensionCommandContext
 ): EpicServices {
@@ -213,7 +226,10 @@ export function createEpicServices(
       const next = { ...state }
       await writePlanRevision(next, result)
       await fs.writeFile(next.planPath, `${result}\n`, 'utf8')
-      return { state: next, result }
+      return {
+        state: { ...next, pendingHumanAction: 'approve_plan' },
+        result,
+      }
     },
     async approvePlan(state) {
       const plan = await fs.readFile(state.planPath, 'utf8')
@@ -273,7 +289,7 @@ export function createEpicServices(
       return { state: next, revised: true }
     },
     async decompose(state) {
-      const plan = await fs.readFile(state.planPath, 'utf8')
+      const plan = await readApprovedPlan(state)
       const run = await runRole(
         state,
         'planner',
@@ -288,11 +304,24 @@ export function createEpicServices(
         tasks,
         currentTaskIndex: 0,
         taskApproved: false,
+        pendingHumanAction: 'approve_task' as const,
       }
       next.taskPlanPath = await persistEpicTasks(next, tasks)
+      await appendEvent(next, 'tasks_decomposed', {
+        count: tasks.length,
+        path: next.taskPlanPath,
+      })
       return next
     },
     async prerequisites(state) {
+      if (!state.planApproved)
+        throw new Error(
+          'Cannot inspect prerequisites before the plan is approved.'
+        )
+      if (!state.tasks || state.tasks.length === 0)
+        throw new Error(
+          'Cannot inspect prerequisites before tasks are decomposed.'
+        )
       const next = {
         ...state,
         prerequisites: await discoverPrerequisites(state.repositoryRoot),
@@ -313,7 +342,15 @@ export function createEpicServices(
       }
     },
     async implement(state, feedback = '') {
-      const plan = await fs.readFile(state.planPath, 'utf8')
+      const plan = await readApprovedPlan(state)
+      if (!state.tasks || state.tasks.length === 0)
+        throw new Error('Cannot implement a task before tasks are decomposed.')
+      if (!state.tasks[state.currentTaskIndex])
+        throw new Error(
+          `Cannot implement missing task at index ${state.currentTaskIndex}.`
+        )
+      if (!state.taskApproved)
+        throw new Error('Cannot implement a task before the task is approved.')
       const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
       const run = await runRole(
         state,
@@ -352,7 +389,7 @@ export function createEpicServices(
       return { state: next, result }
     },
     async review(state, checks) {
-      const plan = await fs.readFile(state.planPath, 'utf8')
+      const plan = await readApprovedPlan(state)
       const diff = await getCurrentDiff(state.repositoryRoot)
       const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
       const run = await runRole(

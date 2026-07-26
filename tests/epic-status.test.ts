@@ -263,7 +263,7 @@ test('live widget renders and dispatches the focused action', async () => {
   assert.equal(inputHandler?.('\x1b[C')?.consume, true)
   assert.equal(inputHandler?.('\x1b[1;1:3C')?.consume, true)
   assert.equal(inputHandler?.('\r')?.consume, true)
-  assert.equal(dispatched, 'plan-approve')
+  assert.equal(dispatched, 'epic-cancel')
 
   await widget.refresh()
   assert.doesNotMatch(widget.render(100).join('\n'), /ACTION REQUIRED/)

@@ -169,7 +169,12 @@ export function createEpicMachine(services: EpicServices) {
                 {
                   guard: ({ event }) => typeof event.output.result === 'string',
                   target: 'awaitingReview',
-                  actions: assign({ state: ({ event }) => event.output.state }),
+                  actions: assign({
+                    state: ({ event }) => ({
+                      ...event.output.state,
+                      pendingHumanAction: 'approve_plan',
+                    }),
+                  }),
                 },
                 {
                   target: 'scouting',
@@ -210,7 +215,12 @@ export function createEpicMachine(services: EpicServices) {
               }),
               onDone: {
                 target: 'awaitingReview',
-                actions: assign({ state: ({ event }) => event.output.state }),
+                actions: assign({
+                  state: ({ event }) => ({
+                    ...event.output.state,
+                    pendingHumanAction: 'approve_plan',
+                  }),
+                }),
               },
               onError: '#epic.terminal.failed',
             },
@@ -268,7 +278,7 @@ export function createEpicMachine(services: EpicServices) {
                   actions: assign({
                     state: ({ event }) => ({
                       ...event.output,
-                      pendingHumanAction: 'review_task',
+                      pendingHumanAction: 'approve_task',
                     }),
                   }),
                 },
@@ -302,7 +312,7 @@ export function createEpicMachine(services: EpicServices) {
                 actions: assign({
                   state: ({ event }) => ({
                     ...event.output,
-                    pendingHumanAction: 'review_task',
+                    pendingHumanAction: 'approve_task',
                   }),
                 }),
               },
@@ -356,14 +366,14 @@ export function createEpicMachine(services: EpicServices) {
                 return {
                   ...synchronizedState,
                   stage: taskStage(childValue),
-                  pendingHumanAction: [
-                    'awaitingApproval',
-                    'awaitingReview',
-                  ].includes(childValue)
-                    ? 'review_task'
-                    : childValue === 'escalating'
-                      ? 'resolve_escalation'
-                      : context.state.pendingHumanAction,
+                  pendingHumanAction:
+                    childValue === 'awaitingApproval'
+                      ? 'approve_task'
+                      : childValue === 'awaitingReview'
+                        ? 'review_task'
+                        : childValue === 'escalating'
+                          ? 'resolve_escalation'
+                          : context.state.pendingHumanAction,
                 }
               },
             }),

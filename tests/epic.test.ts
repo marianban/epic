@@ -620,6 +620,54 @@ test('post-plan machine state is visible as the plan review stage', async () => 
     ),
     'awaiting_plan_review'
   )
+  assert.equal(snapshot.context.state.pendingHumanAction, 'approve_plan')
+  actor.stop()
+})
+
+test('plan approval decomposes before the first task can implement', async () => {
+  const state = createEpicState('/repo', 'task', '2026-01-01T00:00:00.000Z')
+  const services = createTestEpicServices()
+  let implementations = 0
+  services.approvePlan = async (value) => ({
+    ...value,
+    planApproved: true,
+  })
+  services.decompose = async (value) => ({
+    ...value,
+    tasks: [{ id: 'task-1' } as never],
+    taskApproved: false,
+  })
+  services.implement = async (value) => {
+    implementations++
+    return value
+  }
+  const actor = createActor(createEpicMachine(services), { input: { state } })
+  actor.start()
+  actor.send({ type: 'EPIC.START' })
+  for (
+    let i = 0;
+    i < 20 && JSON.stringify(actor.getSnapshot().value) !==
+      JSON.stringify({ planning: 'awaitingReview' });
+    i++
+  )
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+  actor.send({ type: 'PLAN.APPROVE' })
+  const child = () =>
+    actor.getSnapshot().children['task-execution']?.getSnapshot?.() as
+      | { value?: unknown }
+      | undefined
+  for (let i = 0; i < 20 && child()?.value !== 'awaitingApproval'; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+  assert.equal(child()?.value, 'awaitingApproval')
+  assert.equal(actor.getSnapshot().context.state.pendingHumanAction, 'approve_task')
+  assert.equal(implementations, 0)
+
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let i = 0; i < 20 && implementations === 0; i++)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(implementations, 1)
   actor.stop()
 })
 
