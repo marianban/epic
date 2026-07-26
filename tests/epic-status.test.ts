@@ -141,12 +141,12 @@ test('dashboard loader uses persisted updatedAt for terminal completion time', a
         context: { state: Record<string, unknown> }
       }
     }
-    persisted.stage = 'cancelled'
+    persisted.stage = 'failed'
     persisted.updatedAt = '2026-01-01T00:00:05.000Z'
-    persisted.machineSnapshot.value = { terminal: 'cancelled' }
+    persisted.machineSnapshot.value = { terminal: 'failed' }
     persisted.machineSnapshot.context.state = {
       ...persisted.machineSnapshot.context.state,
-      stage: 'cancelled',
+      stage: 'failed',
       updatedAt: persisted.updatedAt,
     }
     await writeFile(statePath, `${JSON.stringify(persisted)}\n`)
@@ -315,7 +315,7 @@ test('live widget renders and dispatches the focused action', async () => {
   assert.equal(inputHandler?.('\x1b[C')?.consume, true)
   assert.equal(inputHandler?.('\x1b[1;1:3C')?.consume, true)
   assert.equal(inputHandler?.('\r')?.consume, true)
-  assert.equal(dispatched, 'epic-cancel')
+  assert.equal(dispatched, 'epic-exit')
 
   await widget.refresh()
   assert.doesNotMatch(widget.render(100).join('\n'), /ACTION REQUIRED/)
@@ -362,7 +362,7 @@ test('lifecycle registers and clears the TUI epicstatus widget', () => {
     on: (event: string, handler: (event: unknown, ctx: unknown) => void) =>
       handlers.set(event, handler),
   } as unknown as ExtensionAPI
-  registerEpicStatusWidget(api, 1_000, async () => undefined)
+  const lifecycle = registerEpicStatusWidget(api, 1_000, async () => undefined)
 
   let widgetKey: string | undefined
   let widgetContent: string[] | ((tui: TUI, theme: Theme) => Component) | undefined
@@ -386,6 +386,13 @@ test('lifecycle registers and clears the TUI epicstatus widget', () => {
   assert.equal(widgetKey, EPIC_STATUS_WIDGET_KEY)
   assert.equal(typeof widgetContent, 'function')
 
+  lifecycle.hide(ctx as unknown as ExtensionContext)
+  assert.equal(widgetContent, undefined)
+
+  lifecycle.show(ctx as unknown as ExtensionContext)
+  assert.equal(widgetKey, EPIC_STATUS_WIDGET_KEY)
+  assert.equal(typeof widgetContent, 'function')
+
   handlers.get('session_shutdown')?.({}, ctx)
   assert.equal(widgetKey, EPIC_STATUS_WIDGET_KEY)
   assert.equal(widgetContent, undefined)
@@ -398,7 +405,8 @@ test('dashboard escalation action routes to the registered resume command', asyn
       () =>
         executeEpicDashboardAction(
           { id: EPIC_COMMANDS.resume, label: 'Resume' },
-          { cwd: root } as ExtensionContext
+          { cwd: root } as ExtensionContext,
+          { show: () => undefined, hide: () => undefined }
         ),
       (error: unknown) => {
         assert.match(String(error), /active\.json/)
@@ -408,5 +416,53 @@ test('dashboard escalation action routes to the registered resume command', asyn
     )
   } finally {
     await rm(root, { recursive: true, force: true })
+  }
+})
+
+test('dashboard Exit hides the widget without touching Epic state', async () => {
+  const fixture = await createDashboardFixture()
+  let hidden = 0
+  let shown = 0
+  try {
+    const statePath = join(
+      fixture.root,
+      '.pi',
+      'epics',
+      'runs',
+      (await loadActiveEpic(fixture.root)).epicId,
+      'state.json'
+    )
+    const activePath = join(fixture.root, '.pi', 'epics', 'active.json')
+    const before = await Promise.all([
+      readFile(statePath, 'utf8'),
+      readFile(activePath, 'utf8'),
+      readFile(fixture.eventsPath, 'utf8'),
+    ])
+
+    await executeEpicDashboardAction(
+      { id: EPIC_COMMANDS.exit, label: 'Exit' },
+      { cwd: fixture.root, mode: 'tui' } as ExtensionContext,
+      {
+        show: () => {
+          shown += 1
+        },
+        hide: () => {
+          hidden += 1
+        },
+      }
+    )
+
+    assert.deepEqual(
+      await Promise.all([
+        readFile(statePath, 'utf8'),
+        readFile(activePath, 'utf8'),
+        readFile(fixture.eventsPath, 'utf8'),
+      ]),
+      before
+    )
+    assert.equal(hidden, 1)
+    assert.equal(shown, 0)
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true })
   }
 })

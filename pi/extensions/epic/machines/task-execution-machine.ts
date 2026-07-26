@@ -20,9 +20,8 @@ export type TaskExecutionEvent =
   | { type: 'TASK.REVIEW' }
   | { type: 'TASK.REVISE' }
   | { type: 'EPIC.RESUME' }
-  | { type: 'EPIC.CANCEL' }
 export interface TaskExecutionResult {
-  kind: 'completed' | 'escalated' | 'cancelled'
+  kind: 'completed' | 'escalated'
   state: EpicState
   reason?: string
 }
@@ -135,7 +134,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
             actions: 'markTaskApproved',
           },
           'TASK.REVIEW': 'revisingTask',
-          'EPIC.CANCEL': 'cancelled',
         },
       },
       revisingTask: {
@@ -148,7 +146,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       implementing: {
         invoke: {
@@ -160,7 +157,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       fastChecks: {
         invoke: {
@@ -185,7 +181,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           ],
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingFast: {
         tags: ['active', 'repairing'],
@@ -199,7 +194,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           },
           { target: 'escalating', actions: 'markFastRepairEscalation' },
         ],
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingFastInvoke: {
         invoke: {
@@ -214,7 +208,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       fullChecks: {
         invoke: {
@@ -239,7 +232,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           ],
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingFull: {
         tags: ['active', 'repairing'],
@@ -253,7 +245,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           },
           { target: 'escalating', actions: 'markFullRepairEscalation' },
         ],
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingFullInvoke: {
         invoke: {
@@ -268,7 +259,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       reviewing: {
         invoke: {
@@ -293,7 +283,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           ],
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingReview: {
         tags: ['active', 'repairing'],
@@ -308,7 +297,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           },
           { target: 'escalating', actions: 'markSemanticRepairEscalation' },
         ],
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       repairingReviewInvoke: {
         invoke: {
@@ -323,7 +311,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
-        on: { 'EPIC.CANCEL': 'cancelled' },
       },
       awaitingReview: {
         tags: ['awaiting-human', 'awaiting-task-review'],
@@ -331,7 +318,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
           'TASK.APPROVE': { target: 'done', actions: 'markTaskApproved' },
           'TASK.REVIEW': 'repairingReviewInvoke',
           'TASK.REVISE': 'revisingTask',
-          'EPIC.CANCEL': 'cancelled',
         },
       },
       escalating: {
@@ -342,18 +328,12 @@ export function createTaskExecutionMachine(services: EpicServices) {
             target: 'implementing',
             actions: 'markTaskApproved',
           },
-          'EPIC.CANCEL': 'cancelled',
         },
       },
       done: {
         type: 'final',
         output: ({ context }) =>
           ({ kind: 'completed', state: context.state }) as TaskExecutionResult,
-      },
-      cancelled: {
-        type: 'final',
-        output: ({ context }) =>
-          ({ kind: 'cancelled', state: context.state }) as TaskExecutionResult,
       },
       failed: {
         type: 'final',

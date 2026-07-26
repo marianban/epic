@@ -92,7 +92,7 @@ Add at least these Pi slash commands:
 /epic <epic>
 /epic-status
 /epic-resume
-/epic-cancel
+/epic-exit
 /plan-review
 /plan-approve
 /plan-revise
@@ -126,9 +126,9 @@ Display:
 
 Resume a previously interrupted epic from persisted state.
 
-## `/epic-cancel`
+## `/epic-exit`
 
-Cancel the current epic without reverting repository changes automatically.
+Hide the Epic widgets without changing or persisting Epic state. The Epic remains resumable with `/epic-resume`.
 
 ## `/plan-review`
 
@@ -228,7 +228,6 @@ type EpicStage =
   | 'final_verification'
   | 'completed'
   | 'failed'
-  | 'cancelled'
 ```
 
 Define persisted epic state:
@@ -287,17 +286,13 @@ Example transition validator:
 ```ts
 const ALLOWED_TRANSITIONS: Record<EpicStage, EpicStage[]> = {
   idle: ['classifying'],
-  classifying: ['scouting', 'failed', 'cancelled'],
-  scouting: ['planning', 'failed', 'cancelled'],
-  planning: ['awaiting_plan_review', 'failed', 'cancelled'],
-  awaiting_plan_review: [
-    'revising_plan',
-    'awaiting_plan_approval',
-    'cancelled',
-  ],
-  revising_plan: ['awaiting_plan_review', 'failed', 'cancelled'],
-  awaiting_plan_approval: ['implementing', 'revising_plan', 'cancelled'],
-  implementing: ['running_fast_checks', 'failed', 'cancelled'],
+  classifying: ['scouting', 'failed'],
+  scouting: ['planning', 'failed'],
+  planning: ['awaiting_plan_review', 'failed'],
+  awaiting_plan_review: ['revising_plan', 'awaiting_plan_approval'],
+  revising_plan: ['awaiting_plan_review', 'failed'],
+  awaiting_plan_approval: ['implementing', 'revising_plan'],
+  implementing: ['running_fast_checks', 'failed'],
   running_fast_checks: [
     'repairing_fast_checks',
     'running_full_checks',
@@ -308,11 +303,10 @@ const ALLOWED_TRANSITIONS: Record<EpicStage, EpicStage[]> = {
   repairing_full_checks: ['running_full_checks', 'escalating', 'failed'],
   reviewing: ['repairing_review', 'final_verification', 'failed'],
   repairing_review: ['running_fast_checks', 'escalating', 'failed'],
-  escalating: ['implementing', 'awaiting_plan_review', 'failed', 'cancelled'],
+  escalating: ['implementing', 'awaiting_plan_review', 'failed'],
   final_verification: ['completed', 'failed'],
   completed: [],
   failed: [],
-  cancelled: [],
 }
 ```
 
@@ -1804,7 +1798,6 @@ interface EpicEvent {
     | 'escalation_requested'
     | 'epic_completed'
     | 'epic_failed'
-    | 'epic_cancelled'
   stage: EpicStage
   payload: Record<string, unknown>
 }
@@ -1834,7 +1827,7 @@ Add tests for:
 
 - valid transitions succeed;
 - invalid transitions fail;
-- completed and cancelled epics cannot resume incorrectly.
+- completed and failed epics cannot resume incorrectly.
 
 ## Plan review parser
 

@@ -3,7 +3,7 @@ import { activeAgentRuns } from '../agent-activity.ts'
 import { isEpicOperationActive } from '../operation-status.ts'
 import { DashboardState } from './state.ts'
 
-const TERMINAL_STAGES = new Set(['completed', 'failed', 'cancelled'])
+const TERMINAL_STAGES = new Set(['completed', 'failed'])
 
 export async function loadActiveDashboardState(
   repositoryRoot: string,

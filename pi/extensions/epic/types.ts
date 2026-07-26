@@ -24,7 +24,6 @@ export type EpicStage =
   | 'final_verification'
   | 'completed'
   | 'failed'
-  | 'cancelled'
 
 export type EpicComplexity = 'simple' | 'moderate' | 'complex'
 export type AgentRole =

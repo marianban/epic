@@ -89,7 +89,7 @@ The multi-agent examples show three composition styles:
 2. A host-owned tool that delegates to another agent implementation.
 3. Sibling child actors coordinating through events.
 
-The current epic should prefer the first style only where a role genuinely deserves its own stateful subflow. Parallel fan-out is not an immediate fit because tasks modify the same repository and checks have ordering and audit requirements. Parallel Scout work could be considered later, but would need explicit result aggregation, cancellation, resource limits, and deterministic event ordering.
+The current epic should prefer the first style only where a role genuinely deserves its own stateful subflow. Parallel fan-out is not an immediate fit because tasks modify the same repository and checks have ordering and audit requirements. Parallel Scout work could be considered later, but would need explicit result aggregation, resource limits, and deterministic event ordering.
 
 ## Current state
 
@@ -102,7 +102,7 @@ The current implementation uses:
 - Human-gated plan, prerequisite, and task approvals.
 - A `currentTaskIndex` for sequential task execution.
 - Separate counters and limits for fast checks, full checks, and semantic repairs.
-- Explicit failure, cancellation, escalation, and resume behavior.
+- Explicit failure, escalation, resume, and UI-exit behavior.
 
 The state hierarchy is currently implicit. Planning, task execution, checking, review, and repair phases are represented as sibling stages, while nested behavior is implemented through functions and loops.
 
@@ -136,8 +136,7 @@ epic
 ├── finalVerification
 └── terminal
     ├── completed
-    ├── failed
-    └── cancelled
+    └── failed
 ```
 
 The task execution machine is the strongest candidate for extraction because the same lifecycle repeats for each task:
@@ -188,14 +187,14 @@ The child submachines should expose typed inputs and outputs, while the host rem
   - task iteration;
   - repair-limit escalation;
   - resume behavior;
-  - cancellation and failure handling;
+  - failure and escalation handling;
   - final verification;
   - incompatible persisted state.
 - Treat the current behavior as the compatibility baseline.
 
 ### Phase 2: Define a hierarchical domain model
 
-- Define epic events such as `START`, `SCOUT_COMPLETE`, `PLAN_APPROVE`, `TASK_APPROVE`, `CHECKS_FAILED`, `REVIEW_FAILED`, `HUMAN_REVIEW`, `RESUME`, and `CANCEL`.
+- Define epic events such as `START`, `SCOUT_COMPLETE`, `PLAN_APPROVE`, `TASK_APPROVE`, `CHECKS_FAILED`, `REVIEW_FAILED`, `HUMAN_REVIEW`, and `RESUME`.
 - Group existing flat stages into planning, prerequisite, task execution, escalation, and final verification domains.
 - Define guards for plan hashes, task manifests, approval state, pending human actions, and repair limits.
 - Define the persisted context contract independently from the XState machine configuration.
@@ -304,7 +303,7 @@ The migration should not be considered successful merely because the machine run
 - no prerequisite command without approval;
 - all mandatory checks and reviews remain enforced;
 - repair limits still escalate deterministically;
-- cancellation never reverts repository changes automatically;
+- UI exit never changes repository or Epic state;
 - persisted runs resume or fail with clear compatibility diagnostics;
 - event journals retain a complete and understandable audit trail;
 - behavior-equivalence tests pass for all existing epic paths;

@@ -139,6 +139,10 @@ test('root actor accepts domain events only in valid states', () => {
   assert.equal(actor.getSnapshot().can({ type: 'TASK.APPROVE' }), false)
   actor.send({ type: 'EPIC.START' })
   assert.equal(actor.getSnapshot().value, 'classifying')
+  assert.equal(
+    actor.getSnapshot().can({ type: 'EPIC.CANCEL' } as never),
+    false
+  )
   actor.stop()
 })
 
@@ -149,9 +153,9 @@ test('escalation notifications include the persisted failure reason', () => {
         stage: 'escalating',
         failureReason: 'Task T1 requires unavailable check(s): fallow.',
       },
-      'Inspect the failure and run /epic-resume to retry, or /epic-cancel.'
+      'Inspect the failure and run /epic-resume to retry.'
     ),
-    'Task T1 requires unavailable check(s): fallow. Inspect the failure and run /epic-resume to retry, or /epic-cancel.'
+    'Task T1 requires unavailable check(s): fallow. Inspect the failure and run /epic-resume to retry.'
   )
   assert.equal(
     formatEscalationMessage({ stage: 'awaiting_task_review' }, 'Review the task.'),
@@ -321,6 +325,10 @@ test('task execution actor exposes final output to its invoking parent', async (
     input: { state },
   })
   actor.start()
+  assert.equal(
+    actor.getSnapshot().can({ type: 'EPIC.CANCEL' } as never),
+    false
+  )
   actor.send({ type: 'TASK.APPROVE' })
   for (let i = 0; i < 10 && actor.getSnapshot().value !== 'awaitingReview'; i++)
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -1068,8 +1076,8 @@ test('unsupported persisted epic versions are rejected without migration', async
       string,
       unknown
     >
-    persisted.schemaVersion = 2
-    persisted.machineVersion = 4
+    persisted.schemaVersion = 3
+    persisted.machineVersion = 5
     await writeFile(statePath, `${JSON.stringify(persisted)}\n`)
     await assert.rejects(
       () => loadActiveEpic(root),

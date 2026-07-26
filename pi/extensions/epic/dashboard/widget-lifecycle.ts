@@ -32,6 +32,11 @@ export type EpicStatusActionExecutor = (
   ctx: ExtensionContext
 ) => Promise<void>
 
+export interface EpicStatusWidgetLifecycle {
+  show(ctx: ExtensionContext): void
+  hide(ctx: ExtensionContext): void
+}
+
 export class EpicStatusWidget implements Component {
   private readonly repositoryRoot: string
   private readonly tui: TUI
@@ -171,10 +176,10 @@ export function registerEpicStatusWidget(
   pi: ExtensionAPI,
   refreshIntervalMs: number,
   executeAction: EpicStatusActionExecutor
-): void {
+): EpicStatusWidgetLifecycle {
   let installed = false
 
-  pi.on('session_start', (_event, ctx) => {
+  const show = (ctx: ExtensionContext): void => {
     if (ctx.mode !== 'tui') return
     installed = true
     ctx.ui.setWidget(EPIC_STATUS_WIDGET_KEY, (tui, theme) =>
@@ -198,11 +203,21 @@ export function registerEpicStatusWidget(
         refreshIntervalMs
       )
     )
-  })
+  }
 
-  pi.on('session_shutdown', (_event, ctx) => {
+  const hide = (ctx: ExtensionContext): void => {
     if (!installed || ctx.mode !== 'tui') return
     installed = false
     ctx.ui.setWidget(EPIC_STATUS_WIDGET_KEY, undefined)
+  }
+
+  pi.on('session_start', (_event, ctx) => {
+    show(ctx)
   })
+
+  pi.on('session_shutdown', (_event, ctx) => {
+    hide(ctx)
+  })
+
+  return { show, hide }
 }

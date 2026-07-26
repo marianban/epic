@@ -153,16 +153,9 @@ export async function resumeEpic(
         : state.stage === 'awaiting_task_approval'
           ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
           : state.stage === 'escalating'
-            ? 'Inspect the failure and run /epic-resume to retry, or /epic-cancel.'
+            ? 'Inspect the failure and run /epic-resume to retry.'
             : undefined,
   })
-}
-export async function cancelEpic(
-  ctx: ExtensionContext
-): Promise<void> {
-  const state = await loadActiveEpic(ctx.cwd)
-  await dispatch(state, ctx, { type: 'EPIC.CANCEL' })
-  ctx.ui.notify(`Epic ${state.epicId} cancelled.`)
 }
 export async function approveTask(ctx: ExtensionContext): Promise<void> {
   const state = await loadActiveEpic(ctx.cwd)
@@ -182,7 +175,7 @@ export async function approveTask(ctx: ExtensionContext): Promise<void> {
         : state.stage === 'awaiting_task_approval'
           ? `Task ${state.currentTaskIndex + 1} is ready for review. Inspect its task artifact, then run /task-approve or /task-review.`
           : state.stage === 'escalating'
-            ? 'Inspect the failure and run /epic-resume to retry, or /epic-cancel.'
+            ? 'Inspect the failure and run /epic-resume to retry.'
             : undefined,
   })
 }
@@ -227,7 +220,7 @@ export async function epicStatus(
 async function ensureNoActiveEpic(root: string): Promise<void> {
   try {
     const state = await loadActiveEpic(root)
-    if (!['completed', 'failed', 'cancelled'].includes(state.stage))
+    if (!['completed', 'failed'].includes(state.stage))
       throw new Error(
         `Epic ${state.epicId} is already active at stage ${state.stage}.`
       )

@@ -27,8 +27,8 @@ The initial Scout is not necessarily the only discovery pass. A Planner may retu
 - `/epic <epic>` starts one epic, writes `Epic.md`, and always pauses after writing `plan.md`.
 - `/epic-status` shows persisted state and the pending human action.
 - `/epic-resume` resumes safe in-progress work or retries a failed pre-plan run as a new audited run.
+- `/epic-exit` hides the Epic widgets without changing persisted Epic state.
 - `/epic-approve-prerequisites` applies the exact prerequisite commands discovered for the repository after human approval.
-- `/epic-cancel` cancels without reverting repository changes.
 - `/plan-review` extracts standalone or trailing inline `R:` comments and asks the Planner to revise.
 - `/plan-revise` forces a Planner revision.
 - `/task-approve` continues the current task review: it refines `R:` findings automatically, or approves the task when no findings remain.
@@ -43,13 +43,13 @@ After approval, the Planner writes a persisted task manifest and one artifact pe
 
 Runs are stored under `.pi/epics/runs/<epic-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `epic.log`, per-invocation raw stdout files under `agent-runs/`, `Epic.md`, task, and plan revisions. Agent stdout is written incrementally to a new private file for every role invocation so it remains available if the parent process crashes. `.pi/epics/` is ignored; `plan.md` is intentionally not ignored.
 
-`state.json` contains a versioned hierarchical XState persisted snapshot together with durable epic context and artifact references. The current schema/machine version is `3/5`. Older or malformed snapshots, including snapshots from before this domain rename and partial-migration snapshots, are reported as incompatible and are not silently migrated; start a new epic unless an explicit migration is added later.
+`state.json` contains a versioned hierarchical XState persisted snapshot together with durable epic context and artifact references. The current schema/machine version is `3/6`. Older or malformed snapshots, including snapshots from before this domain rename and snapshots from machine version `5`, are reported as incompatible and are not silently migrated; start a new epic unless an explicit migration is added later.
 
 Fast checks include `git diff --check`, dependency installation when `package.json` exists, and configured/discovered typecheck, lint, and focused tests. Full checks include dependency installation, configured/discovered tests and build, plus Fallow when configured. Installation uses the repository lockfile when present. Every command has a timeout and bounded output. Missing package scripts are not invented as failures; configure repository-specific commands explicitly when they are required gates. Each decomposed task declares `requiredChecks`, `deferredChecks`, and a dependency-based `reason`; task-local suites execute only required checks, while other discovered checks are skipped. Deferred checks are recorded as skipped for that task and are always run by final verification.
 
 After plan approval, the epic checks for a Git repository and declared Node dependencies. In a new or non-Git directory it proposes `git init`; when `package.json` dependencies are missing it proposes the appropriate lockfile-aware install command (`npm ci`, `npm install`, `pnpm install`, or `yarn install`). These repository-level prerequisite commands are persisted in the run artifacts and never execute until `/epic-approve-prerequisites` is run. If an approved implementation task creates its own manifest and explicitly includes dependency installation, the writable Implementer may run that task-local install inside its OS sandbox.
 
-Fast, full, semantic-repair, and final-verification stages are persisted independently. Each repair class is bounded by configuration; exhausting a limit pauses in `escalating` and requires `/epic-resume` or `/epic-cancel`.
+Fast, full, semantic-repair, and final-verification stages are persisted independently. Each repair class is bounded by configuration; exhausting a limit pauses in `escalating` and requires `/epic-resume`. Exit is UI-only, so an exited Epic remains resumable.
 
 ## Security boundaries
 

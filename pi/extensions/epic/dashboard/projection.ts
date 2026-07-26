@@ -46,7 +46,6 @@ const STAGE_STATUS: Record<EpicStage, EpicDashboardStatus> = {
   final_verification: 'in-progress',
   completed: 'completed',
   failed: 'failed',
-  cancelled: 'failed',
 }
 
 function timestampMs(value: string, field: string): number {
@@ -115,7 +114,7 @@ function planActions(): readonly DashboardAction[] {
       EPIC_COMMANDS.approvePlan,
       'primary'
     ),
-    action(EPIC_COMMANDS.cancel, 'Abort', EPIC_COMMANDS.cancel, 'danger'),
+    action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
   ]
 }
 
@@ -127,7 +126,7 @@ function taskActions(): readonly DashboardAction[] {
       EPIC_COMMANDS.approveTask,
       'primary'
     ),
-    action(EPIC_COMMANDS.cancel, 'Abort', EPIC_COMMANDS.cancel, 'danger'),
+    action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
   ]
 }
 
@@ -184,7 +183,7 @@ function actionRequired(
             EPIC_COMMANDS.approvePrerequisites,
             'primary'
           ),
-          action(EPIC_COMMANDS.cancel, 'Abort', EPIC_COMMANDS.cancel, 'danger'),
+          action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
         ],
       }
     case 'awaiting_task_approval':
@@ -210,7 +209,7 @@ function actionRequired(
         message: state.failureReason,
         actions: [
           action(EPIC_COMMANDS.resume, 'Resume', EPIC_COMMANDS.resume, 'primary'),
-          action(EPIC_COMMANDS.cancel, 'Abort', EPIC_COMMANDS.cancel, 'danger'),
+          action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
         ],
       }
     default:
@@ -426,7 +425,7 @@ export function projectDashboardState(
   input: DashboardProjectionInput
 ): DashboardProjection {
   const nowMs = timestampMs(input.now ?? input.state.updatedAt, 'now')
-  const terminal = ['completed', 'failed', 'cancelled'].includes(input.state.stage)
+  const terminal = ['completed', 'failed'].includes(input.state.stage)
   if (terminal && input.completedAt === undefined) {
     throw new Error('Terminal epics require completedAt.')
   }

@@ -294,11 +294,11 @@ test('action-required projection uses registered commands', () => {
   assert.equal(planReview?.id, 'plan-action-required')
   assert.deepEqual(
     planReview?.actions.map((item) => item.command),
-    ['/plan-approve', '/epic-cancel']
+    ['/plan-approve', '/epic-exit']
   )
   assert.deepEqual(
     planReview?.actions.map((item) => item.label),
-    ['Continue', 'Abort']
+    ['Continue', 'Exit']
   )
   assert.match(planReview?.message ?? '', /plan\.md/)
   assert.ok(planReview?.message?.includes('\x1b]8;;file:///repo/plan.md\x1b\\'))
@@ -317,17 +317,31 @@ test('action-required projection uses registered commands', () => {
   }).actionRequired
   assert.deepEqual(
     taskReview?.actions.map((item) => item.command),
-    ['/task-approve', '/epic-cancel']
+    ['/task-approve', '/epic-exit']
   )
   assert.deepEqual(
     taskReview?.actions.map((item) => item.label),
-    ['Continue', 'Abort']
+    ['Continue', 'Exit']
   )
   assert.match(taskReview?.message ?? '', /task-001\.md/)
   assert.ok(
     taskReview?.message?.includes(
       `\x1b]8;;file:///repo/.pi/epics/runs/${state.epicId}/tasks/task-001.md\x1b\\`
     )
+  )
+
+  state.stage = 'awaiting_prerequisite_approval'
+  const prerequisites = DashboardState.fromRun({
+    state,
+    events: [],
+  }).actionRequired
+  assert.deepEqual(
+    prerequisites?.actions.map((item) => item.command),
+    ['/epic-approve-prerequisites', '/epic-exit']
+  )
+  assert.deepEqual(
+    prerequisites?.actions.map((item) => item.label),
+    ['Approve prerequisites', 'Exit']
   )
 
   state.stage = 'escalating'
@@ -338,6 +352,10 @@ test('action-required projection uses registered commands', () => {
   }).actionRequired
   assert.equal(escalation?.severity, 'critical')
   assert.equal(escalation?.message, state.failureReason)
+  assert.deepEqual(
+    escalation?.actions.map((item) => item.label),
+    ['Resume', 'Exit']
+  )
 
   state.stage = 'implementing'
   assert.equal(

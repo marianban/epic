@@ -29,9 +29,9 @@ interface EpicInspector {
 // tearing down the inspector server after the command returns.
 const inspectors = new Map<number, EpicInspector>()
 
-function createEpicInspector(config: EpicConfig['inspector']):
-  | EpicInspector
-  | undefined {
+function createEpicInspector(
+  config: EpicConfig['inspector']
+): EpicInspector | undefined {
   const enabled =
     process.env.PI_EPIC_INSPECTOR === '1' || config?.enabled === true
   if (!enabled || process.env.PI_EPIC_INSPECTOR === '0') return undefined
@@ -40,7 +40,9 @@ function createEpicInspector(config: EpicConfig['inspector']):
     process.env.PI_EPIC_INSPECTOR_PORT ?? config?.port ?? 8080
   )
   const port =
-    Number.isInteger(configuredPort) && configuredPort > 0 && configuredPort < 65536
+    Number.isInteger(configuredPort) &&
+    configuredPort > 0 &&
+    configuredPort < 65536
       ? configuredPort
       : 8080
   const existing = inspectors.get(port)
@@ -118,7 +120,6 @@ export class EpicRuntime {
       'escalating',
       'completed',
       'failed',
-      'cancelled',
     ])
     while (Date.now() - started < timeoutMs) {
       const snapshot = this.actor.getSnapshot() as unknown as {

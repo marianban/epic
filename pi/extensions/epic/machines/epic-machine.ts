@@ -15,7 +15,7 @@ import {
 import { createEpicServices, type EpicServices } from '../services.ts'
 
 export const EPIC_SCHEMA_VERSION = 3
-export const EPIC_MACHINE_VERSION = 5
+export const EPIC_MACHINE_VERSION = 6
 export interface EpicMachineContext {
   state: EpicState
   report?: ScoutReport
@@ -24,7 +24,6 @@ export interface EpicMachineContext {
 export type EpicMachineEvent =
   | { type: 'EPIC.START' }
   | { type: 'EPIC.RESUME' }
-  | { type: 'EPIC.CANCEL' }
   | { type: 'PLAN.REVIEW'; force?: boolean }
   | { type: 'PLAN.APPROVE' }
   | { type: 'PLAN.REVISE' }
@@ -51,7 +50,6 @@ const taskStage = (value: unknown): EpicStage =>
       awaitingReview: 'awaiting_task_review',
       escalating: 'escalating',
       done: 'final_verification',
-      cancelled: 'cancelled',
       failed: 'failed',
     }) as Record<string, EpicStage>
   )[String(value)] ?? 'implementing'
@@ -132,7 +130,6 @@ export function createEpicMachine(services: EpicServices) {
           },
           onError: 'terminal.failed',
         },
-        on: { 'EPIC.CANCEL': 'terminal.cancelled' },
       },
       planning: {
         initial: 'scouting',
@@ -155,7 +152,6 @@ export function createEpicMachine(services: EpicServices) {
               },
               onError: '#epic.terminal.failed',
             },
-            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
           generating: {
             tags: ['active', 'planning'],
@@ -193,7 +189,6 @@ export function createEpicMachine(services: EpicServices) {
               ],
               onError: '#epic.terminal.failed',
             },
-            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
           awaitingReview: {
             tags: ['awaiting-human', 'awaiting-plan-review'],
@@ -201,7 +196,6 @@ export function createEpicMachine(services: EpicServices) {
               'PLAN.REVIEW': 'revising',
               'PLAN.REVISE': 'revising',
               'PLAN.APPROVE': 'approving',
-              'EPIC.CANCEL': '#epic.terminal.cancelled',
             },
           },
           revising: {
@@ -224,7 +218,6 @@ export function createEpicMachine(services: EpicServices) {
               },
               onError: '#epic.terminal.failed',
             },
-            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
           awaitingApproval: {
             tags: ['awaiting-human', 'awaiting-plan-approval'],
@@ -232,7 +225,6 @@ export function createEpicMachine(services: EpicServices) {
               'PLAN.REVIEW': 'revising',
               'PLAN.REVISE': 'revising',
               'PLAN.APPROVE': 'approving',
-              'EPIC.CANCEL': '#epic.terminal.cancelled',
             },
           },
           approving: {
@@ -245,7 +237,6 @@ export function createEpicMachine(services: EpicServices) {
               },
               onError: '#epic.terminal.failed',
             },
-            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
         },
       },
@@ -260,7 +251,6 @@ export function createEpicMachine(services: EpicServices) {
           },
           onError: 'terminal.failed',
         },
-        on: { 'EPIC.CANCEL': 'terminal.cancelled' },
       },
       prerequisites: {
         initial: 'checking',
@@ -294,13 +284,11 @@ export function createEpicMachine(services: EpicServices) {
               ],
               onError: '#epic.terminal.failed',
             },
-            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
           awaitingApproval: {
             tags: ['awaiting-human', 'awaiting-prerequisite-approval'],
             on: {
               'PREREQUISITES.APPROVE': 'preparing',
-              'EPIC.CANCEL': '#epic.terminal.cancelled',
             },
           },
           preparing: {
@@ -318,7 +306,6 @@ export function createEpicMachine(services: EpicServices) {
               },
               onError: '#epic.terminal.failed',
             },
-            on: { 'EPIC.CANCEL': '#epic.terminal.cancelled' },
           },
         },
       },
@@ -381,15 +368,6 @@ export function createEpicMachine(services: EpicServices) {
           onDone: [
             {
               guard: ({ event }) =>
-                (event.output as TaskExecutionResult).kind === 'cancelled',
-              target: 'terminal.cancelled',
-              actions: assign({
-                state: ({ event }) =>
-                  (event.output as TaskExecutionResult).state,
-              }),
-            },
-            {
-              guard: ({ event }) =>
                 (event.output as TaskExecutionResult).kind === 'completed' &&
                 (event.output as TaskExecutionResult).state.currentTaskIndex +
                   1 <
@@ -441,14 +419,12 @@ export function createEpicMachine(services: EpicServices) {
           'TASK.REVIEW': { actions: 'forwardTask' },
           'TASK.REVISE': { actions: 'forwardTask' },
           'EPIC.RESUME': { actions: 'forwardTask' },
-          'EPIC.CANCEL': { actions: 'forwardTask' },
         },
       },
       escalating: {
         tags: ['awaiting-human', 'escalated'],
         on: {
           'EPIC.RESUME': 'taskExecution',
-          'EPIC.CANCEL': 'terminal.cancelled',
         },
       },
       finalVerification: {
@@ -480,14 +456,12 @@ export function createEpicMachine(services: EpicServices) {
           ],
           onError: 'terminal.failed',
         },
-        on: { 'EPIC.CANCEL': 'terminal.cancelled' },
       },
       terminal: {
         initial: 'completed',
         states: {
           completed: { type: 'final', tags: ['terminal', 'completed'] },
           failed: { type: 'final', tags: ['terminal', 'failed'] },
-          cancelled: { type: 'final', tags: ['terminal', 'cancelled'] },
         },
       },
     },

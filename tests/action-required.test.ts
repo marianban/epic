@@ -21,15 +21,15 @@ const continueAction: DashboardAction = {
   kind: 'primary',
   command: '/continue',
 }
-const abortAction: DashboardAction = {
-  id: 'abort',
-  label: 'Abort',
-  kind: 'danger',
-  command: '/abort',
+const exitAction: DashboardAction = {
+  id: 'exit',
+  label: 'Exit',
+  kind: 'secondary',
+  command: '/epic-exit',
 }
 const actions: readonly DashboardAction[] = [
   continueAction,
-  abortAction,
+  exitAction,
 ]
 
 function request(
@@ -102,11 +102,11 @@ test('navigates with wrapping in both directions', () => {
   assert.equal(component.getFocusedActionId(), 'continue')
 
   component.handleInput('\t')
-  assert.equal(component.getFocusedActionId(), 'abort')
+  assert.equal(component.getFocusedActionId(), 'exit')
   component.handleInput('\x1b[C')
   assert.equal(component.getFocusedActionId(), 'continue')
   component.handleInput('\x1b[Z')
-  assert.equal(component.getFocusedActionId(), 'abort')
+  assert.equal(component.getFocusedActionId(), 'exit')
   component.handleInput('\x1b[D')
   assert.equal(component.getFocusedActionId(), 'continue')
 })
@@ -127,8 +127,8 @@ test('executes the focused action once on Enter', () => {
 test('preserves focus by action id and falls back when removed', () => {
   const component = new ActionRequired(request(), identityTheme, () => undefined)
   component.handleInput('\t')
-  component.setState(request({ actions: [abortAction, continueAction] }))
-  assert.equal(component.getFocusedActionId(), 'abort')
+  component.setState(request({ actions: [exitAction, continueAction] }))
+  assert.equal(component.getFocusedActionId(), 'exit')
 
   component.setState(request({ actions: [continueAction] }))
   assert.equal(component.getFocusedActionId(), 'continue')
