@@ -11,6 +11,7 @@ import type {
   EpicConfig,
   EpicState,
 } from './types.ts'
+import { packageInstallCommand } from './prerequisites.ts'
 import { assertRepositoryPath, readConfig, redactSecrets } from './tools.ts'
 import { logEpic } from './logger.ts'
 
@@ -50,6 +51,12 @@ function checkNameForCommand(
 ): string {
   const normalized = command.trim()
   if (/^git\s+diff\s+--check$/i.test(normalized)) return 'diff-check'
+  if (
+    /\b(?:npm\s+(?:ci|install)|pnpm\s+install|yarn\s+install)\b/i.test(
+      normalized
+    )
+  )
+    return 'install'
   if (/\bnpm\s+run\s+typecheck\b/i.test(normalized)) return 'typecheck'
   if (/\bnpm\s+run\s+lint\b/i.test(normalized)) return 'lint'
   if (/\bnpm\s+(?:run\s+)?test\b/i.test(normalized))
@@ -57,6 +64,26 @@ function checkNameForCommand(
   if (/\bnpm\s+run\s+build\b/i.test(normalized)) return 'build'
   if (/\bfallow\b/i.test(normalized)) return 'fallow'
   return `${suite}-${index + 1}`
+}
+
+async function hasPackageManifest(root: string): Promise<boolean> {
+  try {
+    await fs.access(path.join(root, 'package.json'))
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function packageInstallCheck(
+  root: string
+): Promise<CheckDefinition | undefined> {
+  if (!(await hasPackageManifest(root))) return undefined
+  return {
+    name: 'install',
+    command: await packageInstallCommand(root),
+    required: true,
+  }
 }
 
 async function resolveCheckDefinitions(
@@ -112,6 +139,10 @@ async function resolveCheckDefinitions(
         command: config.checks.fallow,
         required: true,
       })
+  }
+  if (suite === 'fast' || suite === 'full') {
+    const install = await packageInstallCheck(root)
+    if (install) definitions.push(install)
   }
   return definitions
 }

@@ -38,6 +38,9 @@ export const executeEpicDashboardAction: EpicStatusActionExecutor = async (
     case EPIC_COMMANDS.cancel:
       await cancelEpic(ctx)
       return
+    case EPIC_COMMANDS.resume:
+      await resumeEpic(ctx)
+      return
     default:
       throw new Error(`Unsupported dashboard action: ${action.id}`)
   }

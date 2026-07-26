@@ -952,6 +952,56 @@ test('task check policy skips discovered checks that are not required', async ()
   }
 })
 
+test('task check policy supports lockfile-aware dependency installation', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-task-install-check-'))
+  try {
+    await writeFile(
+      join(root, 'package.json'),
+      JSON.stringify({ name: 'install-check-fixture', version: '1.0.0' })
+    )
+    await writeFile(
+      join(root, 'package-lock.json'),
+      JSON.stringify({
+        name: 'install-check-fixture',
+        version: '1.0.0',
+        lockfileVersion: 3,
+        requires: true,
+        packages: {
+          '': { name: 'install-check-fixture', version: '1.0.0' },
+        },
+      })
+    )
+    const state = createEpicState(root, 'task')
+    state.tasks = [
+      {
+        id: 'task-001',
+        title: 'Install dependencies',
+        objective: 'Install the declared dependencies.',
+        scope: { read: [], modify: [], create: ['package.json'], delete: [] },
+        implementation: ['Create package.json.'],
+        acceptanceCriteria: ['Dependencies install successfully.'],
+        verification: ['npm install'],
+        manualReviewSteps: ['Inspect the installed dependencies.'],
+        risks: [],
+        requiredChecks: ['install'],
+        deferredChecks: [],
+        reason: 'The task creates the dependency manifest.',
+      },
+    ]
+    await saveState(state)
+
+    const result = await runCheckSuite('full', state)
+    const install = result.checks.find((check) => check.name === 'install')
+    assert.ok(install)
+    assert.equal(install.command, 'npm ci')
+    assert.equal(install.required, true)
+    assert.equal(install.passed, true)
+    assert.equal(result.passed, true)
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test('persistence writes an active state and append-only event journal', async () => {
   const root = await mkdtemp(join(tmpdir(), 'pi-epic-'))
   try {

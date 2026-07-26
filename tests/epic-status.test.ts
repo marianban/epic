@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { test } from 'node:test'
 import type {
   ExtensionAPI,
+  ExtensionContext,
   Theme,
 } from '@earendil-works/pi-coding-agent'
 import type { Component, TUI } from '@earendil-works/pi-tui'
@@ -29,6 +30,10 @@ import {
   loadActiveEpic,
   saveState,
 } from '../pi/extensions/epic/persistence.ts'
+import {
+  executeEpicDashboardAction,
+} from '../pi/extensions/epic/index.ts'
+import { EPIC_COMMANDS } from '../pi/extensions/epic/commands.ts'
 
 const identityTheme = {
   fg: (_color: string, text: string) => text,
@@ -384,4 +389,24 @@ test('lifecycle registers and clears the TUI epicstatus widget', () => {
   handlers.get('session_shutdown')?.({}, ctx)
   assert.equal(widgetKey, EPIC_STATUS_WIDGET_KEY)
   assert.equal(widgetContent, undefined)
+})
+
+test('dashboard escalation action routes to the registered resume command', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-epic-resume-action-'))
+  try {
+    await assert.rejects(
+      () =>
+        executeEpicDashboardAction(
+          { id: EPIC_COMMANDS.resume, label: 'Resume' },
+          { cwd: root } as ExtensionContext
+        ),
+      (error: unknown) => {
+        assert.match(String(error), /active\.json/)
+        assert.doesNotMatch(String(error), /Unsupported dashboard action/)
+        return true
+      }
+    )
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })

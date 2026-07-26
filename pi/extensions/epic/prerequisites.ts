@@ -12,7 +12,7 @@ async function exists(filePath: string): Promise<boolean> {
   }
 }
 
-async function packageInstallCommand(
+export async function packageInstallCommand(
   root: string
 ): Promise<Prerequisite['command']> {
   if (await exists(path.join(root, 'pnpm-lock.yaml'))) return 'pnpm install'
