@@ -6,6 +6,7 @@ import type {
 import type { Component, TUI } from '@earendil-works/pi-tui'
 import { isKeyRelease, truncateToWidth } from '@earendil-works/pi-tui'
 import { ActionRequired } from './components/action-required.ts'
+import { CurrentTask } from './components/current-task.ts'
 import { EpicStats } from './components/epic-stats.ts'
 import { loadActiveDashboardState } from './data.ts'
 import type { DashboardState } from './state.ts'
@@ -47,6 +48,7 @@ export class EpicStatusWidget implements Component {
   private readonly unregisterTerminalInput: () => void
   private stats: EpicStats | undefined
   private actionRequired: ActionRequired | undefined
+  private currentTask: CurrentTask | undefined
   private errorMessage: string | undefined
   private notifiedError: string | undefined
   private refreshInFlight = false
@@ -90,10 +92,15 @@ export class EpicStatusWidget implements Component {
   render(width: number): string[] {
     const stats = this.stats?.render(width)
     const actions = this.actionRequired?.render(width) ?? []
-    if (stats !== undefined) {
-      return actions.length === 0 ? stats : [...stats, '', ...actions]
+    const currentTask = this.currentTask?.render(width) ?? []
+    const panels = [stats ?? [], actions, currentTask].filter(
+      (panel) => panel.length > 0
+    )
+    if (panels.length > 0) {
+      return panels.flatMap((panel, index) =>
+        index === 0 ? panel : ['', ...panel]
+      )
     }
-    if (actions.length > 0) return actions
     if (width <= 0) return []
 
     const message =
@@ -106,6 +113,7 @@ export class EpicStatusWidget implements Component {
   invalidate(): void {
     this.stats?.invalidate()
     this.actionRequired?.invalidate()
+    this.currentTask?.invalidate()
   }
 
   dispose(): void {
@@ -131,6 +139,7 @@ export class EpicStatusWidget implements Component {
         this.stats = undefined
         this.actionRequired?.setState(undefined)
         this.actionRequired?.setFocused(false)
+        this.currentTask?.setState(undefined)
       } else if (this.stats === undefined) {
         this.stats = new EpicStats(next, this.theme)
         this.actionRequired = new ActionRequired(
@@ -139,6 +148,7 @@ export class EpicStatusWidget implements Component {
           this.executeAction
         )
         this.actionRequired.setFocused(next.actionRequired !== undefined)
+        this.currentTask = new CurrentTask(next.currentTask, this.theme)
       } else {
         this.stats.setState(next)
         if (this.actionRequired === undefined) {
@@ -151,6 +161,11 @@ export class EpicStatusWidget implements Component {
           this.actionRequired.setState(next.actionRequired)
         }
         this.actionRequired.setFocused(next.actionRequired !== undefined)
+        if (this.currentTask === undefined) {
+          this.currentTask = new CurrentTask(next.currentTask, this.theme)
+        } else {
+          this.currentTask.setState(next.currentTask)
+        }
       }
       this.invalidate()
       this.tui.requestRender()
@@ -159,6 +174,7 @@ export class EpicStatusWidget implements Component {
       this.stats = undefined
       this.actionRequired?.setState(undefined)
       this.actionRequired?.setFocused(false)
+      this.currentTask?.setState(undefined)
       this.errorMessage = error instanceof Error ? error.message : String(error)
       if (this.notifiedError !== this.errorMessage) {
         this.notifiedError = this.errorMessage

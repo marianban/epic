@@ -8,6 +8,7 @@ import type { Theme } from '@earendil-works/pi-coding-agent'
 import { pathToFileURL } from 'node:url'
 import { DashboardState } from '../state.ts'
 import type { EpicDashboardState, ProgressMetric } from '../types.ts'
+import { formatDuration } from '../formatting.ts'
 import { framedBottom, framedLine, framedTop } from './panel.ts'
 
 const COMPACT_BREAKPOINT = 80
@@ -18,26 +19,6 @@ const RIGHT_COLUMN_GAP = 2
 interface RightColumnRow {
   readonly label: string
   readonly value: string
-}
-
-function pad(value: number): string {
-  return String(value).padStart(2, '0')
-}
-
-function formatDuration(durationMs: number): string {
-  if (!Number.isFinite(durationMs) || durationMs < 0) {
-    throw new Error(
-      `Duration must be a finite non-negative number: ${durationMs}`
-    )
-  }
-  const totalSeconds = Math.floor(durationMs / 1_000)
-  const seconds = totalSeconds % 60
-  const totalMinutes = Math.floor(totalSeconds / 60)
-  const minutes = totalMinutes % 60
-  const hours = Math.floor(totalMinutes / 60)
-  return hours === 0
-    ? `${pad(minutes)}:${pad(seconds)}`
-    : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
 }
 
 function formatTokens(total: number): string {

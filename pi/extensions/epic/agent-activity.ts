@@ -2,6 +2,8 @@ export interface ActiveAgentRun {
   readonly repositoryRoot: string
   readonly epicId: string
   readonly startedAtMs: number
+  readonly taskId?: string
+  readonly role?: string
 }
 
 const activeRuns = new Map<string, ActiveAgentRun>()
@@ -10,12 +12,20 @@ export function startAgentRun(
   runId: string,
   repositoryRoot: string,
   epicId: string,
-  startedAtMs: number
+  startedAtMs: number,
+  taskId: string | undefined,
+  role: string
 ): void {
   if (activeRuns.has(runId)) {
     throw new Error(`Agent run ${runId} is already active.`)
   }
-  activeRuns.set(runId, { repositoryRoot, epicId, startedAtMs })
+  activeRuns.set(runId, {
+    repositoryRoot,
+    epicId,
+    startedAtMs,
+    ...(taskId === undefined ? {} : { taskId }),
+    role,
+  })
 }
 
 export function finishAgentRun(runId: string): void {

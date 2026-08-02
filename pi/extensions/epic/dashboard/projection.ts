@@ -16,6 +16,9 @@ import {
   type DashboardProjectionInput,
   type EpicDashboardState,
   type EpicDashboardStatus,
+  type CurrentTaskDashboardState,
+  type TaskDashboardStatus,
+  type TaskDiffDashboardState,
   type ProgressMetric,
   type TokenUsage,
 } from './types.ts'
@@ -436,6 +439,198 @@ function completedTaskCount(
   return currentTaskIndex
 }
 
+const TASK_STAGES = new Set<EpicStage>([
+  'awaiting_task_approval',
+  'awaiting_task_review',
+  'revising_task',
+  'implementing',
+  'running_fast_checks',
+  'repairing_fast_checks',
+  'running_full_checks',
+  'repairing_full_checks',
+  'reviewing',
+  'repairing_review',
+  'escalating',
+])
+
+function taskIdFromEvent(event: EpicEvent): string | undefined {
+  const value = event.payload.taskId
+  if (value === undefined) return undefined
+  if (typeof value !== 'string' || value.length === 0) {
+    throw new Error(`Event ${event.id} has an invalid taskId.`)
+  }
+  return value
+}
+
+function taskEvents(
+  events: readonly EpicEvent[],
+  type: string,
+  taskId: string
+): readonly EpicEvent[] {
+  return orderedEvents(events)
+    .map(({ event }) => event)
+    .filter(
+      (event) => event.type === type && taskIdFromEvent(event) === taskId
+    )
+}
+
+function taskAgentTimeMs(
+  events: readonly EpicEvent[],
+  activeAgentRuns: readonly ActiveAgentRun[],
+  taskId: string,
+  nowMs: number
+): number {
+  return agentTimeMs(
+    events.filter((event) => taskIdFromEvent(event) === taskId),
+    activeAgentRuns.filter((run) => run.taskId === taskId),
+    nowMs
+  )
+}
+
+function taskAttempt(
+  events: readonly EpicEvent[],
+  taskId: string
+): { readonly current: number } {
+  const implementations = events.filter(
+    (event) =>
+      event.type === 'agent_started' &&
+      taskIdFromEvent(event) === taskId &&
+      event.payload.role === 'implementer' &&
+      event.payload.action === 'implementation'
+  )
+  return { current: Math.max(1, implementations.length) }
+}
+
+function nonNegativeEventInteger(
+  event: EpicEvent,
+  field: string
+): number {
+  const value = event.payload[field]
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
+    throw new Error(`Event ${event.id} has an invalid ${field}.`)
+  }
+  return value
+}
+
+function taskCriteria(
+  events: readonly EpicEvent[],
+  taskId: string,
+  total: number
+): ProgressMetric {
+  const latest = taskEvents(events, 'task_review_completed', taskId).at(-1)
+  if (latest === undefined) return progress(0, total)
+  const completed = nonNegativeEventInteger(latest, 'criteriaCompleted')
+  const recordedTotal = nonNegativeEventInteger(latest, 'criteriaTotal')
+  if (recordedTotal !== total) {
+    throw new Error(
+      `Event ${latest.id} criteria total ${recordedTotal} does not match task total ${total}.`
+    )
+  }
+  return progress(completed, total)
+}
+
+function taskDiff(
+  events: readonly EpicEvent[],
+  taskId: string
+): TaskDiffDashboardState | undefined {
+  const latest = taskEvents(events, 'task_diff_updated', taskId).at(-1)
+  if (latest === undefined) return undefined
+  return {
+    filesChanged: nonNegativeEventInteger(latest, 'filesChanged'),
+    linesAdded: nonNegativeEventInteger(latest, 'linesAdded'),
+    linesDeleted: nonNegativeEventInteger(latest, 'linesDeleted'),
+  }
+}
+
+function taskAgentName(
+  activeAgentRuns: readonly ActiveAgentRun[],
+  taskId: string
+): string | undefined {
+  const role = activeAgentRuns
+    .filter((run) => run.taskId === taskId)
+    .at(-1)?.role
+  if (role === undefined) return undefined
+  switch (role) {
+    case 'implementer':
+      return 'Implementor'
+    case 'reviewer':
+      return 'Reviewer'
+    case 'task-reviewer':
+      return 'Task Reviewer'
+    case 'scout':
+      return 'Scout'
+    default:
+      return role
+  }
+}
+
+function taskStatus(
+  stage: EpicStage,
+  events: readonly EpicEvent[],
+  taskId: string
+): TaskDashboardStatus {
+  switch (stage) {
+    case 'awaiting_task_approval':
+      return taskEvents(events, 'task_revised', taskId).length > 0
+        ? 'refinement'
+        : 'initial-review'
+    case 'revising_task':
+      return 'refinement'
+    case 'awaiting_task_review':
+      return 'completed'
+    case 'escalating':
+      return 'failed'
+    case 'implementing':
+    case 'running_fast_checks':
+    case 'repairing_fast_checks':
+    case 'running_full_checks':
+    case 'repairing_full_checks':
+    case 'reviewing':
+    case 'repairing_review':
+      return 'in-progress'
+    default:
+      throw new Error(`Unsupported current-task stage: ${stage}`)
+  }
+}
+
+function currentTask(
+  input: DashboardProjectionInput,
+  tasks: readonly EpicTask[],
+  nowMs: number
+): CurrentTaskDashboardState | undefined {
+  if (!TASK_STAGES.has(input.state.stage) || tasks.length === 0) {
+    return undefined
+  }
+  const index = nonNegativeInteger(input.state.currentTaskIndex, 'currentTaskIndex')
+  const task = tasks[index]
+  if (task === undefined) {
+    throw new Error(`currentTaskIndex must refer to an existing task.`)
+  }
+  const taskId = task.id
+  const activeAgentRuns = input.activeAgentRuns ?? []
+  return {
+    id: taskId,
+    index: index + 1,
+    totalTasks: tasks.length,
+    name: task.title,
+    status: taskStatus(input.state.stage, input.events, taskId),
+    agentTimeMs: taskAgentTimeMs(
+      input.events,
+      activeAgentRuns,
+      taskId,
+      nowMs
+    ),
+    attempt: taskAttempt(input.events, taskId),
+    criteria: taskCriteria(input.events, taskId, task.acceptanceCriteria.length),
+    ...(taskAgentName(activeAgentRuns, taskId) === undefined
+      ? {}
+      : { agent: taskAgentName(activeAgentRuns, taskId) }),
+    ...(taskDiff(input.events, taskId) === undefined
+      ? {}
+      : { diff: taskDiff(input.events, taskId) }),
+  }
+}
+
 export function projectDashboardState(
   input: DashboardProjectionInput
 ): DashboardProjection {
@@ -487,5 +682,6 @@ export function projectDashboardState(
   return {
     epic,
     actionRequired: actionRequired(input.state, input.activeOperation === true),
+    currentTask: currentTask(input, tasks, nowMs),
   }
 }

@@ -34,7 +34,7 @@ import {
 import { applyPrerequisites, discoverPrerequisites } from './prerequisites.ts'
 import { runAgentActor } from './machines/actors.ts'
 import { finishAgentRun, startAgentRun } from './agent-activity.ts'
-import { getCurrentDiff } from './diff.ts'
+import { getCurrentDiff, summarizeDiff } from './diff.ts'
 import { runCheckSuite } from './checks.ts'
 import type {
   CheckSuiteResult,
@@ -103,7 +103,8 @@ export function createEpicServices(
     state: EpicState,
     role: Parameters<typeof runAgentActor>[0]['role'],
     prompt: string,
-    action: string
+    action: string,
+    taskId: string | undefined
   ): Promise<AgentRunResult> => {
     const agentRunDirectory = path.join(
       state.repositoryRoot,
@@ -117,11 +118,19 @@ export function createEpicServices(
       role,
       action,
       agentRunDirectory,
+      ...(taskId === undefined ? {} : { taskId }),
     })
     notify(`${role} started: ${action}.`)
     const runId = randomUUID()
     const runStartedAt = Date.now()
-    startAgentRun(runId, state.repositoryRoot, state.epicId, runStartedAt)
+    startAgentRun(
+      runId,
+      state.repositoryRoot,
+      state.epicId,
+      runStartedAt,
+      taskId,
+      role
+    )
     let result: AgentRunResult | undefined
     let failure: unknown
     let failed = false
@@ -145,6 +154,7 @@ export function createEpicServices(
       await appendEvent(state, 'agent_finished', {
         role,
         action,
+        ...(taskId === undefined ? {} : { taskId }),
         exitCode: 1,
         failureReason:
           failure instanceof Error ? failure.message : String(failure),
@@ -158,6 +168,7 @@ export function createEpicServices(
     await appendEvent(state, 'agent_finished', {
       role,
       action,
+      ...(taskId === undefined ? {} : { taskId }),
       exitCode: result.exitCode,
       stdoutLogPath: result.stdoutLogPath,
       failureReason: result.failureReason,
@@ -195,7 +206,8 @@ export function createEpicServices(
         next,
         'scout',
         scoutEpicPrompt(next, questions),
-        questions.length ? 'focused discovery' : 'repository discovery'
+        questions.length ? 'focused discovery' : 'repository discovery',
+        undefined
       )
       if (run.exitCode !== 0)
         throw new Error(`Scout failed: ${agentFailure(run)}`)
@@ -208,7 +220,8 @@ export function createEpicServices(
         state,
         'planner',
         plannerEpicPrompt(state, report, null),
-        'planning'
+        'planning',
+        undefined
       )
       if (run.exitCode !== 0)
         throw new Error(`Planner failed: ${agentFailure(run)}`)
@@ -272,7 +285,8 @@ export function createEpicServices(
         state,
         'plan-reviewer',
         plannerEpicPrompt(state, report, current, instructions),
-        'plan revision'
+        'plan revision',
+        undefined
       )
       if (run.exitCode !== 0)
         throw new Error(`Plan reviewer failed: ${agentFailure(run)}`)
@@ -294,7 +308,8 @@ export function createEpicServices(
         state,
         'planner',
         taskDecompositionTask(state, plan),
-        'task decomposition'
+        'task decomposition',
+        undefined
       )
       if (run.exitCode !== 0)
         throw new Error(`Task decomposition failed: ${agentFailure(run)}`)
@@ -351,12 +366,19 @@ export function createEpicServices(
         )
       if (!state.taskApproved)
         throw new Error('Cannot implement a task before the task is approved.')
+      const task = state.tasks[state.currentTaskIndex]
+      if (task === undefined) {
+        throw new Error(
+          `Cannot implement missing task at index ${state.currentTaskIndex}.`
+        )
+      }
       const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
       const run = await runRole(
         state,
         'implementer',
         implementerTask(state, plan, feedback, artifact),
-        feedback ? 'bounded repair' : 'implementation'
+        feedback ? 'bounded repair' : 'implementation',
+        task.id
       )
       if (run.exitCode !== 0)
         throw new Error(`Implementer failed: ${agentFailure(run)}`)
@@ -365,11 +387,14 @@ export function createEpicServices(
         implementationAttempt: state.implementationAttempt + (feedback ? 0 : 1),
       }
       const diff = await getCurrentDiff(next.repositoryRoot)
+      const taskId = task.id
+      const summary = summarizeDiff(diff)
       next.lastDiffPath = await persistJsonArtifact(
         next,
         `diffs/implementation-${String(next.implementationAttempt).padStart(3, '0')}.json`,
-        { attempt: next.implementationAttempt, diff }
+        { taskId, attempt: next.implementationAttempt, diff, summary }
       )
+      await appendEvent(next, 'task_diff_updated', { taskId, ...summary })
       return next
     },
     async checks(state, suite) {
@@ -396,12 +421,22 @@ export function createEpicServices(
         state,
         'reviewer',
         reviewerTask(state, plan, diff, JSON.stringify(checks), artifact),
-        'semantic review'
+        'semantic review',
+        state.tasks?.[state.currentTaskIndex]?.id
       )
       if (run.exitCode !== 0)
         throw new Error(`Reviewer failed: ${agentFailure(run)}`)
       const result = parseJsonResponse<ReviewResult>(run.output, 'reviewer')
-      if (typeof result.passed !== 'boolean' || !Array.isArray(result.findings))
+      if (
+        typeof result.passed !== 'boolean' ||
+        !Array.isArray(result.findings) ||
+        !Array.isArray(result.acceptanceCriteria) ||
+        result.acceptanceCriteria.some(
+          (criterion) =>
+            typeof criterion.criterion !== 'string' ||
+            !['met', 'partially_met', 'not_met'].includes(criterion.status)
+        )
+      )
         throw new Error('Reviewer returned an invalid review result.')
       const next = { ...state }
       next.lastReviewResultPath = await persistJsonArtifact(
@@ -409,6 +444,18 @@ export function createEpicServices(
         `reviews/review-${String(next.semanticRepairAttempt + 1).padStart(3, '0')}.json`,
         result
       )
+      const task = next.tasks?.[next.currentTaskIndex]
+      if (task === undefined) {
+        throw new Error('Cannot record a review without a current task.')
+      }
+      const criteriaCompleted = result.acceptanceCriteria.filter(
+        (criterion) => criterion.status === 'met'
+      ).length
+      await appendEvent(next, 'task_review_completed', {
+        taskId: task.id,
+        criteriaCompleted,
+        criteriaTotal: task.acceptanceCriteria.length,
+      })
       return { state: next, result }
     },
     async reviseTask(state) {
@@ -423,7 +470,8 @@ export function createEpicServices(
         state,
         'task-reviewer',
         taskReviewTask(state, markdown, instructions),
-        'task revision'
+        'task revision',
+        state.tasks?.[state.currentTaskIndex]?.id
       )
       if (run.exitCode !== 0)
         throw new Error(`Task reviewer failed: ${agentFailure(run)}`)
@@ -433,6 +481,11 @@ export function createEpicServices(
           'Task reviewer left unresolved R: findings in the task artifact.'
         )
       await fs.writeFile(file, `${revised}\n`, 'utf8')
+      const task = state.tasks?.[state.currentTaskIndex]
+      if (task === undefined) {
+        throw new Error('Cannot record a revision without a current task.')
+      }
+      await appendEvent(state, 'task_revised', { taskId: task.id })
       return { ...state, pendingHumanAction: 'review_task' }
     },
   }

@@ -2,6 +2,8 @@ import type { EpicEvent, EpicState } from '../types.ts'
 
 export interface ActiveAgentRun {
   readonly startedAtMs: number
+  readonly taskId?: string
+  readonly role?: string
 }
 
 export type EpicDashboardStatus =
@@ -26,6 +28,38 @@ export interface TokenUsage {
   readonly output?: number
   readonly cached?: number
   readonly reasoning?: number
+}
+
+export type TaskDashboardStatus =
+  | 'initial-review'
+  | 'refinement'
+  | 'pending'
+  | 'in-progress'
+  | 'completed'
+  | 'failed'
+
+export interface TaskDiffDashboardState {
+  readonly filesChanged: number
+  readonly linesAdded: number
+  readonly linesDeleted: number
+  readonly hasWarning?: boolean
+}
+
+export interface CurrentTaskDashboardState {
+  readonly id: string
+  readonly index: number
+  readonly totalTasks: number
+  readonly name: string
+  readonly status: TaskDashboardStatus
+  /** Cumulative execution time of all agent runs associated with this task. */
+  readonly agentTimeMs: number
+  readonly attempt: {
+    readonly current: number
+    readonly max?: number
+  }
+  readonly criteria: ProgressMetric
+  readonly agent?: string
+  readonly diff?: TaskDiffDashboardState
 }
 
 export interface DashboardAction {
@@ -68,4 +102,5 @@ export interface DashboardProjectionInput {
 export interface DashboardProjection {
   readonly epic: EpicDashboardState
   readonly actionRequired?: DashboardActionRequest
+  readonly currentTask?: CurrentTaskDashboardState
 }
