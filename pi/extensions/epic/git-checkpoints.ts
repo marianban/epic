@@ -14,7 +14,9 @@ const diagnosticPatterns = [
 
 async function git(root: string, args: string[]): Promise<string> {
   try {
-    return String((await exec('git', args, { cwd: root })).stdout).trim()
+    // Preserve leading porcelain status columns. They distinguish a tracked
+    // modification (` M path`) from the path text itself.
+    return String((await exec('git', args, { cwd: root })).stdout).trimEnd()
   } catch (error) {
     const detail = error as { stderr?: string; stdout?: string }
     throw new Error(`git ${args.join(' ')} failed: ${detail.stderr ?? detail.stdout ?? String(error)}`, { cause: error })
