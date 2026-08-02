@@ -6,9 +6,18 @@ import {
 } from '@earendil-works/pi-tui'
 import type { Component } from '@earendil-works/pi-tui'
 import type { DashboardAction, DashboardActionRequest } from '../types.ts'
-import { framedBottom, framedLine, framedTop } from './panel.ts'
+import {
+  framedBottom,
+  framedLine,
+  framedTop,
+  type PanelStyle,
+} from './panel.ts'
 
 const ACTION_GAP = 3
+const CHECKPOINT_PANEL_STYLE: PanelStyle = {
+  borderColor: 'borderAccent',
+  backgroundColor: 'customMessageBg',
+}
 
 function severityIcon(severity: DashboardActionRequest['severity']): string {
   switch (severity) {
@@ -155,9 +164,11 @@ export class ActionRequired implements Component {
       ...(actionLines.length > 0 ? ['', ...actionLines] : []),
     ]
     const lines = [
-      framedTop(width, 'ACTION REQUIRED', this.theme),
-      ...content.map((line) => framedLine(line, width, this.theme)),
-      framedBottom(width, this.theme),
+      framedTop(width, 'CHECKPOINT', this.theme, CHECKPOINT_PANEL_STYLE),
+      ...content.map((line) =>
+        framedLine(line, width, this.theme, CHECKPOINT_PANEL_STYLE)
+      ),
+      framedBottom(width, this.theme, CHECKPOINT_PANEL_STYLE),
     ]
     this.cachedWidth = width
     this.cachedLines = lines

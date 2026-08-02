@@ -11,6 +11,7 @@ import type {
 
 const identityTheme = {
   fg: (_color: string, text: string) => text,
+  bg: (_color: string, text: string) => text,
   bold: (text: string) => text,
   inverse: (text: string) => text,
 } as unknown as Theme
@@ -49,11 +50,35 @@ test('renders severity, title, message, and every action', () => {
   )
 
   const output = component.render(100).join('\n')
-  assert.match(output, /ACTION REQUIRED/)
+  assert.match(output, /CHECKPOINT/)
   assert.match(output, /⚠ Plan is ready/)
   assert.match(output, /Please inspect the generated plan\./)
   for (const action of actions) assert.match(output, new RegExp(action.label))
   assert.match(output, /▸\[ Continue \]/)
+})
+
+test('renders the checkpoint with an accented border and elevated background', () => {
+  const foregrounds: string[] = []
+  const backgrounds: string[] = []
+  const theme = {
+    fg: (color: string, text: string) => {
+      foregrounds.push(color)
+      return text
+    },
+    bg: (color: string, text: string) => {
+      backgrounds.push(color)
+      return text
+    },
+    bold: (text: string) => text,
+    inverse: (text: string) => text,
+  } as unknown as Theme
+
+  const lines = new ActionRequired(request(), theme, () => undefined).render(80)
+
+  assert.match(lines[0] ?? '', /CHECKPOINT/)
+  assert.ok(foregrounds.includes('borderAccent'))
+  assert.equal(backgrounds.length, lines.length)
+  assert.ok(backgrounds.every((color) => color === 'customMessageBg'))
 })
 
 test('Continue chooses approval or refinement from R: comments', () => {

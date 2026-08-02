@@ -185,7 +185,7 @@ export class EpicStats implements Component {
       theme,
       [
         {
-          label: 'Agent time',
+          label: 'Time',
           value: formatDuration(epic.agentTimeMs),
         },
         { label: 'Tokens', value: formatTokens(epic.tokens.total) },
@@ -217,7 +217,7 @@ export class EpicStats implements Component {
       theme,
       [
         {
-          label: 'Agent time',
+          label: 'Time',
           value: formatDuration(epic.agentTimeMs),
         },
         { label: 'Tokens', value: formatTokens(epic.tokens.total) },

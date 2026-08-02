@@ -91,7 +91,7 @@ class EpicStatusWidget implements Component {
     const stats = this.stats?.render(width)
     const actions = this.actionRequired?.render(width) ?? []
     const currentTask = this.currentTask?.render(width) ?? []
-    const panels = [stats ?? [], actions, currentTask].filter(
+    const panels = [stats ?? [], currentTask, actions].filter(
       (panel) => panel.length > 0
     )
     if (panels.length > 0) {

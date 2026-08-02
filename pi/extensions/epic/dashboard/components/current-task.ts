@@ -173,7 +173,7 @@ export class CurrentTask implements Component {
           ...renderGrid(rows.right, innerWidth, this.theme),
         ]
     const lines = [
-      framedTop(width, 'CURRENT TASK', this.theme),
+      framedTop(width, 'TASK', this.theme),
       ...title.map((line) => framedLine(line, width, this.theme)),
       framedLine(statusLine, width, this.theme),
       framedLine('', width, this.theme),
