@@ -3,3 +3,25 @@
 node_modules/
 dist/
 .fallow/
+
+# macOS
+# Applies to nested folders too, including .pi/epics/runs/<epic-id>/.
+**/.DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux and desktop environments
+*~
+.fuse_hidden*
+.nfs*
+.directory
+.Trash-*/
+.Trash/

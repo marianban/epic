@@ -11,6 +11,23 @@ const diagnosticPatterns = [
   '.pi/epics/runs/*/agent-runs/',
   '.pi/epics/runs/*/epic.log',
 ]
+const epicArtifactOsPatterns = [
+  '.pi/epics/**/.DS_Store',
+  '.pi/epics/**/.AppleDouble',
+  '.pi/epics/**/.LSOverride',
+  '.pi/epics/**/Icon?',
+  '.pi/epics/**/._*',
+  '.pi/epics/**/Thumbs.db',
+  '.pi/epics/**/ehthumbs.db',
+  '.pi/epics/**/Desktop.ini',
+  '.pi/epics/**/$RECYCLE.BIN/',
+  '.pi/epics/**/*~',
+  '.pi/epics/**/.fuse_hidden*',
+  '.pi/epics/**/.nfs*',
+  '.pi/epics/**/.directory',
+  '.pi/epics/**/.Trash-*/',
+  '.pi/epics/**/.Trash/',
+]
 
 async function git(root: string, args: string[]): Promise<string> {
   try {
@@ -24,7 +41,7 @@ async function git(root: string, args: string[]): Promise<string> {
 }
 
 function managedIgnoreBlock(): string {
-  return [MANAGED_BEGIN, '!.pi/', '!.pi/epic.config.json', '!.pi/epic.config.local.json', '!.pi/epics/', '!.pi/epics/**', ...diagnosticPatterns, MANAGED_END].join('\n')
+  return [MANAGED_BEGIN, '!.pi/', '!.pi/epic.config.json', '!.pi/epic.config.local.json', '!.pi/epics/', '!.pi/epics/**', ...epicArtifactOsPatterns, ...diagnosticPatterns, MANAGED_END].join('\n')
 }
 
 /** Add only the engine's own rules before the first checkpoint. */
