@@ -8,15 +8,13 @@ import type {
   CheckSuiteResult,
   FallowDelta,
   Finding,
-  EpicConfig,
-  EpicState,
+  EpicDomainState,
+  ResolvedEpicConfiguration,
 } from './types.ts'
 import { packageInstallCommand } from './prerequisites.ts'
-import { assertRepositoryPath, readConfig, redactSecrets } from './tools.ts'
+import { assertRepositoryPath, redactSecrets } from './tools.ts'
 import { logEpic } from './logger.ts'
 
-const DEFAULT_TIMEOUT_MS = 120_000
-const DEFAULT_MAX_OUTPUT_BYTES = 20_000
 
 interface PackageJson {
   scripts?: Record<string, string>
@@ -88,11 +86,11 @@ async function packageInstallCheck(
 
 async function resolveCheckDefinitions(
   root: string,
-  suite: CheckSuiteName
+  suite: CheckSuiteName,
+  configuration: ResolvedEpicConfiguration
 ): Promise<CheckDefinition[]> {
-  const config = (await readConfig(root)) as EpicConfig
   const scripts = await packageScripts(root)
-  const configured = config.checks?.[suite]
+  const configured = configuration.checks[suite]
   if (configured?.length)
     return configured.map((command, index) => ({
       name: checkNameForCommand(suite, command, index),
@@ -110,7 +108,7 @@ async function resolveCheckDefinitions(
     const typecheck = commandForScript(scripts, 'typecheck')
     const lint = commandForScript(scripts, 'lint')
     const focused =
-      config.checks?.focusedTests ??
+      configuration.checks.focusedTests ??
       commandForScript(scripts, 'test', ' -- --run')
     if (typecheck)
       definitions.push({
@@ -133,10 +131,10 @@ async function resolveCheckDefinitions(
       definitions.push({ name: 'tests', command: tests, required: true })
     if (build)
       definitions.push({ name: 'build', command: build, required: true })
-    if (config.checks?.fallow)
+    if (configuration.checks.fallow)
       definitions.push({
         name: 'fallow',
-        command: config.checks.fallow,
+        command: configuration.checks.fallow,
         required: true,
       })
   }
@@ -149,17 +147,18 @@ async function resolveCheckDefinitions(
 
 async function resolveFinalCheckDefinitions(
   root: string,
-  state: EpicState
+  state: EpicDomainState,
+  configuration: ResolvedEpicConfiguration
 ): Promise<CheckDefinition[]> {
-  const definitions = await resolveCheckDefinitions(root, 'final')
+  const definitions = await resolveCheckDefinitions(root, 'final', configuration)
   const deferredNames = new Set(
     state.tasks?.flatMap((task) => task.deferredChecks) ?? []
   )
   if (!deferredNames.size) return definitions
 
   const candidates = [
-    ...(await resolveCheckDefinitions(root, 'fast')),
-    ...(await resolveCheckDefinitions(root, 'full')),
+    ...(await resolveCheckDefinitions(root, 'fast', configuration)),
+    ...(await resolveCheckDefinitions(root, 'full', configuration)),
   ]
   for (const name of deferredNames) {
     if (definitions.some((definition) => definition.name === name)) continue
@@ -174,7 +173,7 @@ async function resolveFinalCheckDefinitions(
 }
 
 function taskCheckPolicy(
-  state: EpicState,
+  state: EpicDomainState,
   suite: CheckSuiteName
 ): EpicTaskCheckPolicy | undefined {
   if (suite === 'final') return undefined
@@ -347,19 +346,20 @@ function runShell(
 
 export async function runCheckSuite(
   suite: CheckSuiteName,
-  state: EpicState
+  state: EpicDomainState,
+  timestamp: string,
+  configuration: ResolvedEpicConfiguration
 ): Promise<CheckSuiteResult> {
-  const config = (await readConfig(state.repositoryRoot)) as EpicConfig
   const policy = taskCheckPolicy(state, suite)
   const resolvedDefinitions =
     suite === 'final'
-      ? await resolveFinalCheckDefinitions(state.repositoryRoot, state)
-      : await resolveCheckDefinitions(state.repositoryRoot, suite)
+      ? await resolveFinalCheckDefinitions(state.repositoryRoot, state, configuration)
+      : await resolveCheckDefinitions(state.repositoryRoot, suite, configuration)
   if (policy) {
     const otherSuite = suite === 'fast' ? 'full' : 'fast'
     const otherDefinitions = await resolveCheckDefinitions(
       state.repositoryRoot,
-      otherSuite
+      otherSuite, configuration
     )
     const availableNames = new Set(
       [...resolvedDefinitions, ...otherDefinitions].map(
@@ -390,8 +390,8 @@ export async function runCheckSuite(
         : undefined,
     }
   })
-  const timeoutMs = config.commandTimeoutMs ?? DEFAULT_TIMEOUT_MS
-  const maxOutputBytes = config.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES
+  const timeoutMs = configuration.commandTimeoutMs
+  const maxOutputBytes = configuration.maxOutputBytes
   const checks: CheckResult[] = []
   for (const definition of definitions) {
     if (definition.skipped) {
@@ -410,13 +410,13 @@ export async function runCheckSuite(
         skipReason: definition.skipReason,
       }
       checks.push(check)
-      await logEpic(state, 'info', 'Check skipped', {
+      await logEpic(state, timestamp, 'info', 'Check skipped', {
         suite,
         ...check,
       })
       continue
     }
-    await logEpic(state, 'info', 'Check started', {
+    await logEpic(state, timestamp, 'info', 'Check started', {
       suite,
       name: definition.name,
       command: definition.command,
@@ -428,11 +428,11 @@ export async function runCheckSuite(
       maxOutputBytes
     )
     const baseline: Finding[] = []
-    if (definition.name === 'fallow' && config.checks?.fallowBaseline) {
+    if (definition.name === 'fallow' && configuration.checks.fallowBaseline) {
       try {
         const baselinePath = assertRepositoryPath(
           state.repositoryRoot,
-          config.checks.fallowBaseline,
+          configuration.checks.fallowBaseline,
           true
         )
         baseline.push(
@@ -470,6 +470,7 @@ export async function runCheckSuite(
     checks.push(check)
     await logEpic(
       state,
+      timestamp,
       check.passed ? 'info' : 'error',
       'Check finished',
       { suite, ...check }

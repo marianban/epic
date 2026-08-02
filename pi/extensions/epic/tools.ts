@@ -1,4 +1,3 @@
-import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
 
@@ -39,26 +38,6 @@ export function assertRepositoryPath(
     throw new Error(`Epic-managed path is protected: ${candidate}`)
   }
   return resolved
-}
-
-export async function readConfig(
-  root: string
-): Promise<Record<string, unknown>> {
-  const candidates = [
-    path.join(root, '.pi', 'epic.config.json'),
-    path.join(root, '.pi', 'epic.config.local.json'),
-  ]
-  for (const candidate of candidates) {
-    try {
-      return JSON.parse(await fs.readFile(candidate, 'utf8')) as Record<
-        string,
-        unknown
-      >
-    } catch {
-      /* optional */
-    }
-  }
-  return {}
 }
 
 export function redactSecrets(value: string): string {
@@ -111,10 +90,7 @@ export default function epicToolGuard(pi: ExtensionAPI): void {
     }
     if (event.toolName === 'bash') {
       const command = String(input.command ?? '')
-      if (
-        role === 'implementer' &&
-        process.env.PI_EPIC_SANDBOX !== '1'
-      )
+      if (role === 'implementer' && process.env.PI_EPIC_SANDBOX !== '1')
         return {
           block: true,
           reason: 'implementer bash requires the OS sandbox.',

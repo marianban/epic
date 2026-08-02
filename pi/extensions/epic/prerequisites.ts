@@ -107,7 +107,7 @@ function runCommand(
 export async function applyPrerequisites(
   root: string,
   prerequisites: Prerequisite[],
-  timeoutMs = 120_000
+  timeoutMs: number
 ): Promise<void> {
   for (const prerequisite of prerequisites)
     await runCommand(root, prerequisite.command, timeoutMs)

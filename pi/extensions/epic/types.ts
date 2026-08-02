@@ -35,25 +35,19 @@ export type AgentRole =
   | 'implementer'
   | 'reviewer'
 export type PendingHumanAction =
-  | 'review_plan'
   | 'approve_plan'
   | 'approve_prerequisites'
   | 'review_task'
   | 'approve_task'
   | 'resolve_escalation'
-  | 'none'
 export type CheckSuiteName = 'fast' | 'full' | 'final'
 export type Severity = 'error' | 'warning' | 'info'
 
-export interface EpicState {
+/** Durable business facts owned by the epic actor. Lifecycle belongs to its snapshot. */
+export interface EpicDomainState {
   epicId: string
-  schemaVersion: number
-  machineVersion: number
   epic: string
   repositoryRoot: string
-  stage: EpicStage
-  createdAt: string
-  updatedAt: string
   epicComplexity: EpicComplexity
   scoutRound: number
   maxScoutRounds: number
@@ -68,13 +62,9 @@ export interface EpicState {
   currentTaskIndex: number
   taskApproved: boolean
   taskApprovedAt?: string
-  pendingHumanAction?: PendingHumanAction
   prerequisites?: Prerequisite[]
   prerequisitesApprovedAt?: string
   implementationAttempt: number
-  fastRepairAttempt: number
-  fullRepairAttempt: number
-  semanticRepairAttempt: number
   maxFastRepairs: number
   maxFullRepairs: number
   maxSemanticRepairs: number
@@ -82,7 +72,51 @@ export interface EpicState {
   lastReviewResultPath?: string
   lastDiffPath?: string
   failureReason?: string
-  machineSnapshot?: unknown
+}
+
+export interface EpicRunMetadata {
+  epicId: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface EpicRunIdentity {
+  epicId: string
+  repositoryRoot: string
+}
+export interface RepairAttempts { fast: number; full: number; semantic: number }
+export interface TaskFailureDiagnostics { reason: string; repairs: RepairAttempts }
+
+export interface EpicClock {
+  now(): string
+  nowMs(): number
+}
+
+export interface EpicTimer {
+  setTimeout(
+    callback: () => void,
+    timeoutMs: number
+  ): ReturnType<typeof setTimeout>
+  clearTimeout(timer: ReturnType<typeof setTimeout>): void
+}
+
+export interface PersistedEpicEnvelope extends EpicRunMetadata {
+  schemaVersion: 4
+  machineVersion: 7
+  snapshot: unknown
+}
+
+export type EpicWait = 'active' | 'awaiting-human' | 'terminal'
+export interface TaskDisplayState {
+  state: string
+  repairs?: { fast: number; full: number; semantic: number }
+}
+export interface EpicBoundaryView {
+  stage: EpicStage
+  wait: EpicWait
+  pendingHumanAction?: PendingHumanAction
+  task?: TaskDisplayState
+  failureDiagnostics?: TaskFailureDiagnostics
 }
 
 export interface EpicTask {
@@ -267,4 +301,16 @@ export interface EpicConfig {
     fallowBaseline?: string
   }
   agents?: Partial<Record<AgentRole, Partial<AgentProfile>>>
+}
+export interface ResolvedEpicConfiguration {
+  inspector: { enabled: boolean; port: number; autoOpen: boolean }
+  agentTimeoutMs: number
+  commandTimeoutMs: number
+  maxOutputBytes: number
+  maxScoutRounds: number
+  maxFastRepairs: number
+  maxFullRepairs: number
+  maxSemanticRepairs: number
+  checks: NonNullable<EpicConfig['checks']>
+  agents: Partial<Record<AgentRole, Partial<AgentProfile>>>
 }

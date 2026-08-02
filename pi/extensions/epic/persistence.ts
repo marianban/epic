@@ -1,20 +1,18 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createActor } from 'xstate'
 import type {
   ScoutReport,
   EpicEvent,
-  EpicState,
+  EpicDomainState,
+  EpicRunIdentity,
+  PersistedEpicEnvelope,
   EpicTask,
 } from './types.ts'
 import { logEpic } from './logger.ts'
-import {
-  machineStage,
-  epicMachine,
-  EPIC_MACHINE_VERSION,
-  EPIC_SCHEMA_VERSION,
-} from './machines/epic-machine.ts'
+import { EPIC_MACHINE_VERSION, EPIC_SCHEMA_VERSION } from './persistence-version.ts'
+import { projectActorSystemSnapshot } from './machines/actor-system-projection.ts'
+import { domainFromActorSnapshot } from './domain-validation.ts'
 
 function runDirectory(root: string, epicId: string): string {
   return path.join(root, '.pi', 'epics', 'runs', epicId)
@@ -43,63 +41,34 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
   await fs.rename(temporary, filePath)
 }
 
-export async function saveState(state: EpicState): Promise<void> {
-  if (
-    state.schemaVersion !== EPIC_SCHEMA_VERSION ||
-    state.machineVersion !== EPIC_MACHINE_VERSION
-  ) {
-    throw incompatibleState(
-      state,
-      `unsupported persistence version ${state.schemaVersion ?? 'missing'}/${state.machineVersion ?? 'missing'}`
-    )
-  }
-  if (!state.machineSnapshot) {
-    if (state.stage !== 'idle')
-      throw incompatibleState(state, 'missing XState machine snapshot')
-    const actor = createActor(epicMachine, { input: { state } })
-    actor.start()
-    state.machineSnapshot = actor.getPersistedSnapshot()
-    actor.stop()
-  }
-  await ensureEpicDirectories(state.repositoryRoot, state.epicId)
-  state.updatedAt = new Date().toISOString()
+export async function saveState(
+  identity: EpicRunIdentity,
+  envelope: PersistedEpicEnvelope
+): Promise<void> {
+  parsePersistedEpicEnvelope(envelope)
+  if (identity.epicId !== envelope.epicId)
+    throw new Error('Persisted epic identity does not match its envelope.')
+  await ensureEpicDirectories(identity.repositoryRoot, identity.epicId)
   await atomicWrite(
-    epicStatePath(state.repositoryRoot, state.epicId),
-    `${JSON.stringify(state, null, 2)}\n`
+    epicStatePath(identity.repositoryRoot, identity.epicId),
+    `${JSON.stringify(envelope, null, 2)}\n`
   )
   await atomicWrite(
-    path.join(state.repositoryRoot, '.pi', 'epics', 'active.json'),
-    `${JSON.stringify({ epicId: state.epicId }, null, 2)}\n`
+    path.join(identity.repositoryRoot, '.pi', 'epics', 'active.json'),
+    `${JSON.stringify({ epicId: identity.epicId }, null, 2)}\n`
   )
-  await logEpic(state, 'debug', 'Epic state saved', {
-    stage: state.stage,
-  })
 }
 
-async function loadState(root: string, epicId: string): Promise<EpicState> {
+async function loadState(
+  root: string,
+  epicId: string
+): Promise<PersistedEpicEnvelope> {
   const raw = await fs.readFile(epicStatePath(root, epicId), 'utf8')
   try {
-    const state = JSON.parse(raw) as EpicState
-    if (
-      state.schemaVersion !== EPIC_SCHEMA_VERSION ||
-      state.machineVersion !== EPIC_MACHINE_VERSION
-    ) {
-      throw incompatibleState(
-        state,
-        `unsupported persistence version ${state.schemaVersion ?? 'missing'}/${state.machineVersion ?? 'missing'}`
-      )
-    }
-    if (!state.machineSnapshot)
-      throw incompatibleState(state, 'missing XState machine snapshot')
-    const snapshotStage = machineStage(
-      state.machineSnapshot as { context: { state: EpicState } }
-    )
-    if (snapshotStage !== state.stage)
-      throw incompatibleState(
-        state,
-        `stage mismatch between durable state (${state.stage}) and machine snapshot (${snapshotStage})`
-      )
-    return state
+    const envelope = parsePersistedEpicEnvelope(JSON.parse(raw))
+    if (envelope.epicId !== epicId)
+      throw new Error('State envelope epicId does not match active pointer.')
+    return envelope
   } catch (error) {
     throw new Error(
       `Corrupt epic state at ${epicStatePath(root, epicId)}: ${String(error)}`,
@@ -108,7 +77,9 @@ async function loadState(root: string, epicId: string): Promise<EpicState> {
   }
 }
 
-export async function loadActiveEpic(root: string): Promise<EpicState> {
+export async function loadActiveEpic(
+  root: string
+): Promise<PersistedEpicEnvelope> {
   const active = JSON.parse(
     await fs.readFile(path.join(root, '.pi', 'epics', 'active.json'), 'utf8')
   ) as { epicId?: string }
@@ -118,7 +89,7 @@ export async function loadActiveEpic(root: string): Promise<EpicState> {
 
 export async function loadOptionalActiveEpic(
   root: string
-): Promise<EpicState | undefined> {
+): Promise<PersistedEpicEnvelope | undefined> {
   let activeRaw: string
   try {
     activeRaw = await fs.readFile(
@@ -136,13 +107,19 @@ export async function loadOptionalActiveEpic(
 }
 
 export async function loadEpicEvents(
-  state: EpicState
+  state: EpicRunIdentity
 ): Promise<readonly EpicEvent[]> {
   const filePath = path.join(
     runDirectory(state.repositoryRoot, state.epicId),
     'events.jsonl'
   )
-  const contents = await fs.readFile(filePath, 'utf8')
+  let contents: string
+  try {
+    contents = await fs.readFile(filePath, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  }
   return contents.split('\n').flatMap((line, index) => {
     if (line.trim().length === 0) return []
     try {
@@ -157,16 +134,18 @@ export async function loadEpicEvents(
 }
 
 export async function appendEvent(
-  state: EpicState,
+  state: EpicRunIdentity,
+  stage: import('./types.ts').EpicStage,
+  timestamp: string,
   type: string,
   payload: Record<string, unknown> = {}
 ): Promise<void> {
   const event: EpicEvent = {
     id: randomUUID(),
     epicId: state.epicId,
-    timestamp: new Date().toISOString(),
+    timestamp,
     type,
-    stage: state.stage,
+    stage,
     payload,
   }
   await fs.appendFile(
@@ -174,17 +153,63 @@ export async function appendEvent(
     `${JSON.stringify(event)}\n`,
     'utf8'
   )
-  await logEpic(state, 'info', type, { stage: state.stage, ...payload })
+  await logEpic(state, timestamp, 'info', type, { stage, ...payload })
 }
 
-function incompatibleState(state: Partial<EpicState>, reason: string): Error {
+function incompatibleState(
+  state: Partial<PersistedEpicEnvelope>,
+  reason: string
+): Error {
   return new Error(
     `Epic ${state.epicId ?? 'unknown'} is incompatible with XState persistence: ${reason}. Required schema/machine version ${EPIC_SCHEMA_VERSION}/${EPIC_MACHINE_VERSION}; no compatibility migration was applied.`
   )
 }
 
+export function parsePersistedEpicEnvelope(value: unknown): PersistedEpicEnvelope {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('Persisted epic envelope must be an object.')
+  const envelope = value as Record<string, unknown>
+  const keys = ['schemaVersion', 'machineVersion', 'epicId', 'createdAt', 'updatedAt', 'snapshot']
+  if (Object.keys(envelope).some((key) => !keys.includes(key)) || keys.some((key) => !(key in envelope)))
+    throw new Error('Persisted epic envelope has missing or unsupported fields.')
+  const schema = envelope.schemaVersion
+  const machine = envelope.machineVersion
+  if (schema !== EPIC_SCHEMA_VERSION || machine !== EPIC_MACHINE_VERSION)
+    throw incompatibleState(
+      envelope as Partial<PersistedEpicEnvelope>,
+      `found schema/machine version ${String(schema ?? 'missing')}/${String(machine ?? 'missing')}`
+    )
+  if (
+    typeof envelope.epicId !== 'string' || !envelope.epicId ||
+    typeof envelope.createdAt !== 'string' || !envelope.createdAt ||
+    typeof envelope.updatedAt !== 'string' || !envelope.updatedAt ||
+    !envelope.snapshot || typeof envelope.snapshot !== 'object'
+  )
+    throw incompatibleState(envelope as Partial<PersistedEpicEnvelope>, 'missing envelope metadata or snapshot')
+  const typed = envelope as unknown as PersistedEpicEnvelope
+  const domain = domainFromActorSnapshot(typed.snapshot)
+  if (domain.epicId !== typed.epicId)
+    throw incompatibleState(
+      typed,
+      'snapshot domain identity is missing or does not match the envelope'
+    )
+  try {
+    projectActorSystemSnapshot(
+      typed.snapshot as {
+        value: unknown
+        children?: Record<string, unknown>
+      }
+    )
+  } catch (error) {
+    throw new Error('Malformed persisted actor-system snapshot.', {
+      cause: error,
+    })
+  }
+  return typed
+}
+
 export async function persistJsonArtifact(
-  state: EpicState,
+  state: EpicRunIdentity,
   relativePath: string,
   value: unknown
 ): Promise<string> {
@@ -197,7 +222,7 @@ export async function persistJsonArtifact(
 }
 
 export async function persistScoutReport(
-  state: EpicState,
+  state: EpicRunIdentity & Pick<EpicDomainState, 'scoutRound'>,
   report: ScoutReport
 ): Promise<string> {
   const latest = await persistJsonArtifact(state, 'scout-report.json', report)
@@ -209,7 +234,9 @@ export async function persistScoutReport(
   return latest
 }
 
-export async function persistEpic(state: EpicState): Promise<string> {
+export async function persistEpic(
+  state: Pick<EpicDomainState, 'repositoryRoot' | 'epicId' | 'epic'>
+): Promise<string> {
   const filePath = path.join(
     runDirectory(state.repositoryRoot, state.epicId),
     'Epic.md'
@@ -219,7 +246,7 @@ export async function persistEpic(state: EpicState): Promise<string> {
 }
 
 export async function persistEpicTasks(
-  state: EpicState,
+  state: EpicRunIdentity,
   tasks: EpicTask[]
 ): Promise<string> {
   const manifest = await persistJsonArtifact(state, 'tasks/tasks.json', tasks)
@@ -268,8 +295,9 @@ export async function persistEpicTasks(
 }
 
 export async function writePlanRevision(
-  state: EpicState,
-  markdown: string
+  state: EpicDomainState,
+  markdown: string,
+  timestamp: string
 ): Promise<string> {
   const revision = state.planRevision + 1
   const filePath = path.join(
@@ -282,7 +310,9 @@ export async function writePlanRevision(
     markdown.endsWith('\n') ? markdown : `${markdown}\n`
   )
   state.planRevision = revision
-  await saveState(state)
-  await appendEvent(state, 'plan_written', { revision, path: filePath })
+  await appendEvent(state, 'planning', timestamp, 'plan_written', {
+    revision,
+    path: filePath,
+  })
   return filePath
 }

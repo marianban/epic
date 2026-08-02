@@ -84,9 +84,10 @@ function detailRows(state: CurrentTaskDashboardState): {
 }
 
 function renderRow(row: DetailRow, width: number, theme: Theme): string {
-  const labelWidth = row.label === 'Agent' || row.label === 'Files' || row.label === 'Diff'
-    ? RIGHT_LABEL_WIDTH
-    : LEFT_LABEL_WIDTH
+  const labelWidth =
+    row.label === 'Agent' || row.label === 'Files' || row.label === 'Diff'
+      ? RIGHT_LABEL_WIDTH
+      : LEFT_LABEL_WIDTH
   const valueWidth = Math.max(0, width - labelWidth - 1)
   const suffix = row.warning === true ? ' ⚠' : ''
   const value = truncateToWidth(`${row.value}${suffix}`, valueWidth, '…', true)
@@ -111,10 +112,7 @@ export class CurrentTask implements Component {
   private cachedWidth: number | undefined
   private cachedLines: string[] | undefined
 
-  constructor(
-    state: CurrentTaskDashboardState | undefined,
-    theme: Theme
-  ) {
+  constructor(state: CurrentTaskDashboardState | undefined, theme: Theme) {
     this.state = state
     this.theme = theme
   }
@@ -147,13 +145,15 @@ export class CurrentTask implements Component {
       `${status.icon} ${status.label}`
     )
     const rows = detailRows(state)
-    const minimumLeftWidth = LEFT_LABEL_WIDTH +
+    const minimumLeftWidth =
+      LEFT_LABEL_WIDTH +
       1 +
       Math.max(
         MIN_VALUE_WIDTH,
         ...rows.left.map((row) => visibleWidth(row.value))
       )
-    const minimumRightWidth = RIGHT_LABEL_WIDTH +
+    const minimumRightWidth =
+      RIGHT_LABEL_WIDTH +
       1 +
       Math.max(
         MIN_VALUE_WIDTH,
@@ -191,7 +191,11 @@ export class CurrentTask implements Component {
     innerWidth: number
   ): string[] {
     const left = renderGrid(rows.left, columnWidth, this.theme)
-    const right = renderGrid(rows.right, innerWidth - COLUMN_GAP - columnWidth, this.theme)
+    const right = renderGrid(
+      rows.right,
+      innerWidth - COLUMN_GAP - columnWidth,
+      this.theme
+    )
     return left.map(
       (line, index) =>
         `${line}${' '.repeat(Math.max(0, columnWidth - visibleWidth(line)) + COLUMN_GAP)}${right[index] ?? ''}`

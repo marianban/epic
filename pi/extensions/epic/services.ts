@@ -41,43 +41,47 @@ import type {
   PlannerContextRequest,
   ReviewResult,
   ScoutReport,
-  EpicConfig,
-  EpicState,
+  EpicClock,
+  EpicDomainState,
+  EpicBoundaryView,
+  ResolvedEpicConfiguration,
 } from './types.ts'
 
 export interface EpicServices {
   ctx: ExtensionContext
+  now(): string
   notify(message: string, level?: 'info' | 'warning' | 'error'): void
-  classify(state: EpicState): EpicState
+  classify(state: EpicDomainState): EpicDomainState
   scout(
-    state: EpicState,
+    state: EpicDomainState,
     questions?: string[]
-  ): Promise<{ state: EpicState; report: ScoutReport }>
+  ): Promise<{ state: EpicDomainState; report: ScoutReport }>
   plan(
-    state: EpicState,
+    state: EpicDomainState,
     report: ScoutReport
-  ): Promise<{ state: EpicState; result: string | PlannerContextRequest }>
-  approvePlan(state: EpicState): Promise<EpicState>
+  ): Promise<{ state: EpicDomainState; result: string | PlannerContextRequest }>
+  approvePlan(state: EpicDomainState): Promise<EpicDomainState>
   reviewPlan(
-    state: EpicState,
+    state: EpicDomainState,
     force: boolean
-  ): Promise<{ state: EpicState; revised: boolean }>
-  decompose(state: EpicState): Promise<EpicState>
-  prerequisites(state: EpicState): Promise<EpicState>
-  preparePrerequisites(state: EpicState): Promise<EpicState>
-  implement(state: EpicState, feedback?: string): Promise<EpicState>
+  ): Promise<{ state: EpicDomainState; revised: boolean }>
+  decompose(state: EpicDomainState): Promise<EpicDomainState>
+  prerequisites(state: EpicDomainState): Promise<EpicDomainState>
+  preparePrerequisites(state: EpicDomainState): Promise<EpicDomainState>
+  implement(state: EpicDomainState, feedback?: string): Promise<EpicDomainState>
   checks(
-    state: EpicState,
+    state: EpicDomainState,
     suite: 'fast' | 'full' | 'final'
-  ): Promise<{ state: EpicState; result: CheckSuiteResult }>
+  ): Promise<{ state: EpicDomainState; result: CheckSuiteResult }>
   review(
-    state: EpicState,
-    checks: CheckSuiteResult
-  ): Promise<{ state: EpicState; result: ReviewResult }>
-  reviseTask(state: EpicState): Promise<EpicState>
+    state: EpicDomainState,
+    checks: CheckSuiteResult,
+    semanticAttempt: number
+  ): Promise<{ state: EpicDomainState; result: ReviewResult }>
+  reviseTask(state: EpicDomainState): Promise<EpicDomainState>
 }
 
-async function readApprovedPlan(state: EpicState): Promise<string> {
+async function readApprovedPlan(state: EpicDomainState): Promise<string> {
   if (!state.planApproved)
     throw new Error('The plan must be approved before this task phase.')
   if (!state.approvedPlanHash)
@@ -91,7 +95,10 @@ async function readApprovedPlan(state: EpicState): Promise<string> {
 }
 
 export function createEpicServices(
-  ctx: ExtensionContext
+  ctx: ExtensionContext,
+  getBoundary: () => EpicBoundaryView,
+  clock: EpicClock,
+  configuration: ResolvedEpicConfiguration
 ): EpicServices {
   const notify = (
     message: string,
@@ -100,7 +107,7 @@ export function createEpicServices(
   const agentFailure = (run: AgentRunResult): string =>
     run.failureReason || run.stderr || run.output.slice(-2_000)
   const runRole = async (
-    state: EpicState,
+    state: EpicDomainState,
     role: Parameters<typeof runAgentActor>[0]['role'],
     prompt: string,
     action: string,
@@ -114,15 +121,21 @@ export function createEpicServices(
       state.epicId,
       'agent-runs'
     )
-    await appendEvent(state, 'agent_started', {
-      role,
-      action,
-      agentRunDirectory,
-      ...(taskId === undefined ? {} : { taskId }),
-    })
+    await appendEvent(
+      state,
+      getBoundary().stage,
+      clock.now(),
+      'agent_started',
+      {
+        role,
+        action,
+        agentRunDirectory,
+        ...(taskId === undefined ? {} : { taskId }),
+      }
+    )
     notify(`${role} started: ${action}.`)
     const runId = randomUUID()
-    const runStartedAt = Date.now()
+    const runStartedAt = clock.nowMs()
     startAgentRun(
       runId,
       state.repositoryRoot,
@@ -141,6 +154,7 @@ export function createEpicServices(
         role,
         prompt,
         signal: ctx.signal,
+        configuration,
         onProgress: (message) =>
           ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
       })
@@ -148,49 +162,50 @@ export function createEpicServices(
       failed = true
       failure = error
     }
-    const durationMs = Math.max(0, Date.now() - runStartedAt)
+    const durationMs = Math.max(0, clock.nowMs() - runStartedAt)
     finishAgentRun(runId)
     if (failed) {
-      await appendEvent(state, 'agent_finished', {
-        role,
-        action,
-        ...(taskId === undefined ? {} : { taskId }),
-        exitCode: 1,
-        failureReason:
-          failure instanceof Error ? failure.message : String(failure),
-        durationMs,
-      })
+      await appendEvent(
+        state,
+        getBoundary().stage,
+        clock.now(),
+        'agent_finished',
+        {
+          role,
+          action,
+          ...(taskId === undefined ? {} : { taskId }),
+          exitCode: 1,
+          failureReason:
+            failure instanceof Error ? failure.message : String(failure),
+          durationMs,
+        }
+      )
       throw failure
     }
     if (result === undefined) {
       throw new Error(`${role} agent finished without a result.`)
     }
-    await appendEvent(state, 'agent_finished', {
-      role,
-      action,
-      ...(taskId === undefined ? {} : { taskId }),
-      exitCode: result.exitCode,
-      stdoutLogPath: result.stdoutLogPath,
-      failureReason: result.failureReason,
-      usage: result.usage,
-      durationMs,
-    })
+    await appendEvent(
+      state,
+      getBoundary().stage,
+      clock.now(),
+      'agent_finished',
+      {
+        role,
+        action,
+        ...(taskId === undefined ? {} : { taskId }),
+        exitCode: result.exitCode,
+        stdoutLogPath: result.stdoutLogPath,
+        failureReason: result.failureReason,
+        usage: result.usage,
+        durationMs,
+      }
+    )
     return result
-  }
-  const config = async (root: string): Promise<EpicConfig> => {
-    try {
-      return JSON.parse(
-        await fs.readFile(
-          path.join(root, '.pi', 'epic.config.json'),
-          'utf8'
-        )
-      ) as EpicConfig
-    } catch {
-      return {}
-    }
   }
   return {
     ctx,
+    now: () => clock.now(),
     notify,
     classify: (state) => ({
       ...state,
@@ -227,9 +242,7 @@ export function createEpicServices(
         throw new Error(`Planner failed: ${agentFailure(run)}`)
       const result = parsePlannerResponse(run.output)
       if (typeof result !== 'string') {
-        const max =
-          (await config(state.repositoryRoot)).maxScoutRounds ??
-          state.maxScoutRounds
+        const max = state.maxScoutRounds
         if (state.scoutRound >= max)
           throw new Error(
             `Planner requested more Scout context after the maximum of ${max} rounds.`
@@ -237,10 +250,10 @@ export function createEpicServices(
         return { state, result }
       }
       const next = { ...state }
-      await writePlanRevision(next, result)
+      await writePlanRevision(next, result, clock.now())
       await fs.writeFile(next.planPath, `${result}\n`, 'utf8')
       return {
-        state: { ...next, pendingHumanAction: 'approve_plan' },
+        state: next,
         result,
       }
     },
@@ -256,14 +269,19 @@ export function createEpicServices(
       const next = {
         ...state,
         planApproved: true,
-        planApprovedAt: new Date().toISOString(),
+        planApprovedAt: clock.now(),
         approvedPlanHash: hashPlan(plan),
-        pendingHumanAction: 'none' as const,
       }
-      await appendEvent(next, 'plan_approved', {
-        revision: next.planRevision,
-        hash: next.approvedPlanHash,
-      })
+      await appendEvent(
+        next,
+        getBoundary().stage,
+        clock.now(),
+        'plan_approved',
+        {
+          revision: next.planRevision,
+          hash: next.approvedPlanHash,
+        }
+      )
       return next
     },
     async reviewPlan(state, force) {
@@ -271,7 +289,7 @@ export function createEpicServices(
       const instructions = extractReviewInstructions(current)
       if (!force && instructions.length === 0)
         return {
-          state: { ...state, pendingHumanAction: 'approve_plan' },
+          state,
           revised: false,
         }
       const report = state.scoutReportPath
@@ -279,8 +297,7 @@ export function createEpicServices(
             await fs.readFile(state.scoutReportPath, 'utf8')
           ) as ScoutReport)
         : undefined
-      if (!report)
-        throw new Error('Scout report is missing from epic state.')
+      if (!report) throw new Error('Scout report is missing from epic state.')
       const run = await runRole(
         state,
         'plan-reviewer',
@@ -296,9 +313,8 @@ export function createEpicServices(
         ...state,
         planApproved: false,
         approvedPlanHash: undefined,
-        pendingHumanAction: 'review_plan' as const,
       }
-      await writePlanRevision(next, revised)
+      await writePlanRevision(next, revised, clock.now())
       await fs.writeFile(next.planPath, `${revised}\n`, 'utf8')
       return { state: next, revised: true }
     },
@@ -319,13 +335,18 @@ export function createEpicServices(
         tasks,
         currentTaskIndex: 0,
         taskApproved: false,
-        pendingHumanAction: 'approve_task' as const,
       }
       next.taskPlanPath = await persistEpicTasks(next, tasks)
-      await appendEvent(next, 'tasks_decomposed', {
-        count: tasks.length,
-        path: next.taskPlanPath,
-      })
+      await appendEvent(
+        next,
+        getBoundary().stage,
+        clock.now(),
+        'tasks_decomposed',
+        {
+          count: tasks.length,
+          path: next.taskPlanPath,
+        }
+      )
       return next
     },
     async prerequisites(state) {
@@ -344,16 +365,14 @@ export function createEpicServices(
       return next
     },
     async preparePrerequisites(state) {
-      const cfg = await config(state.repositoryRoot)
       await applyPrerequisites(
         state.repositoryRoot,
         state.prerequisites ?? [],
-        cfg.commandTimeoutMs ?? 120_000
+        configuration.commandTimeoutMs
       )
       return {
         ...state,
-        prerequisitesApprovedAt: new Date().toISOString(),
-        pendingHumanAction: 'none',
+        prerequisitesApprovedAt: clock.now(),
       }
     },
     async implement(state, feedback = '') {
@@ -394,26 +413,38 @@ export function createEpicServices(
         `diffs/implementation-${String(next.implementationAttempt).padStart(3, '0')}.json`,
         { taskId, attempt: next.implementationAttempt, diff, summary }
       )
-      await appendEvent(next, 'task_diff_updated', { taskId, ...summary })
+      await appendEvent(
+        next,
+        getBoundary().stage,
+        clock.now(),
+        'task_diff_updated',
+        { taskId, ...summary }
+      )
       return next
     },
     async checks(state, suite) {
-      const result = await runCheckSuite(suite, state)
+      const result = await runCheckSuite(suite, state, clock.now(), configuration)
       const next = { ...state }
       next.lastCheckResultPath = await persistJsonArtifact(
         next,
-        `checks/${suite}-${Date.now()}.json`,
+        `checks/${clock.nowMs()}.json`,
         result
       )
-      await appendEvent(next, 'checks_completed', {
-        suite,
-        passed: result.passed,
-        introducedFindings: result.introducedFindings.length,
-      })
+      await appendEvent(
+        next,
+        getBoundary().stage,
+        clock.now(),
+        'checks_completed',
+        {
+          suite,
+          passed: result.passed,
+          introducedFindings: result.introducedFindings.length,
+        }
+      )
       notify(`${suite} checks ${result.passed ? 'passed' : 'failed'}.`)
       return { state: next, result }
     },
-    async review(state, checks) {
+    async review(state, checks, semanticAttempt) {
       const plan = await readApprovedPlan(state)
       const diff = await getCurrentDiff(state.repositoryRoot)
       const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
@@ -441,7 +472,7 @@ export function createEpicServices(
       const next = { ...state }
       next.lastReviewResultPath = await persistJsonArtifact(
         next,
-        `reviews/review-${String(next.semanticRepairAttempt + 1).padStart(3, '0')}.json`,
+        `reviews/review-${String(semanticAttempt + 1).padStart(3, '0')}.json`,
         result
       )
       const task = next.tasks?.[next.currentTaskIndex]
@@ -451,11 +482,17 @@ export function createEpicServices(
       const criteriaCompleted = result.acceptanceCriteria.filter(
         (criterion) => criterion.status === 'met'
       ).length
-      await appendEvent(next, 'task_review_completed', {
-        taskId: task.id,
-        criteriaCompleted,
-        criteriaTotal: task.acceptanceCriteria.length,
-      })
+      await appendEvent(
+        next,
+        getBoundary().stage,
+        clock.now(),
+        'task_review_completed',
+        {
+          taskId: task.id,
+          criteriaCompleted,
+          criteriaTotal: task.acceptanceCriteria.length,
+        }
+      )
       return { state: next, result }
     },
     async reviseTask(state) {
@@ -485,8 +522,14 @@ export function createEpicServices(
       if (task === undefined) {
         throw new Error('Cannot record a revision without a current task.')
       }
-      await appendEvent(state, 'task_revised', { taskId: task.id })
-      return { ...state, pendingHumanAction: 'review_task' }
+      await appendEvent(
+        state,
+        getBoundary().stage,
+        clock.now(),
+        'task_revised',
+        { taskId: task.id }
+      )
+      return state
     },
   }
 }

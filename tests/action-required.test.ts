@@ -27,10 +27,7 @@ const exitAction: DashboardAction = {
   kind: 'secondary',
   command: '/epic-exit',
 }
-const actions: readonly DashboardAction[] = [
-  continueAction,
-  exitAction,
-]
+const actions: readonly DashboardAction[] = [continueAction, exitAction]
 
 function request(
   overrides: Partial<DashboardActionRequest> = {}
@@ -87,18 +84,28 @@ test('renders the semantic icon for each severity', () => {
       request({ severity }),
       identityTheme,
       () => undefined
-    ).render(80).join('\n')
+    )
+      .render(80)
+      .join('\n')
     assert.match(output, new RegExp(`${icon} Plan is ready`))
   }
 })
 
 test('renders no panel when action state is absent', () => {
-  const component = new ActionRequired(undefined, identityTheme, () => undefined)
+  const component = new ActionRequired(
+    undefined,
+    identityTheme,
+    () => undefined
+  )
   assert.deepEqual(component.render(80), [])
 })
 
 test('navigates with wrapping in both directions', () => {
-  const component = new ActionRequired(request(), identityTheme, () => undefined)
+  const component = new ActionRequired(
+    request(),
+    identityTheme,
+    () => undefined
+  )
   assert.equal(component.getFocusedActionId(), 'continue')
 
   component.handleInput('\t')
@@ -113,19 +120,24 @@ test('navigates with wrapping in both directions', () => {
 
 test('executes the focused action once on Enter', () => {
   const selected: DashboardAction[] = []
-  const component = new ActionRequired(
-    request(),
-    identityTheme,
-    (action) => selected.push(action)
+  const component = new ActionRequired(request(), identityTheme, (action) =>
+    selected.push(action)
   )
 
   component.handleInput('\r')
-  assert.deepEqual(selected.map((action) => action.id), ['continue'])
+  assert.deepEqual(
+    selected.map((action) => action.id),
+    ['continue']
+  )
   assert.deepEqual(component.render(80), [])
 })
 
 test('preserves focus by action id and falls back when removed', () => {
-  const component = new ActionRequired(request(), identityTheme, () => undefined)
+  const component = new ActionRequired(
+    request(),
+    identityTheme,
+    () => undefined
+  )
   component.handleInput('\t')
   component.setState(request({ actions: [exitAction, continueAction] }))
   assert.equal(component.getFocusedActionId(), 'exit')

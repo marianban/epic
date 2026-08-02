@@ -14,7 +14,7 @@ export function isImplementerSandboxSupported(
   return platform === 'darwin' || platform === 'linux'
 }
 
-export function implementerSandboxConfig(root: string): SandboxRuntimeConfig {
+function implementerSandboxConfig(root: string): SandboxRuntimeConfig {
   const repositoryRoot = path.resolve(root)
   return {
     // sandbox-runtime treats an omitted allowedDomains field as filesystem-only
@@ -70,7 +70,10 @@ async function initializeImplementerSandbox(root: string): Promise<void> {
     )
   }
 
-  if (initializedRoot === path.resolve(root) && SandboxManager.isSandboxingEnabled())
+  if (
+    initializedRoot === path.resolve(root) &&
+    SandboxManager.isSandboxingEnabled()
+  )
     return
 
   if (!SandboxManager.checkDependencies({ command: 'rg' }))

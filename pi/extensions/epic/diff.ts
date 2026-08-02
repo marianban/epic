@@ -57,10 +57,7 @@ async function getUntrackedPaths(repositoryRoot: string): Promise<string[]> {
   )
   return String(result.stdout)
     .split('\0')
-    .filter(
-      (filePath) =>
-        filePath.length > 0 && !isEpicManagedPath(filePath)
-    )
+    .filter((filePath) => filePath.length > 0 && !isEpicManagedPath(filePath))
 }
 
 async function getUntrackedFileDiff(

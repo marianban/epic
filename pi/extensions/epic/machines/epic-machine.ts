@@ -1,25 +1,24 @@
 import { assign, fromPromise, sendTo, setup } from 'xstate'
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import type {
   PlannerContextRequest,
   ScoutReport,
-  EpicStage,
-  EpicState,
+  EpicDomainState,
+  TaskFailureDiagnostics,
 } from '../types.ts'
+import { parseEpicDomainState } from '../domain-validation.ts'
 import {
   createTaskExecutionMachine,
   type TaskExecutionEvent,
   type TaskExecutionResult,
 } from './task-execution-machine.ts'
-// fallow-ignore-next-line circular-dependency -- canonical machine bootstrap is required for persisted snapshots
-import { createEpicServices, type EpicServices } from '../services.ts'
+import type { EpicServices } from '../services.ts'
+export { EPIC_MACHINE_VERSION, EPIC_SCHEMA_VERSION } from '../persistence-version.ts'
 
-export const EPIC_SCHEMA_VERSION = 3
-export const EPIC_MACHINE_VERSION = 6
-export interface EpicMachineContext {
-  state: EpicState
+interface EpicMachineContext {
+  state: EpicDomainState
   report?: ScoutReport
   focusedQuestions?: string[]
+  failureDiagnostics?: TaskFailureDiagnostics
 }
 export type EpicMachineEvent =
   | { type: 'EPIC.START' }
@@ -32,65 +31,68 @@ export type EpicMachineEvent =
   | { type: 'TASK.REVIEW' }
   | { type: 'TASK.REVISE' }
 
-const taskStage = (value: unknown): EpicStage =>
-  (
-    ({
-      awaitingApproval: 'awaiting_task_approval',
-      revisingTask: 'revising_task',
-      implementing: 'implementing',
-      fastChecks: 'running_fast_checks',
-      repairingFast: 'repairing_fast_checks',
-      repairingFastInvoke: 'repairing_fast_checks',
-      fullChecks: 'running_full_checks',
-      repairingFull: 'repairing_full_checks',
-      repairingFullInvoke: 'repairing_full_checks',
-      reviewing: 'reviewing',
-      repairingReview: 'repairing_review',
-      repairingReviewInvoke: 'repairing_review',
-      awaitingReview: 'awaiting_task_review',
-      escalating: 'escalating',
-      done: 'final_verification',
-      failed: 'failed',
-    }) as Record<string, EpicStage>
-  )[String(value)] ?? 'implementing'
+export function validateTaskExecutionResult(
+  output: unknown
+): TaskExecutionResult {
+  if (!output || typeof output !== 'object')
+    throw new Error('Task actor completed without an output.')
+  const result = output as Partial<TaskExecutionResult>
+  if ((result.kind !== 'completed' && result.kind !== 'escalated') || !result.repairs)
+    throw new Error('Task actor completed with a malformed output.')
+  const repairs = result.repairs
+  if (
+    ![repairs.fast, repairs.full, repairs.semantic].every(
+      (attempt) => Number.isInteger(attempt) && attempt >= 0
+    )
+  )
+    throw new Error('Task actor completed with malformed repair attempts.')
+  if (
+    result.kind === 'escalated' &&
+    (!result.reason || typeof result.reason !== 'string')
+  )
+    throw new Error('Task actor escalation requires a failure reason.')
+  const domain = parseEpicDomainState(result.domain, 'task execution result.domain')
+  return { ...result, domain, repairs: { fast: repairs.fast, full: repairs.full, semantic: repairs.semantic } } as TaskExecutionResult
+}
 
 export function createEpicMachine(services: EpicServices) {
   const task = createTaskExecutionMachine(services)
-  const classify = fromPromise<EpicState, { state: EpicState }>(
+  const classify = fromPromise<EpicDomainState, { state: EpicDomainState }>(
     ({ input }) => Promise.resolve(services.classify(input.state))
   )
   const scout = fromPromise<
-    { state: EpicState; report: ScoutReport },
-    { state: EpicState; questions?: string[] }
+    { state: EpicDomainState; report: ScoutReport },
+    { state: EpicDomainState; questions?: string[] }
   >(({ input }) => services.scout(input.state, input.questions))
   const plan = fromPromise<
-    { state: EpicState; result: string | PlannerContextRequest },
-    { state: EpicState; report: ScoutReport }
+    { state: EpicDomainState; result: string | PlannerContextRequest },
+    { state: EpicDomainState; report: ScoutReport }
   >(({ input }) => services.plan(input.state, input.report))
   const planReview = fromPromise<
-    { state: EpicState; revised: boolean },
-    { state: EpicState; force: boolean }
+    { state: EpicDomainState; revised: boolean },
+    { state: EpicDomainState; force: boolean }
   >(({ input }) => services.reviewPlan(input.state, input.force))
-  const approvePlan = fromPromise<EpicState, { state: EpicState }>(
+  const approvePlan = fromPromise<EpicDomainState, { state: EpicDomainState }>(
     ({ input }) => services.approvePlan(input.state)
   )
-  const decompose = fromPromise<EpicState, { state: EpicState }>(
+  const decompose = fromPromise<EpicDomainState, { state: EpicDomainState }>(
     ({ input }) => services.decompose(input.state)
   )
-  const prerequisites = fromPromise<EpicState, { state: EpicState }>(
-    ({ input }) => services.prerequisites(input.state)
-  )
-  const prepare = fromPromise<EpicState, { state: EpicState }>(
+  const prerequisites = fromPromise<
+    EpicDomainState,
+    { state: EpicDomainState }
+  >(({ input }) => services.prerequisites(input.state))
+  const prepare = fromPromise<EpicDomainState, { state: EpicDomainState }>(
     ({ input }) => services.preparePrerequisites(input.state)
   )
   const finalChecks = fromPromise<
-    { state: EpicState; result: { passed: boolean } },
-    { state: EpicState }
+    { state: EpicDomainState; result: { passed: boolean } },
+    { state: EpicDomainState }
   >(({ input }) => services.checks(input.state, 'final'))
   return setup({
     types: {
       context: {} as EpicMachineContext,
-      input: {} as { state: EpicState },
+      input: {} as { state: EpicDomainState },
       events: {} as EpicMachineEvent,
     },
     actors: {
@@ -116,7 +118,7 @@ export function createEpicMachine(services: EpicServices) {
     id: 'epic',
     initial: 'idle',
     context: ({ input }) => ({
-      state: { ...input.state, machineSnapshot: undefined },
+      state: input.state,
     }),
     // Exiting the dashboard is UI-only. Keep resume available after an exit
     // from every persisted workflow state; states with an explicit resume
@@ -173,10 +175,7 @@ export function createEpicMachine(services: EpicServices) {
                   guard: ({ event }) => typeof event.output.result === 'string',
                   target: 'awaitingReview',
                   actions: assign({
-                    state: ({ event }) => ({
-                      ...event.output.state,
-                      pendingHumanAction: 'approve_plan',
-                    }),
+                    state: ({ event }) => event.output.state,
                   }),
                 },
                 {
@@ -217,10 +216,7 @@ export function createEpicMachine(services: EpicServices) {
               onDone: {
                 target: 'awaitingReview',
                 actions: assign({
-                  state: ({ event }) => ({
-                    ...event.output.state,
-                    pendingHumanAction: 'approve_plan',
-                  }),
+                  state: ({ event }) => event.output.state,
                 }),
               },
               onError: '#epic.terminal.failed',
@@ -273,19 +269,13 @@ export function createEpicMachine(services: EpicServices) {
                     event.output.prerequisites?.length === 0,
                   target: '#epic.taskExecution',
                   actions: assign({
-                    state: ({ event }) => ({
-                      ...event.output,
-                      pendingHumanAction: 'approve_task',
-                    }),
+                    state: ({ event }) => event.output,
                   }),
                 },
                 {
                   target: 'awaitingApproval',
                   actions: assign({
-                    state: ({ event }) => ({
-                      ...event.output,
-                      pendingHumanAction: 'approve_prerequisites',
-                    }),
+                    state: ({ event }) => event.output,
                   }),
                 },
               ],
@@ -305,10 +295,7 @@ export function createEpicMachine(services: EpicServices) {
               onDone: {
                 target: '#epic.taskExecution',
                 actions: assign({
-                  state: ({ event }) => ({
-                    ...event.output,
-                    pendingHumanAction: 'approve_task',
-                  }),
+                  state: ({ event }) => event.output,
                 }),
               },
               onError: '#epic.terminal.failed',
@@ -321,101 +308,54 @@ export function createEpicMachine(services: EpicServices) {
         invoke: {
           id: 'task-execution',
           src: 'task',
-          input: ({ context }) => ({ state: context.state }),
-          onSnapshot: {
-            actions: assign({
-              state: ({ context, event }) => {
-                const childSnapshot = (
-                  event as {
-                    snapshot: {
-                      value: unknown
-                      context?: {
-                        state?: EpicState
-                        fastRepairAttempt?: number
-                        fullRepairAttempt?: number
-                        semanticRepairAttempt?: number
-                      }
-                    }
-                  }
-                ).snapshot
-                const childValue = String(childSnapshot.value)
-                const childContext = childSnapshot.context
-                const childState = childContext?.state
-                const synchronizedState = {
-                  ...context.state,
-                  ...childState,
-                  fastRepairAttempt:
-                    childContext?.fastRepairAttempt ??
-                    childState?.fastRepairAttempt ??
-                    context.state.fastRepairAttempt,
-                  fullRepairAttempt:
-                    childContext?.fullRepairAttempt ??
-                    childState?.fullRepairAttempt ??
-                    context.state.fullRepairAttempt,
-                  semanticRepairAttempt:
-                    childContext?.semanticRepairAttempt ??
-                    childState?.semanticRepairAttempt ??
-                    context.state.semanticRepairAttempt,
-                }
-                return {
-                  ...synchronizedState,
-                  stage: taskStage(childValue),
-                  pendingHumanAction:
-                    childValue === 'awaitingApproval'
-                      ? 'approve_task'
-                      : childValue === 'awaitingReview'
-                        ? 'review_task'
-                        : childValue === 'escalating'
-                          ? 'resolve_escalation'
-                          : context.state.pendingHumanAction,
-                }
-              },
-            }),
-          },
+          input: ({ context }) => ({ domain: context.state }),
           onDone: [
             {
               guard: ({ event }) =>
-                (event.output as TaskExecutionResult).kind === 'completed' &&
-                (event.output as TaskExecutionResult).state.currentTaskIndex +
+                validateTaskExecutionResult(event.output).kind ===
+                  'completed' &&
+                validateTaskExecutionResult(event.output).domain
+                  .currentTaskIndex +
                   1 <
-                  ((event.output as TaskExecutionResult).state.tasks?.length ??
-                    0),
+                  (validateTaskExecutionResult(event.output).domain.tasks
+                    ?.length ?? 0),
               target: 'taskExecution',
               actions: assign({
                 state: ({ event }) => ({
-                  ...(event.output as TaskExecutionResult).state,
+                  ...validateTaskExecutionResult(event.output).domain,
                   currentTaskIndex:
-                    (event.output as TaskExecutionResult).state
+                    validateTaskExecutionResult(event.output).domain
                       .currentTaskIndex + 1,
                   taskApproved: false,
-                  pendingHumanAction: 'review_task',
                 }),
               }),
               reenter: true,
             },
             {
               guard: ({ event }) =>
-                (event.output as TaskExecutionResult).kind === 'completed',
+                validateTaskExecutionResult(event.output).kind === 'completed',
               target: 'finalVerification',
               actions: assign({
                 state: ({ event }) =>
-                  (event.output as TaskExecutionResult).state,
+                  validateTaskExecutionResult(event.output).domain,
               }),
             },
             {
               target: 'escalating',
               actions: assign({
                 state: ({ event }) => {
-                  const result = event.output as TaskExecutionResult
+                  const result = validateTaskExecutionResult(event.output)
                   return {
-                    ...result.state,
-                    stage: 'escalating',
-                    pendingHumanAction: 'resolve_escalation',
+                    ...result.domain,
                     failureReason:
                       result.reason ??
-                      result.state.failureReason ??
+                      result.domain.failureReason ??
                       'Task actor failed.',
                   }
+                },
+                failureDiagnostics: ({ event }) => {
+                  const result = validateTaskExecutionResult(event.output)
+                  return { reason: result.reason ?? 'Task actor failed.', repairs: result.repairs }
                 },
               }),
             },
@@ -431,7 +371,7 @@ export function createEpicMachine(services: EpicServices) {
       escalating: {
         tags: ['awaiting-human', 'escalated'],
         on: {
-          'EPIC.RESUME': 'taskExecution',
+          'EPIC.RESUME': { target: 'taskExecution', actions: assign({ failureDiagnostics: undefined }) },
         },
       },
       finalVerification: {
@@ -444,10 +384,7 @@ export function createEpicMachine(services: EpicServices) {
               guard: ({ event }) => event.output.result.passed,
               target: 'terminal.completed',
               actions: assign({
-                state: ({ event }) => ({
-                  ...event.output.state,
-                  stage: 'completed',
-                }),
+                state: ({ event }) => event.output.state,
               }),
             },
             {
@@ -455,7 +392,6 @@ export function createEpicMachine(services: EpicServices) {
               actions: assign({
                 state: ({ event }) => ({
                   ...event.output.state,
-                  stage: 'failed',
                   failureReason: 'Final verification failed.',
                 }),
               }),
@@ -474,92 +410,3 @@ export function createEpicMachine(services: EpicServices) {
     },
   })
 }
-
-export function machineStage(snapshot: {
-  value?: unknown
-  context: EpicMachineContext
-}): EpicStage {
-  const value = snapshot.value
-  if (value === 'classifying') return 'classifying'
-  if (value === 'decomposingTasks') return 'decomposing_tasks'
-  if (value === 'taskExecution') {
-    // `taskExecution` is a parent state whose invoked child owns the actual
-    // task lifecycle. The child reports its stage into durable context via
-    // `onSnapshot`; returning a hard-coded approval stage here makes settle()
-    // stop immediately after every task event and persists/stops the child
-    // while implementation or checks are still running.
-    const childStage = snapshot.context.state.stage
-    if (
-      [
-        'awaiting_task_approval',
-        'awaiting_task_review',
-        'revising_task',
-        'implementing',
-        'running_fast_checks',
-        'repairing_fast_checks',
-        'running_full_checks',
-        'repairing_full_checks',
-        'reviewing',
-        'repairing_review',
-        'escalating',
-      ].includes(childStage)
-    )
-      return childStage
-    return 'awaiting_task_approval'
-  }
-  if (value === 'escalating') return 'escalating'
-  if (value === 'finalVerification') return 'final_verification'
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    if (typeof record.planning === 'string')
-      return (
-        (
-          {
-            scouting: 'scouting',
-            generating: 'planning',
-            awaitingReview: 'awaiting_plan_review',
-            revising: 'revising_plan',
-            awaitingApproval: 'awaiting_plan_approval',
-          } as Record<string, EpicStage>
-        )[record.planning] ?? snapshot.context.state.stage
-      )
-    if (typeof record.prerequisites === 'string')
-      return (
-        (
-          {
-            checking: 'checking_prerequisites',
-            awaitingApproval: 'awaiting_prerequisite_approval',
-            preparing: 'preparing_prerequisites',
-          } as Record<string, EpicStage>
-        )[record.prerequisites] ?? snapshot.context.state.stage
-      )
-    if (typeof record.terminal === 'string')
-      return record.terminal as EpicStage
-  }
-  return snapshot.context.state.stage
-}
-export function createServices(ctx: ExtensionContext): EpicServices {
-  return createEpicServices(ctx)
-}
-
-const unavailable = async (): Promise<never> => {
-  throw new Error(
-    'Epic services are unavailable during snapshot initialization.'
-  )
-}
-export const epicMachine = createEpicMachine({
-  ctx: undefined as never,
-  notify: () => undefined,
-  classify: (state) => state,
-  scout: unavailable,
-  plan: unavailable,
-  reviewPlan: unavailable,
-  decompose: unavailable,
-  approvePlan: unavailable,
-  prerequisites: unavailable,
-  preparePrerequisites: unavailable,
-  implement: unavailable,
-  checks: unavailable,
-  review: unavailable,
-  reviseTask: unavailable,
-})

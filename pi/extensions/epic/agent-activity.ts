@@ -38,7 +38,9 @@ export function activeAgentRuns(
   nowMs: number
 ): readonly ActiveAgentRun[] {
   if (!Number.isInteger(nowMs) || nowMs < 0) {
-    throw new Error(`Agent activity time must be a non-negative integer: ${nowMs}`)
+    throw new Error(
+      `Agent activity time must be a non-negative integer: ${nowMs}`
+    )
   }
   return [...activeRuns.values()].filter(
     (run) =>

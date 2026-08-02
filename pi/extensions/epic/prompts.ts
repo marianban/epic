@@ -1,19 +1,19 @@
 import type {
   PlanReviewInstruction,
   ScoutReport,
-  EpicState,
+  EpicDomainState,
 } from './types.ts'
 import { extractReviewInstructions } from './plan-review.ts'
 
 export function scoutEpicPrompt(
-  state: EpicState,
+  state: EpicDomainState,
   focusedQuestions: string[] = []
 ): string {
   return `Investigate the repository for this epic and return the exact JSON contract from your role prompt.\n\nEpic:\n${state.epic}\n\nRepository root: ${state.repositoryRoot}\nLimits: inspect at most 15 primary files, 30 excerpts, and 140 lines per excerpt.${focusedQuestions.length ? `\n\nThe Planner requested this focused follow-up context. Answer only these questions:\n${focusedQuestions.map((question) => `- ${question}`).join('\n')}` : ''}`
 }
 
 export function plannerEpicPrompt(
-  state: EpicState,
+  state: EpicDomainState,
   report: ScoutReport,
   currentPlan: string | null,
   instructions: PlanReviewInstruction[] = []
@@ -33,7 +33,7 @@ export function plannerEpicPrompt(
 }
 
 export function implementerTask(
-  state: EpicState,
+  state: EpicDomainState,
   plan: string,
   feedback = '',
   taskArtifact = ''
@@ -61,7 +61,7 @@ export function implementerTask(
 }
 
 export function reviewerTask(
-  state: EpicState,
+  state: EpicDomainState,
   plan: string,
   diff: string,
   checks: string,
@@ -84,7 +84,7 @@ export function reviewerTask(
 }
 
 export function taskDecompositionTask(
-  state: EpicState,
+  state: EpicDomainState,
   plan: string
 ): string {
   return [
@@ -96,7 +96,7 @@ export function taskDecompositionTask(
 }
 
 export function taskReviewTask(
-  state: EpicState,
+  state: EpicDomainState,
   taskMarkdown: string,
   instructions: PlanReviewInstruction[]
 ): string {

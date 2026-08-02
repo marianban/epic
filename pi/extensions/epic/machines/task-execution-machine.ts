@@ -1,30 +1,42 @@
 import { assign, fromPromise, setup } from 'xstate'
-import type { CheckSuiteResult, ReviewResult, EpicState } from '../types.ts'
+import type {
+  CheckSuiteResult,
+  ReviewResult,
+  EpicDomainState,
+  RepairAttempts,
+} from '../types.ts'
 import type { EpicServices } from '../services.ts'
 
 interface TaskExecutionContext {
-  state: EpicState
+  domain: EpicDomainState
   failureReason?: string
   fast?: CheckSuiteResult
   full?: CheckSuiteResult
   review?: ReviewResult
-  fastRepairAttempt: number
-  fullRepairAttempt: number
-  semanticRepairAttempt: number
+  repairs: RepairAttempts
 }
 interface TaskExecutionInput {
-  state: EpicState
+  domain: EpicDomainState
 }
 export type TaskExecutionEvent =
   | { type: 'TASK.APPROVE' }
   | { type: 'TASK.REVIEW' }
   | { type: 'TASK.REVISE' }
   | { type: 'EPIC.RESUME' }
-export interface TaskExecutionResult {
-  kind: 'completed' | 'escalated'
-  state: EpicState
-  reason?: string
+interface CompletedTaskExecutionResult {
+  kind: 'completed'
+  domain: EpicDomainState
+  repairs: RepairAttempts
+  reason?: never
 }
+interface EscalatedTaskExecutionResult {
+  kind: 'escalated'
+  domain: EpicDomainState
+  repairs: RepairAttempts
+  reason: string
+}
+export type TaskExecutionResult =
+  CompletedTaskExecutionResult | EscalatedTaskExecutionResult
 
 function formatActorError(error: unknown): string {
   if (error == null) return 'Task actor failed.'
@@ -45,23 +57,28 @@ function repairLimitReason(kind: RepairKind): string {
 
 export function createTaskExecutionMachine(services: EpicServices) {
   const implementation = fromPromise<
-    EpicState,
+    EpicDomainState,
     { context: TaskExecutionContext; feedback?: string }
-  >(({ input }) => services.implement(input.context.state, input.feedback))
+  >(({ input }) => services.implement(input.context.domain, input.feedback))
   const checks = fromPromise<
-    { state: EpicState; result: CheckSuiteResult },
+    { state: EpicDomainState; result: CheckSuiteResult },
     { context: TaskExecutionContext; suite: 'fast' | 'full' }
-  >(({ input }) => services.checks(input.context.state, input.suite))
+  >(({ input }) => services.checks(input.context.domain, input.suite))
   const review = fromPromise<
-    { state: EpicState; result: ReviewResult },
+    { state: EpicDomainState; result: ReviewResult },
     { context: TaskExecutionContext }
   >(({ input }) => {
     if (!input.context.full) throw new Error('Full check result is missing.')
-    return services.review(input.context.state, input.context.full)
+    return services.review(
+      input.context.domain,
+      input.context.full,
+      input.context.repairs.semantic
+    )
   })
-  const revise = fromPromise<EpicState, { context: TaskExecutionContext }>(
-    ({ input }) => services.reviseTask(input.context.state)
-  )
+  const revise = fromPromise<
+    EpicDomainState,
+    { context: TaskExecutionContext }
+  >(({ input }) => services.reviseTask(input.context.domain))
   return setup({
     types: {
       context: {} as TaskExecutionContext,
@@ -71,11 +88,11 @@ export function createTaskExecutionMachine(services: EpicServices) {
     actors: { implementation, checks, review, revise },
     guards: {
       fastRepairAvailable: ({ context }) =>
-        context.fastRepairAttempt < context.state.maxFastRepairs,
+        context.repairs.fast < context.domain.maxFastRepairs,
       fullRepairAvailable: ({ context }) =>
-        context.fullRepairAttempt < context.state.maxFullRepairs,
+        context.repairs.full < context.domain.maxFullRepairs,
       semanticRepairAvailable: ({ context }) =>
-        context.semanticRepairAttempt < context.state.maxSemanticRepairs,
+        context.repairs.semantic < context.domain.maxSemanticRepairs,
     },
     actions: {
       captureFailureReason: assign({
@@ -86,29 +103,28 @@ export function createTaskExecutionMachine(services: EpicServices) {
         const failureReason = repairLimitReason('fast checks')
         return {
           failureReason,
-          state: { ...context.state, failureReason },
+          domain: { ...context.domain, failureReason },
         }
       }),
       markFullRepairEscalation: assign(({ context }) => {
         const failureReason = repairLimitReason('full checks')
         return {
           failureReason,
-          state: { ...context.state, failureReason },
+          domain: { ...context.domain, failureReason },
         }
       }),
       markSemanticRepairEscalation: assign(({ context }) => {
         const failureReason = repairLimitReason('semantic review')
         return {
           failureReason,
-          state: { ...context.state, failureReason },
+          domain: { ...context.domain, failureReason },
         }
       }),
       markTaskApproved: assign({
-        state: ({ context }) => ({
-          ...context.state,
+        domain: ({ context }) => ({
+          ...context.domain,
           taskApproved: true,
-          taskApprovedAt: new Date().toISOString(),
-          pendingHumanAction: 'none',
+          taskApprovedAt: services.now(),
         }),
       }),
     },
@@ -120,10 +136,8 @@ export function createTaskExecutionMachine(services: EpicServices) {
     // receives xstate.done.actor.task-execution with event.output undefined.
     output: ({ event }) => event.output as TaskExecutionResult,
     context: ({ input }) => ({
-      state: input.state,
-      fastRepairAttempt: input.state.fastRepairAttempt,
-      fullRepairAttempt: input.state.fullRepairAttempt,
-      semanticRepairAttempt: input.state.semanticRepairAttempt,
+      domain: input.domain,
+      repairs: { fast: 0, full: 0, semantic: 0 },
     }),
     states: {
       awaitingApproval: {
@@ -142,7 +156,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
           input: ({ context }) => ({ context }),
           onDone: {
             target: 'awaitingApproval',
-            actions: assign({ state: ({ event }) => event.output }),
+            actions: assign({ domain: ({ event }) => event.output }),
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
@@ -153,7 +167,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
           input: ({ context }) => ({ context }),
           onDone: {
             target: 'fastChecks',
-            actions: assign({ state: ({ event }) => event.output }),
+            actions: assign({ domain: ({ event }) => event.output }),
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
@@ -167,14 +181,14 @@ export function createTaskExecutionMachine(services: EpicServices) {
               guard: ({ event }) => event.output.result.passed,
               target: 'fullChecks',
               actions: assign({
-                state: ({ event }) => event.output.state,
+                domain: ({ event }) => event.output.state,
                 fast: ({ event }) => event.output.result,
               }),
             },
             {
               target: 'repairingFast',
               actions: assign({
-                state: ({ event }) => event.output.state,
+                domain: ({ event }) => event.output.state,
                 fast: ({ event }) => event.output.result,
               }),
             },
@@ -189,7 +203,10 @@ export function createTaskExecutionMachine(services: EpicServices) {
             guard: 'fastRepairAvailable',
             target: 'repairingFastInvoke',
             actions: assign({
-              fastRepairAttempt: ({ context }) => context.fastRepairAttempt + 1,
+              repairs: ({ context }) => ({
+                ...context.repairs,
+                fast: context.repairs.fast + 1,
+              }),
             }),
           },
           { target: 'escalating', actions: 'markFastRepairEscalation' },
@@ -204,7 +221,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
           }),
           onDone: {
             target: 'fastChecks',
-            actions: assign({ state: ({ event }) => event.output }),
+            actions: assign({ domain: ({ event }) => event.output }),
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
@@ -218,14 +235,14 @@ export function createTaskExecutionMachine(services: EpicServices) {
               guard: ({ event }) => event.output.result.passed,
               target: 'reviewing',
               actions: assign({
-                state: ({ event }) => event.output.state,
+                domain: ({ event }) => event.output.state,
                 full: ({ event }) => event.output.result,
               }),
             },
             {
               target: 'repairingFull',
               actions: assign({
-                state: ({ event }) => event.output.state,
+                domain: ({ event }) => event.output.state,
                 full: ({ event }) => event.output.result,
               }),
             },
@@ -240,7 +257,10 @@ export function createTaskExecutionMachine(services: EpicServices) {
             guard: 'fullRepairAvailable',
             target: 'repairingFullInvoke',
             actions: assign({
-              fullRepairAttempt: ({ context }) => context.fullRepairAttempt + 1,
+              repairs: ({ context }) => ({
+                ...context.repairs,
+                full: context.repairs.full + 1,
+              }),
             }),
           },
           { target: 'escalating', actions: 'markFullRepairEscalation' },
@@ -255,7 +275,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
           }),
           onDone: {
             target: 'fullChecks',
-            actions: assign({ state: ({ event }) => event.output }),
+            actions: assign({ domain: ({ event }) => event.output }),
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
@@ -269,14 +289,14 @@ export function createTaskExecutionMachine(services: EpicServices) {
               guard: ({ event }) => event.output.result.passed,
               target: 'awaitingReview',
               actions: assign({
-                state: ({ event }) => event.output.state,
+                domain: ({ event }) => event.output.state,
                 review: ({ event }) => event.output.result,
               }),
             },
             {
               target: 'repairingReview',
               actions: assign({
-                state: ({ event }) => event.output.state,
+                domain: ({ event }) => event.output.state,
                 review: ({ event }) => event.output.result,
               }),
             },
@@ -291,8 +311,10 @@ export function createTaskExecutionMachine(services: EpicServices) {
             guard: 'semanticRepairAvailable',
             target: 'repairingReviewInvoke',
             actions: assign({
-              semanticRepairAttempt: ({ context }) =>
-                context.semanticRepairAttempt + 1,
+              repairs: ({ context }) => ({
+                ...context.repairs,
+                semantic: context.repairs.semantic + 1,
+              }),
             }),
           },
           { target: 'escalating', actions: 'markSemanticRepairEscalation' },
@@ -307,7 +329,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
           }),
           onDone: {
             target: 'fastChecks',
-            actions: assign({ state: ({ event }) => event.output }),
+            actions: assign({ domain: ({ event }) => event.output }),
           },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
@@ -333,14 +355,19 @@ export function createTaskExecutionMachine(services: EpicServices) {
       done: {
         type: 'final',
         output: ({ context }) =>
-          ({ kind: 'completed', state: context.state }) as TaskExecutionResult,
+          ({
+            kind: 'completed',
+            domain: context.domain,
+            repairs: context.repairs,
+          }) as TaskExecutionResult,
       },
       failed: {
         type: 'final',
         output: ({ context }) =>
           ({
             kind: 'escalated',
-            state: context.state,
+            domain: context.domain,
+            repairs: context.repairs,
             reason: context.failureReason ?? 'Task actor failed.',
           }) as TaskExecutionResult,
       },

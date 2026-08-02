@@ -9,173 +9,238 @@ import { createWebSocketInspector } from '@statelyai/inspect'
 import { createInspectorServer } from '@statelyai/inspect/server'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
-  createServices,
   createEpicMachine,
-  machineStage,
-  type EpicMachineContext,
   type EpicMachineEvent,
 } from './machines/epic-machine.ts'
-import { readConfig } from './tools.ts'
-import type { EpicConfig, EpicStage, EpicState } from './types.ts'
+import { createEpicServices } from './services.ts'
+import { projectActorSystemSnapshot } from './machines/actor-system-projection.ts'
+import { liveTaskChild, type LiveTaskChild } from './machines/actor-system-projection.ts'
+import type {
+  EpicBoundaryView,
+  EpicClock,
+  ResolvedEpicConfiguration,
+  EpicDomainState,
+  EpicRunMetadata,
+  EpicTimer,
+  PersistedEpicEnvelope,
+} from './types.ts'
 
 type EpicActor = Actor<ReturnType<typeof createEpicMachine>>
-
 interface EpicInspector {
   inspect: Observer<InspectionEvent>
 }
-
-// The Pi extension process owns the live epic session. Keep one relay per
-// port so each short-lived command runtime can reconnect its actor without
-// tearing down the inspector server after the command returns.
 const inspectors = new Map<number, EpicInspector>()
 
 function createEpicInspector(
-  config: EpicConfig['inspector']
+  config: ResolvedEpicConfiguration['inspector']
 ): EpicInspector | undefined {
   const enabled =
-    process.env.PI_EPIC_INSPECTOR === '1' || config?.enabled === true
+    process.env.PI_EPIC_INSPECTOR === '1' || config.enabled
   if (!enabled || process.env.PI_EPIC_INSPECTOR === '0') return undefined
-
-  const configuredPort = Number(
-    process.env.PI_EPIC_INSPECTOR_PORT ?? config?.port ?? 8080
+  const port = Number(
+    process.env.PI_EPIC_INSPECTOR_PORT ?? config.port
   )
-  const port =
-    Number.isInteger(configuredPort) &&
-    configuredPort > 0 &&
-    configuredPort < 65536
-      ? configuredPort
-      : 8080
+  if (!Number.isInteger(port) || port < 1 || port > 65535)
+    throw new Error('Epic inspector port must be a valid TCP port.')
   const existing = inspectors.get(port)
   if (existing) return existing
-
   createInspectorServer({
     port,
     autoOpen:
       process.env.PI_EPIC_INSPECTOR_AUTO_OPEN === '1' ||
       (process.env.PI_EPIC_INSPECTOR_AUTO_OPEN !== '0' &&
-        (config?.autoOpen ?? true)),
+        config.autoOpen),
   })
-  const inspector = createWebSocketInspector({
-    url: `ws://localhost:${port}`,
-    sanitizeContext: () => ({}),
-  })
-
   const result = {
-    inspect: inspector.inspect,
+    inspect: createWebSocketInspector({
+      url: `ws://localhost:${port}`,
+      sanitizeContext: () => ({}),
+    }).inspect,
   }
   inspectors.set(port, result)
   return result
 }
 
 export async function createEpicRuntime(
-  state: EpicState,
-  ctx?: ExtensionContext
+  domain: EpicDomainState,
+  metadata: EpicRunMetadata,
+  ctx: ExtensionContext,
+  clock: EpicClock,
+  timer: EpicTimer,
+  configuration: ResolvedEpicConfiguration,
+  snapshot?: unknown
 ): Promise<EpicRuntime> {
   const machine = createEpicMachine(
-    ctx ? createServices(ctx) : createServices(undefined as never)
+    createEpicServices(
+      ctx,
+      () => {
+        if (!runtime) throw new Error('Epic boundary is not bound.')
+        return runtime.boundary()
+      },
+      clock,
+      configuration
+    )
   )
-  const config = (await readConfig(state.repositoryRoot)) as EpicConfig
-  const inspector = createEpicInspector(config.inspector)
-  const actor = state.machineSnapshot
+  const actor = snapshot
     ? createActor(machine, {
-        snapshot: state.machineSnapshot as SnapshotFrom<typeof machine>,
-        input: { state },
-        inspect: inspector?.inspect,
+        snapshot: snapshot as SnapshotFrom<typeof machine>,
+        input: { state: domain },
+        inspect: createEpicInspector(configuration.inspector)?.inspect,
       })
-    : createActor(machine, { input: { state }, inspect: inspector?.inspect })
+    : createActor(machine, {
+        input: { state: domain },
+        inspect: createEpicInspector(configuration.inspector)?.inspect,
+      })
+  const runtime = new EpicRuntime(actor, domain, metadata, timer)
   actor.start()
-  return new EpicRuntime(state, actor)
+  return runtime
+}
+
+function activeChild(actor: EpicActor): LiveTaskChild | undefined {
+  return liveTaskChild(actor.getSnapshot())
+}
+function forwarded(event: EpicMachineEvent, hasTaskActor: boolean): boolean {
+  return (
+    ['TASK.APPROVE', 'TASK.REVIEW', 'TASK.REVISE'].includes(event.type) ||
+    (event.type === 'EPIC.RESUME' && hasTaskActor)
+  )
 }
 
 export class EpicRuntime {
   private readonly actor: EpicActor
-  private readonly state: EpicState
-  private stageBeforeEvent?: EpicStage
-  constructor(state: EpicState, actor: EpicActor) {
-    this.state = state
+  private readonly domainState: EpicDomainState
+  private readonly metadataState: EpicRunMetadata
+  private readonly timer: EpicTimer
+  constructor(
+    actor: EpicActor,
+    domainState: EpicDomainState,
+    metadataState: EpicRunMetadata,
+    timer: EpicTimer
+  ) {
     this.actor = actor
+    this.domainState = domainState
+    this.metadataState = metadataState
+    this.timer = timer
   }
-  send(event: EpicMachineEvent): void {
-    const snapshot = this.actor.getSnapshot()
-    const machineSnapshot = snapshot as unknown as {
-      context: EpicMachineContext
-    }
-    if (!snapshot.can(event))
-      throw new Error(
-        `Epic event ${event.type} is not available in stage ${machineStage(machineSnapshot)}.`
-      )
-    // Resume is also valid in human-waiting states where it intentionally
-    // leaves the machine in the same stage. settle() must not wait for a
-    // stage change in that case, or a harmless dashboard re-show becomes a
-    // five-minute timeout.
-    this.stageBeforeEvent =
-      event.type === 'EPIC.RESUME' ? undefined : machineStage(machineSnapshot)
-    this.actor.send(event)
+  boundary(): EpicBoundaryView {
+    return projectActorSystemSnapshot(this.actor.getSnapshot())
   }
-  async settle(timeoutMs = 300_000): Promise<void> {
-    const started = Date.now()
-    const stageBeforeEvent = this.stageBeforeEvent
-    this.stageBeforeEvent = undefined
-    const waiting = new Set([
-      'awaiting_plan_review',
-      'awaiting_plan_approval',
-      'awaiting_prerequisite_approval',
-      'awaiting_task_approval',
-      'awaiting_task_review',
-      'escalating',
-      'completed',
-      'failed',
-    ])
-    while (Date.now() - started < timeoutMs) {
-      const snapshot = this.actor.getSnapshot() as unknown as {
-        context: EpicMachineContext
-      }
-      const stage = machineStage(snapshot)
-      // A command can be forwarded to an invoked child actor with sendTo().
-      // The parent may still report the pre-command human-waiting stage while
-      // that child event is queued. Do not persist that stage as the result of
-      // the command; first observe the machine leave the stage that existed
-      // before the event was sent.
-      if (stageBeforeEvent !== undefined && stage === stageBeforeEvent) {
-        await new Promise((resolve) => setTimeout(resolve, 0))
-        continue
-      }
-      if (waiting.has(stage)) {
-        await this.sync()
-        return
-      }
-      await new Promise((resolve) => setTimeout(resolve, 10))
-    }
-    throw new Error(
-      'Epic actor did not reach a human or terminal state before timeout.'
-    )
+  domain(): EpicDomainState {
+    return (this.actor.getSnapshot().context as { state: EpicDomainState })
+      .state
   }
-  async sync(): Promise<void> {
-    const snapshot = this.actor.getSnapshot() as unknown as {
-      context: EpicMachineContext
-    }
-    const current = snapshot.context.state
-    Object.assign(this.state, current, {
-      machineSnapshot: this.actor.getPersistedSnapshot(),
-      stage: machineStage(snapshot),
-    })
-  }
-  snapshot(): ReturnType<EpicActor['getPersistedSnapshot']> {
+  persistedSnapshot(): ReturnType<EpicActor['getPersistedSnapshot']> {
     return this.actor.getPersistedSnapshot()
   }
-  matches(stage: EpicStage): boolean {
-    return (
-      machineStage(
-        this.actor.getSnapshot() as { context: EpicMachineContext }
-      ) === stage
-    )
-  }
+  // fallow-ignore-next-line unused-class-member -- consumed by epicStatus().
   tags(): ReadonlySet<string> {
     return this.actor.getSnapshot().tags
   }
+  // fallow-ignore-next-line unused-class-member -- consumed by epicStatus().
   value(): unknown {
     return this.actor.getSnapshot().value
   }
+
+  dispatchAndSettle(
+    event: EpicMachineEvent,
+    timeoutMs: number
+  ): Promise<EpicBoundaryView> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+      throw new Error('Epic dispatch timeout must be a positive number.')
+    this.boundary()
+    const parent = this.actor
+    if (!parent.getSnapshot().can(event))
+      throw new Error(
+        `Epic event ${event.type} is not available in stage ${this.boundary().stage}.`
+      )
+    const child = activeChild(parent)
+    const taskForwarded = forwarded(event, child !== undefined)
+    const processor = taskForwarded ? child : parent
+    if (
+      ['TASK.APPROVE', 'TASK.REVIEW', 'TASK.REVISE'].includes(event.type) &&
+      !child
+    )
+      throw new Error('Task event requires an active task-execution actor.')
+    if (taskForwarded && event.type !== 'EPIC.RESUME') {
+      const taskActor = child
+      if (
+        !taskActor ||
+        !taskActor.getSnapshot().can(event)
+      )
+        throw new Error(
+          `Task event ${event.type} is not available in stage ${this.boundary().stage}.`
+        )
+    }
+    return new Promise((resolve, reject) => {
+      let acknowledged = false
+      let settled = false
+      let sent = false
+      const timer = this.timer.setTimeout(() => {
+        if (!settled) {
+          settled = true
+          cleanup()
+          reject(
+            new Error(`Epic event ${event.type} did not settle before timeout.`)
+          )
+        }
+      }, timeoutMs)
+      const cleanup = () => {
+        this.timer.clearTimeout(timer)
+        parentSubscription.unsubscribe()
+        childSubscription?.unsubscribe()
+      }
+      const evaluate = () => {
+        if (!acknowledged || settled) return
+        try {
+          const view = this.boundary()
+          if (view.wait !== 'active') {
+            settled = true
+            cleanup()
+            resolve(view)
+          }
+        } catch (error) {
+          settled = true
+          cleanup()
+          reject(error)
+        }
+      }
+      const observer = (source: unknown) => ({
+        next: () => {
+          if (sent && source === processor) acknowledged = true
+          evaluate()
+        },
+        error: (error: unknown) => {
+          if (!settled) {
+            settled = true
+            cleanup()
+            reject(error)
+          }
+        },
+      })
+      const parentSubscription = parent.subscribe(observer(parent))
+      const childSubscription = child?.subscribe(observer(child))
+      try {
+        sent = true
+        parent.send(event)
+      } catch (error) {
+        settled = true
+        cleanup()
+        reject(error)
+      }
+    })
+  }
+  // fallow-ignore-next-line unused-class-member -- consumed by epic lifecycle persistence.
+  envelope(now: string): PersistedEpicEnvelope {
+    return {
+      schemaVersion: 4,
+      machineVersion: 7,
+      epicId: this.metadataState.epicId,
+      createdAt: this.metadataState.createdAt,
+      updatedAt: now,
+      snapshot: this.persistedSnapshot(),
+    }
+  }
+  // fallow-ignore-next-line unused-class-member -- consumed by epic operation cleanup.
   stop(): void {
     this.actor.stop()
   }

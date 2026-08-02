@@ -1,7 +1,7 @@
 import * as path from 'node:path'
-import type { EpicState } from './types.ts'
+import type { EpicDomainState } from './types.ts'
 
-export function currentTaskArtifactPath(state: EpicState): string {
+export function currentTaskArtifactPath(state: EpicDomainState): string {
   return path.join(
     state.repositoryRoot,
     '.pi',

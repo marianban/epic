@@ -9,11 +9,11 @@ import type {
   AgentProfile,
   AgentRole,
   PlannerContextRequest,
-  EpicConfig,
   EpicTask,
+  ResolvedEpicConfiguration,
 } from './types.ts'
 import { createAgentRunStdoutLog } from './agent-runs.ts'
-import { readConfig, redactSecrets } from './tools.ts'
+import { redactSecrets } from './tools.ts'
 import { wrapImplementerInvocation } from './implementer-sandbox.ts'
 
 const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
@@ -73,12 +73,8 @@ const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
   },
 }
 
-async function getAgentProfile(
-  root: string,
-  role: AgentRole
-): Promise<AgentProfile> {
-  const config = (await readConfig(root)) as EpicConfig
-  const override = config.agents?.[role] ?? {}
+function getAgentProfile(role: AgentRole, configuration: ResolvedEpicConfiguration): AgentProfile {
+  const override = configuration.agents[role] ?? {}
   const base = DEFAULT_AGENT_PROFILES[role]
   return {
     ...base,
@@ -108,7 +104,11 @@ export interface AgentRunOptions {
 const MAX_STDOUT_DIAGNOSTIC_CHARS = 100_000
 const MAX_STDERR_CHARS = 20_000
 
-function appendTail(current: string, incoming: string, maxChars: number): string {
+function appendTail(
+  current: string,
+  incoming: string,
+  maxChars: number
+): string {
   if (incoming.length >= maxChars) return incoming.slice(-maxChars)
   const overflow = current.length + incoming.length - maxChars
   if (overflow <= 0) return current + incoming
@@ -137,7 +137,9 @@ function mergeUsage(
   return merged
 }
 
-function usageRecords(event: Record<string, unknown>): Record<string, unknown>[] {
+function usageRecords(
+  event: Record<string, unknown>
+): Record<string, unknown>[] {
   if (isRecord(event.usage)) return [event.usage]
   if (event.type !== 'agent_end' || !Array.isArray(event.messages)) return []
 
@@ -167,12 +169,17 @@ export interface AgentOutputSummary {
   usage?: Record<string, unknown>
 }
 
-function protocolFailureReason(event: Record<string, unknown>): string | undefined {
+function protocolFailureReason(
+  event: Record<string, unknown>
+): string | undefined {
   if (typeof event.errorMessage === 'string' && event.errorMessage.trim())
     return event.errorMessage.trim()
 
   if (!isRecord(event.message)) return undefined
-  if (typeof event.message.errorMessage === 'string' && event.message.errorMessage.trim())
+  if (
+    typeof event.message.errorMessage === 'string' &&
+    event.message.errorMessage.trim()
+  )
     return event.message.errorMessage.trim()
   if (event.message.stopReason === 'error') return 'Agent reported an error.'
   return undefined
@@ -308,9 +315,10 @@ export async function runAgent(
   root: string,
   role: AgentRole,
   userPrompt: string,
-  options: AgentRunOptions
+  options: AgentRunOptions,
+  configuration: ResolvedEpicConfiguration
 ): Promise<AgentRunResult> {
-  const profile = await getAgentProfile(root, role)
+  const profile = getAgentProfile(role, configuration)
   const systemPrompt = await readPrompt(root, profile.systemPromptPath)
   // The guard belongs to the loaded extension package, not necessarily to the
   // target repository. This allows `pi -e /path/to/epic/index.ts` to run
@@ -337,10 +345,12 @@ export async function runAgent(
   if (profile.thinking) args.push('--thinking', profile.thinking)
   const promptDir = await fs.mkdtemp(path.join(tmpdir(), 'pi-epic-'))
   const promptPath = path.join(promptDir, `${role}.md`)
-  await fs.writeFile(promptPath, systemPrompt, { encoding: 'utf8', mode: 0o600 })
+  await fs.writeFile(promptPath, systemPrompt, {
+    encoding: 'utf8',
+    mode: 0o600,
+  })
   args.push('--append-system-prompt', promptPath, userPrompt)
-  const config = (await readConfig(root)) as EpicConfig
-  const timeoutMs = profile.timeoutMs ?? config.agentTimeoutMs ?? 300_000
+  const timeoutMs = profile.timeoutMs ?? configuration.agentTimeoutMs
   const invocation = getPiInvocation(args)
   let childCommand = invocation.command
   let childArgs = invocation.args
@@ -441,9 +451,7 @@ export async function runAgent(
         output: output.output || redactSecrets(output.diagnosticTail),
         stderr: redactSecrets(stderr),
         stdoutLogPath: stdoutLog.filePath,
-        failureReason: failureReason
-          ? redactSecrets(failureReason)
-          : undefined,
+        failureReason: failureReason ? redactSecrets(failureReason) : undefined,
         usage: output.usage,
       })
     })
@@ -509,10 +517,7 @@ export function parsePlannerResponse(
 }
 
 export function parseTaskDecomposition(output: string): EpicTask[] {
-  const parsed = parseJsonResponse<{ tasks?: EpicTask[] }>(
-    output,
-    'planner'
-  )
+  const parsed = parseJsonResponse<{ tasks?: EpicTask[] }>(output, 'planner')
   if (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0)
     throw new Error('Planner returned no implementation tasks.')
   for (const task of parsed.tasks) {

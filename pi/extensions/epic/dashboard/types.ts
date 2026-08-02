@@ -1,4 +1,9 @@
-import type { EpicEvent, EpicState } from '../types.ts'
+import type {
+  EpicBoundaryView,
+  EpicDomainState,
+  EpicEvent,
+  EpicRunMetadata,
+} from '../types.ts'
 
 export interface ActiveAgentRun {
   readonly startedAtMs: number
@@ -91,7 +96,9 @@ export interface EpicDashboardState {
 }
 
 export interface DashboardProjectionInput {
-  readonly state: EpicState
+  readonly domain: EpicDomainState
+  readonly metadata: EpicRunMetadata
+  readonly boundary: EpicBoundaryView
   readonly events: readonly EpicEvent[]
   readonly activeAgentRuns?: readonly ActiveAgentRun[]
   readonly activeOperation?: boolean

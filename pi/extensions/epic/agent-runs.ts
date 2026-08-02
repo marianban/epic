@@ -1,11 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import {
-  closeSync,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  writeSync,
-} from 'node:fs'
+import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import * as path from 'node:path'
 
 const FLUSH_BYTES = 64 * 1024
@@ -21,7 +15,8 @@ function writeAll(fileDescriptor: number, chunk: Buffer): void {
   let offset = 0
   while (offset < chunk.length) {
     const written = writeSync(fileDescriptor, chunk, offset)
-    if (written <= 0) throw new Error('Agent stdout log write made no progress.')
+    if (written <= 0)
+      throw new Error('Agent stdout log write made no progress.')
     offset += written
   }
 }

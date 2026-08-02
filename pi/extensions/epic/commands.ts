@@ -11,8 +11,7 @@ export const EPIC_COMMANDS = {
   revisePlan: 'plan-revise',
 } as const
 
-export type EpicCommandName =
-  (typeof EPIC_COMMANDS)[keyof typeof EPIC_COMMANDS]
+export type EpicCommandName = (typeof EPIC_COMMANDS)[keyof typeof EPIC_COMMANDS]
 
 export function slashCommand(command: EpicCommandName): `/${EpicCommandName}` {
   return `/${command}`

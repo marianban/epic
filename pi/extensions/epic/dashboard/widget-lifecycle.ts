@@ -12,7 +12,7 @@ import { loadActiveDashboardState } from './data.ts'
 import type { DashboardState } from './state.ts'
 import type { DashboardAction } from './types.ts'
 
-export const EPIC_STATUS_WIDGET_KEY = 'epicstatus'
+const EPIC_STATUS_WIDGET_KEY = 'epicstatus'
 export const EPIC_STATUS_REFRESH_INTERVAL_MS = 1_000
 
 type DashboardLoader = (
@@ -20,13 +20,11 @@ type DashboardLoader = (
   now: string
 ) => Promise<DashboardState | undefined>
 
-type TerminalInputListener = (data: string) =>
-  | { consume?: boolean; data?: string }
-  | undefined
+type TerminalInputListener = (
+  data: string
+) => { consume?: boolean; data?: string } | undefined
 
-type RegisterTerminalInput = (
-  handler: TerminalInputListener
-) => () => void
+type RegisterTerminalInput = (handler: TerminalInputListener) => () => void
 
 export type EpicStatusActionExecutor = (
   action: DashboardAction,
@@ -38,7 +36,7 @@ export interface EpicStatusWidgetLifecycle {
   hide(ctx: ExtensionContext): void
 }
 
-export class EpicStatusWidget implements Component {
+class EpicStatusWidget implements Component {
   private readonly repositoryRoot: string
   private readonly tui: TUI
   private readonly theme: Theme
@@ -106,7 +104,10 @@ export class EpicStatusWidget implements Component {
     const message =
       this.errorMessage === undefined
         ? this.theme.fg('muted', 'No active epic.')
-        : this.theme.fg('error', `Epic status unavailable: ${this.errorMessage}`)
+        : this.theme.fg(
+            'error',
+            `Epic status unavailable: ${this.errorMessage}`
+          )
     return [truncateToWidth(message, width, '…', true)]
   }
 
@@ -198,26 +199,28 @@ export function registerEpicStatusWidget(
   const show = (ctx: ExtensionContext): void => {
     if (ctx.mode !== 'tui') return
     installed = true
-    ctx.ui.setWidget(EPIC_STATUS_WIDGET_KEY, (tui, theme) =>
-      new EpicStatusWidget(
-        ctx.cwd,
-        tui,
-        theme,
-        loadActiveDashboardState,
-        (message) => ctx.ui.notify(message, 'error'),
-        (action) => {
-          void executeAction(action, ctx).catch((error: unknown) => {
-            ctx.ui.notify(
-              `Epic action ${action.id} failed: ${
-                error instanceof Error ? error.message : String(error)
-              }`,
-              'error'
-            )
-          })
-        },
-        (handler) => ctx.ui.onTerminalInput(handler),
-        refreshIntervalMs
-      )
+    ctx.ui.setWidget(
+      EPIC_STATUS_WIDGET_KEY,
+      (tui, theme) =>
+        new EpicStatusWidget(
+          ctx.cwd,
+          tui,
+          theme,
+          loadActiveDashboardState,
+          (message) => ctx.ui.notify(message, 'error'),
+          (action) => {
+            void executeAction(action, ctx).catch((error: unknown) => {
+              ctx.ui.notify(
+                `Epic action ${action.id} failed: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+                'error'
+              )
+            })
+          },
+          (handler) => ctx.ui.onTerminalInput(handler),
+          refreshIntervalMs
+        )
     )
   }
 

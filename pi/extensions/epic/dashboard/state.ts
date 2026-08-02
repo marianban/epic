@@ -30,7 +30,7 @@ export class DashboardState {
       projection.epic,
       projection.actionRequired,
       projection.currentTask,
-      input.state.updatedAt
+      input.metadata.updatedAt
     )
   }
 }

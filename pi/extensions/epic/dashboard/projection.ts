@@ -1,7 +1,13 @@
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { hyperlink } from '@earendil-works/pi-tui'
-import type { EpicEvent, EpicStage, EpicState, EpicTask } from '../types.ts'
+import type {
+  EpicDomainState,
+  EpicEvent,
+  EpicStage,
+  EpicTask,
+  PendingHumanAction,
+} from '../types.ts'
 import { currentTaskArtifactPath } from '../artifact-paths.ts'
 import {
   EPIC_COMMANDS,
@@ -51,6 +57,13 @@ const STAGE_STATUS: Record<EpicStage, EpicDashboardStatus> = {
   failed: 'failed',
 }
 
+interface DashboardRunState extends EpicDomainState {
+  stage: EpicStage
+  createdAt: string
+  updatedAt: string
+  pendingHumanAction?: PendingHumanAction
+}
+
 function timestampMs(value: string, field: string): number {
   const parsed = Date.parse(value)
   if (Number.isNaN(parsed)) {
@@ -66,10 +79,7 @@ function nonNegativeInteger(value: number, field: string): number {
   return value
 }
 
-function requiredPayloadString(
-  event: EpicEvent,
-  field: string
-): string {
+function requiredPayloadString(event: EpicEvent, field: string): string {
   const value = event.payload[field]
   if (typeof value !== 'string' || value.length === 0) {
     throw new Error(
@@ -92,7 +102,7 @@ function progress(completed: number, total: number): ProgressMetric {
   }
 }
 
-function dashboardStatus(state: EpicState): EpicDashboardStatus {
+function dashboardStatus(state: DashboardRunState): EpicDashboardStatus {
   const status = STAGE_STATUS[state.stage]
   if (status === undefined) {
     throw new Error(`Unsupported epic stage: ${String(state.stage)}`)
@@ -137,13 +147,13 @@ function linkedFile(filePath: string, label: string): string {
   return hyperlink(label, pathToFileURL(filePath).toString())
 }
 
-function planMessage(state: EpicState): string {
+function planMessage(state: DashboardRunState): string {
   const verb = state.planRevision > 1 ? 'refined' : 'created'
   const plan = linkedFile(state.planPath, `plan.md has been ${verb}`)
   return `${plan}. Comments marked with R: will be refined.`
 }
 
-function taskMessage(state: EpicState): string {
+function taskMessage(state: DashboardRunState): string {
   const task = linkedFile(
     currentTaskArtifactPath(state),
     `task-${String(state.currentTaskIndex + 1).padStart(3, '0')}.md`
@@ -151,7 +161,7 @@ function taskMessage(state: EpicState): string {
   return `${task} is ready. Comments marked with R: will be refined.`
 }
 
-function implementedTaskMessage(state: EpicState): string {
+function implementedTaskMessage(state: DashboardRunState): string {
   const task = linkedFile(
     currentTaskArtifactPath(state),
     `task-${String(state.currentTaskIndex + 1).padStart(3, '0')}.md`
@@ -160,7 +170,7 @@ function implementedTaskMessage(state: EpicState): string {
 }
 
 function actionRequired(
-  state: EpicState,
+  state: DashboardRunState,
   activeOperation: boolean
 ): DashboardActionRequest | undefined {
   if (activeOperation) return undefined
@@ -226,7 +236,12 @@ function actionRequired(
         title: 'Epic requires intervention',
         message: state.failureReason,
         actions: [
-          action(EPIC_COMMANDS.resume, 'Resume', EPIC_COMMANDS.resume, 'primary'),
+          action(
+            EPIC_COMMANDS.resume,
+            'Resume',
+            EPIC_COMMANDS.resume,
+            'primary'
+          ),
           action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
         ],
       }
@@ -288,7 +303,9 @@ function agentTimeMs(
 
     const startedAt = active.get(key)
     if (startedAt === undefined) {
-      throw new Error(`Agent event ${event.id} finished without a matching start.`)
+      throw new Error(
+        `Agent event ${event.id} finished without a matching start.`
+      )
     }
     if (eventMs < startedAt) {
       throw new Error(`Agent event ${event.id} ends before it starts.`)
@@ -301,7 +318,9 @@ function agentTimeMs(
 
   for (const run of activeAgentRuns) {
     if (!Number.isInteger(run.startedAtMs) || run.startedAtMs < 0) {
-      throw new Error('Active agent runs require non-negative integer timestamps.')
+      throw new Error(
+        'Active agent runs require non-negative integer timestamps.'
+      )
     }
     if (run.startedAtMs > nowMs) {
       throw new Error('Active agent runs cannot start after now.')
@@ -342,11 +361,7 @@ function usageValue(
   const key = keys.find((candidate) => candidate in usage)
   if (key === undefined) return undefined
   const value = usage[key]
-  if (
-    typeof value !== 'number' ||
-    !Number.isInteger(value) ||
-    value < 0
-  ) {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     throw new Error(`Event ${event.id} has an invalid ${key} token count.`)
   }
   return value
@@ -359,7 +374,11 @@ function tokenUsageForEvent(event: EpicEvent): TokenUsage {
     throw new Error(`Event ${event.id} has invalid token usage.`)
   }
   const record = usage as Record<string, unknown>
-  const input = usageValue(record, ['input', 'inputTokens', 'promptTokens'], event)
+  const input = usageValue(
+    record,
+    ['input', 'inputTokens', 'promptTokens'],
+    event
+  )
   const output = usageValue(
     record,
     ['output', 'outputTokens', 'completionTokens'],
@@ -370,11 +389,7 @@ function tokenUsageForEvent(event: EpicEvent): TokenUsage {
     ['cached', 'cachedTokens', 'cacheRead', 'cacheReadTokens'],
     event
   )
-  const reasoning = usageValue(
-    record,
-    ['reasoning', 'reasoningTokens'],
-    event
-  )
+  const reasoning = usageValue(record, ['reasoning', 'reasoningTokens'], event)
   const explicitTotal = usageValue(
     record,
     ['total', 'totalTokens', 'tokens'],
@@ -392,7 +407,10 @@ function tokenUsageForEvent(event: EpicEvent): TokenUsage {
   }
 }
 
-function addOptional(left: number | undefined, right: number | undefined): number | undefined {
+function addOptional(
+  left: number | undefined,
+  right: number | undefined
+): number | undefined {
   if (left === undefined && right === undefined) return undefined
   return (left ?? 0) + (right ?? 0)
 }
@@ -419,7 +437,7 @@ function tokenUsage(events: readonly EpicEvent[]): TokenUsage {
 }
 
 function completedTaskCount(
-  state: EpicState,
+  state: DashboardRunState,
   tasks: readonly EpicTask[]
 ): number {
   const currentTaskIndex = nonNegativeInteger(
@@ -469,9 +487,7 @@ function taskEvents(
 ): readonly EpicEvent[] {
   return orderedEvents(events)
     .map(({ event }) => event)
-    .filter(
-      (event) => event.type === type && taskIdFromEvent(event) === taskId
-    )
+    .filter((event) => event.type === type && taskIdFromEvent(event) === taskId)
 }
 
 function taskAgentTimeMs(
@@ -501,10 +517,7 @@ function taskAttempt(
   return { current: Math.max(1, implementations.length) }
 }
 
-function nonNegativeEventInteger(
-  event: EpicEvent,
-  field: string
-): number {
+function nonNegativeEventInteger(event: EpicEvent, field: string): number {
   const value = event.payload[field]
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
     throw new Error(`Event ${event.id} has an invalid ${field}.`)
@@ -595,13 +608,14 @@ function taskStatus(
 
 function currentTask(
   input: DashboardProjectionInput,
+  state: DashboardRunState,
   tasks: readonly EpicTask[],
   nowMs: number
 ): CurrentTaskDashboardState | undefined {
-  if (!TASK_STAGES.has(input.state.stage) || tasks.length === 0) {
+  if (!TASK_STAGES.has(state.stage) || tasks.length === 0) {
     return undefined
   }
-  const index = nonNegativeInteger(input.state.currentTaskIndex, 'currentTaskIndex')
+  const index = nonNegativeInteger(state.currentTaskIndex, 'currentTaskIndex')
   const task = tasks[index]
   if (task === undefined) {
     throw new Error(`currentTaskIndex must refer to an existing task.`)
@@ -613,15 +627,14 @@ function currentTask(
     index: index + 1,
     totalTasks: tasks.length,
     name: task.title,
-    status: taskStatus(input.state.stage, input.events, taskId),
-    agentTimeMs: taskAgentTimeMs(
-      input.events,
-      activeAgentRuns,
-      taskId,
-      nowMs
-    ),
+    status: taskStatus(state.stage, input.events, taskId),
+    agentTimeMs: taskAgentTimeMs(input.events, activeAgentRuns, taskId, nowMs),
     attempt: taskAttempt(input.events, taskId),
-    criteria: taskCriteria(input.events, taskId, task.acceptanceCriteria.length),
+    criteria: taskCriteria(
+      input.events,
+      taskId,
+      task.acceptanceCriteria.length
+    ),
     ...(taskAgentName(activeAgentRuns, taskId) === undefined
       ? {}
       : { agent: taskAgentName(activeAgentRuns, taskId) }),
@@ -634,8 +647,17 @@ function currentTask(
 export function projectDashboardState(
   input: DashboardProjectionInput
 ): DashboardProjection {
-  const nowMs = timestampMs(input.now ?? input.state.updatedAt, 'now')
-  const terminal = ['completed', 'failed'].includes(input.state.stage)
+  const state: DashboardRunState = {
+    ...input.domain,
+    stage: input.boundary.stage,
+    createdAt: input.metadata.createdAt,
+    updatedAt: input.metadata.updatedAt,
+    ...(input.boundary.pendingHumanAction === undefined
+      ? {}
+      : { pendingHumanAction: input.boundary.pendingHumanAction }),
+  }
+  const nowMs = timestampMs(input.now ?? input.metadata.updatedAt, 'now')
+  const terminal = ['completed', 'failed'].includes(state.stage)
   if (terminal && input.completedAt === undefined) {
     throw new Error('Terminal epics require completedAt.')
   }
@@ -647,31 +669,28 @@ export function projectDashboardState(
   if (completedAt !== undefined) {
     timestampMs(completedAt, 'completedAt')
   }
-  const tasks = input.state.tasks ?? []
+  const tasks = state.tasks ?? []
   const criteriaTotal = tasks.reduce(
     (total, task) => total + task.acceptanceCriteria.length,
     0
   )
-  const completedTasks = completedTaskCount(input.state, tasks)
+  const completedTasks = completedTaskCount(state, tasks)
   const criteriaCompleted = tasks
     .slice(0, completedTasks)
     .reduce((total, task) => total + task.acceptanceCriteria.length, 0)
-  const taskProgress = progress(
-    completedTasks,
-    tasks.length
-  )
+  const taskProgress = progress(completedTasks, tasks.length)
   const epic: EpicDashboardState = {
-    id: input.state.epicId,
+    id: state.epicId,
     runDirectory: join(
-      input.state.repositoryRoot,
+      state.repositoryRoot,
       '.pi',
       'epics',
       'runs',
-      input.state.epicId
+      state.epicId
     ),
-    name: input.state.epic,
-    status: dashboardStatus(input.state),
-    startedAt: input.state.createdAt,
+    name: state.epic,
+    status: dashboardStatus(state),
+    startedAt: state.createdAt,
     ...(completedAt === undefined ? {} : { completedAt }),
     agentTimeMs: agentTimeMs(input.events, input.activeAgentRuns ?? [], nowMs),
     tasks: taskProgress,
@@ -681,7 +700,7 @@ export function projectDashboardState(
 
   return {
     epic,
-    actionRequired: actionRequired(input.state, input.activeOperation === true),
-    currentTask: currentTask(input, tasks, nowMs),
+    actionRequired: actionRequired(state, input.activeOperation === true),
+    currentTask: currentTask(input, state, tasks, nowMs),
   }
 }

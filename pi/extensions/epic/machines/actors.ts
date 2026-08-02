@@ -1,6 +1,6 @@
 import { createActor, fromPromise } from 'xstate'
 import { runAgent, type AgentRunResult } from '../agents.ts'
-import type { AgentRole } from '../types.ts'
+import type { AgentRole, ResolvedEpicConfiguration } from '../types.ts'
 
 interface AgentActorInput {
   repositoryRoot: string
@@ -9,6 +9,7 @@ interface AgentActorInput {
   prompt: string
   signal?: AbortSignal
   onProgress?: (message: string) => void
+  configuration: ResolvedEpicConfiguration
 }
 
 const agentActor = fromPromise<AgentRunResult, AgentActorInput>(({ input }) =>
@@ -16,7 +17,7 @@ const agentActor = fromPromise<AgentRunResult, AgentActorInput>(({ input }) =>
     agentRunDirectory: input.agentRunDirectory,
     signal: input.signal,
     onProgress: input.onProgress,
-  })
+  }, input.configuration)
 )
 
 /** One Pi role invocation is a one-shot XState promise actor. */
