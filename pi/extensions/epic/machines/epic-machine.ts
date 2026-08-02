@@ -89,6 +89,9 @@ export function createEpicMachine(services: EpicServices) {
     { state: EpicDomainState; result: { passed: boolean } },
     { state: EpicDomainState }
   >(({ input }) => services.checks(input.state, 'final'))
+  const checkpoint = fromPromise<EpicDomainState, { state: EpicDomainState }>(
+    ({ input }) => services.checkpointTask(input.state)
+  )
   return setup({
     types: {
       context: {} as EpicMachineContext,
@@ -105,6 +108,7 @@ export function createEpicMachine(services: EpicServices) {
       prerequisites,
       prepare,
       finalChecks,
+      checkpoint,
       task,
     },
     actions: {
@@ -319,22 +323,15 @@ export function createEpicMachine(services: EpicServices) {
                   1 <
                   (validateTaskExecutionResult(event.output).domain.tasks
                     ?.length ?? 0),
-              target: 'taskExecution',
+              target: 'checkpointing',
               actions: assign({
-                state: ({ event }) => ({
-                  ...validateTaskExecutionResult(event.output).domain,
-                  currentTaskIndex:
-                    validateTaskExecutionResult(event.output).domain
-                      .currentTaskIndex + 1,
-                  taskApproved: false,
-                }),
+                state: ({ event }) => validateTaskExecutionResult(event.output).domain,
               }),
-              reenter: true,
             },
             {
               guard: ({ event }) =>
                 validateTaskExecutionResult(event.output).kind === 'completed',
-              target: 'finalVerification',
+              target: 'checkpointing',
               actions: assign({
                 state: ({ event }) =>
                   validateTaskExecutionResult(event.output).domain,
@@ -366,6 +363,24 @@ export function createEpicMachine(services: EpicServices) {
           'TASK.REVIEW': { actions: 'forwardTask' },
           'TASK.REVISE': { actions: 'forwardTask' },
           'EPIC.RESUME': { actions: 'forwardTask' },
+        },
+      },
+      checkpointing: {
+        tags: ['active', 'checkpointing'],
+        invoke: {
+          src: 'checkpoint',
+          input: ({ context }) => ({ state: context.state }),
+          onDone: [
+            {
+              guard: ({ event }) => event.output.currentTaskIndex + 1 < (event.output.tasks?.length ?? 0),
+              target: 'taskExecution',
+              actions: assign({
+                state: ({ event }) => ({ ...event.output, currentTaskIndex: event.output.currentTaskIndex + 1, taskApproved: false, taskApprovedAt: undefined, taskBaselineSha: undefined }),
+              }),
+            },
+            { target: 'finalVerification', actions: assign({ state: ({ event }) => event.output }) },
+          ],
+          onError: 'terminal.failed',
         },
       },
       escalating: {

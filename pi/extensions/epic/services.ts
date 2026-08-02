@@ -35,6 +35,7 @@ import { applyPrerequisites, discoverPrerequisites } from './prerequisites.ts'
 import { runAgentActor } from './machines/actors.ts'
 import { finishAgentRun, startAgentRun } from './agent-activity.ts'
 import { getCurrentDiff, summarizeDiff } from './diff.ts'
+import { assertCleanWorktree, assertGitPreflight, bootstrapEpicGitignore, createCheckpoint, validateTaskDelta } from './git-checkpoints.ts'
 import { runCheckSuite } from './checks.ts'
 import type {
   CheckSuiteResult,
@@ -79,6 +80,7 @@ export interface EpicServices {
     semanticAttempt: number
   ): Promise<{ state: EpicDomainState; result: ReviewResult }>
   reviseTask(state: EpicDomainState): Promise<EpicDomainState>
+  checkpointTask(state: EpicDomainState): Promise<EpicDomainState>
 }
 
 async function readApprovedPlan(state: EpicDomainState): Promise<string> {
@@ -155,6 +157,9 @@ export function createEpicServices(
         prompt,
         signal: ctx.signal,
         configuration,
+        writablePaths: role === 'implementer'
+          ? [...(state.tasks?.[state.currentTaskIndex]?.scope.create ?? []), ...(state.tasks?.[state.currentTaskIndex]?.scope.modify ?? [])]
+          : undefined,
         onProgress: (message) =>
           ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
       })
@@ -358,9 +363,15 @@ export function createEpicServices(
         throw new Error(
           'Cannot inspect prerequisites before tasks are decomposed.'
         )
+      await assertGitPreflight(state.repositoryRoot)
+      await bootstrapEpicGitignore(state.repositoryRoot)
       const next = {
         ...state,
         prerequisites: await discoverPrerequisites(state.repositoryRoot),
+      }
+      if (!next.checkpoint) {
+        const checkpoint = await createCheckpoint(next.repositoryRoot, next, 'plan', 0, [])
+        next.checkpoint = { kind: 'plan', ordinal: 0, ...checkpoint }
       }
       return next
     },
@@ -391,6 +402,14 @@ export function createEpicServices(
           `Cannot implement missing task at index ${state.currentTaskIndex}.`
         )
       }
+      if (!state.taskBaselineSha) {
+        await assertCleanWorktree(state.repositoryRoot)
+        const { execFile } = await import('node:child_process')
+        const { promisify } = await import('node:util')
+        state = { ...state, taskBaselineSha: String((await promisify(execFile)('git', ['rev-parse', 'HEAD'], { cwd: state.repositoryRoot })).stdout).trim() }
+      }
+      const baselineSha = state.taskBaselineSha
+      if (!baselineSha) throw new Error('Task baseline was not recorded.')
       const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
       const run = await runRole(
         state,
@@ -401,6 +420,7 @@ export function createEpicServices(
       )
       if (run.exitCode !== 0)
         throw new Error(`Implementer failed: ${agentFailure(run)}`)
+      await validateTaskDelta(state.repositoryRoot, baselineSha, task)
       const next = {
         ...state,
         implementationAttempt: state.implementationAttempt + (feedback ? 0 : 1),
@@ -458,6 +478,8 @@ export function createEpicServices(
       if (run.exitCode !== 0)
         throw new Error(`Reviewer failed: ${agentFailure(run)}`)
       const result = parseJsonResponse<ReviewResult>(run.output, 'reviewer')
+      const task = state.tasks?.[state.currentTaskIndex]
+      if (task === undefined) throw new Error('Cannot review without a current task.')
       if (
         typeof result.passed !== 'boolean' ||
         !Array.isArray(result.findings) ||
@@ -466,19 +488,15 @@ export function createEpicServices(
           (criterion) =>
             typeof criterion.criterion !== 'string' ||
             !['met', 'partially_met', 'not_met'].includes(criterion.status)
-        )
+        ) || result.findings.some((finding) => !Array.isArray(finding.repairPaths) || finding.repairPaths.some((repairPath) => typeof repairPath !== 'string' || !task.scope.modify.includes(repairPath)))
       )
-        throw new Error('Reviewer returned an invalid review result.')
+        throw new Error('Reviewer returned invalid or out-of-scope repair feedback.')
       const next = { ...state }
       next.lastReviewResultPath = await persistJsonArtifact(
         next,
         `reviews/review-${String(semanticAttempt + 1).padStart(3, '0')}.json`,
         result
       )
-      const task = next.tasks?.[next.currentTaskIndex]
-      if (task === undefined) {
-        throw new Error('Cannot record a review without a current task.')
-      }
       const criteriaCompleted = result.acceptanceCriteria.filter(
         (criterion) => criterion.status === 'met'
       ).length
@@ -530,6 +548,27 @@ export function createEpicServices(
         { taskId: task.id }
       )
       return state
+    },
+    async checkpointTask(state) {
+      const task = state.tasks?.[state.currentTaskIndex]
+      if (!task || !state.taskBaselineSha)
+        throw new Error('Cannot checkpoint without a current task baseline.')
+      const paths = await validateTaskDelta(
+        state.repositoryRoot,
+        state.taskBaselineSha,
+        task
+      )
+      const checkpoint = await createCheckpoint(
+        state.repositoryRoot,
+        state,
+        'task',
+        state.currentTaskIndex + 1,
+        paths
+      )
+      return {
+        ...state,
+        checkpoint: { kind: 'task', ordinal: state.currentTaskIndex + 1, ...checkpoint },
+      }
     },
   }
 }

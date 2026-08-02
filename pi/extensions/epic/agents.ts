@@ -99,6 +99,7 @@ export interface AgentRunOptions {
   agentRunDirectory: string
   signal?: AbortSignal
   onProgress?: (message: string) => void
+  writablePaths?: string[]
 }
 
 const MAX_STDOUT_DIAGNOSTIC_CHARS = 100_000
@@ -361,7 +362,8 @@ export async function runAgent(
         root,
         invocation.command,
         invocation.args,
-        options.signal
+        options.signal,
+        options.writablePaths
       )
       childCommand = '/bin/bash'
       childArgs = ['-c', sandboxedInvocation]

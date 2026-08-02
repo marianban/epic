@@ -10,6 +10,7 @@ interface AgentActorInput {
   signal?: AbortSignal
   onProgress?: (message: string) => void
   configuration: ResolvedEpicConfiguration
+  writablePaths?: string[]
 }
 
 const agentActor = fromPromise<AgentRunResult, AgentActorInput>(({ input }) =>
@@ -17,6 +18,7 @@ const agentActor = fromPromise<AgentRunResult, AgentActorInput>(({ input }) =>
     agentRunDirectory: input.agentRunDirectory,
     signal: input.signal,
     onProgress: input.onProgress,
+    writablePaths: input.writablePaths,
   }, input.configuration)
 )
 

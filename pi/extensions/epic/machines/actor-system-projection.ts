@@ -18,6 +18,7 @@ const parentStages: Record<string, EpicStage> = {
   idle: 'idle',
   classifying: 'classifying',
   decomposingTasks: 'decomposing_tasks',
+  checkpointing: 'final_verification',
   escalating: 'escalating',
   finalVerification: 'final_verification',
 }
@@ -121,13 +122,6 @@ export function liveTaskChild(parent: Snapshot): LiveTaskChild | undefined {
   const live = child as LiveTaskChild
   assertChildSnapshot(live.getSnapshot())
   return live
-}
-function persistedTaskChild(parent: Snapshot): TaskChildSnapshot | undefined {
-  const child = parent.children?.['task-execution']
-  if (child === undefined) return undefined
-  if (!child || typeof child !== 'object' || !('snapshot' in child))
-    throw new Error('persisted task-execution child is malformed.')
-  return assertChildSnapshot((child as { snapshot: unknown }).snapshot)
 }
 function childSnapshot(parent: Snapshot): TaskChildSnapshot {
   const child = parent.children?.['task-execution'] as { getSnapshot?: () => unknown; snapshot?: unknown } | undefined

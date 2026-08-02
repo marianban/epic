@@ -7,6 +7,7 @@ import {
 } from '@anthropic-ai/sandbox-runtime'
 
 let initializedRoot: string | undefined
+let initializedWritablePaths = ''
 
 export function isImplementerSandboxSupported(
   platform = process.platform
@@ -14,7 +15,7 @@ export function isImplementerSandboxSupported(
   return platform === 'darwin' || platform === 'linux'
 }
 
-function implementerSandboxConfig(root: string): SandboxRuntimeConfig {
+function implementerSandboxConfig(root: string, writablePaths: readonly string[]): SandboxRuntimeConfig {
   const repositoryRoot = path.resolve(root)
   return {
     // sandbox-runtime treats an omitted allowedDomains field as filesystem-only
@@ -31,7 +32,7 @@ function implementerSandboxConfig(root: string): SandboxRuntimeConfig {
         path.join(repositoryRoot, '**', '*.pem'),
         path.join(repositoryRoot, '**', '*.key'),
       ],
-      allowWrite: [repositoryRoot, tmpdir(), getAgentDir()],
+      allowWrite: [...writablePaths.map((file) => path.resolve(repositoryRoot, file)), tmpdir(), getAgentDir()],
       denyWrite: [
         path.join(repositoryRoot, '.git'),
         path.join(repositoryRoot, 'plan.md'),
@@ -63,7 +64,7 @@ function missingDependencyMessage(): string {
   return 'Implementer sandbox requires ripgrep (rg), bubblewrap (bwrap), and socat on Linux.'
 }
 
-async function initializeImplementerSandbox(root: string): Promise<void> {
+async function initializeImplementerSandbox(root: string, writablePaths: readonly string[]): Promise<void> {
   if (!isImplementerSandboxSupported()) {
     throw new Error(
       `Implementer sandbox is only supported on macOS and Linux; native ${process.platform} is unsupported. Run Pi from WSL on Windows.`
@@ -72,6 +73,7 @@ async function initializeImplementerSandbox(root: string): Promise<void> {
 
   if (
     initializedRoot === path.resolve(root) &&
+    initializedWritablePaths === writablePaths.slice().sort().join('\0') &&
     SandboxManager.isSandboxingEnabled()
   )
     return
@@ -80,17 +82,19 @@ async function initializeImplementerSandbox(root: string): Promise<void> {
     throw new Error(missingDependencyMessage())
 
   if (SandboxManager.isSandboxingEnabled()) await SandboxManager.reset()
-  await SandboxManager.initialize(implementerSandboxConfig(root))
+  await SandboxManager.initialize(implementerSandboxConfig(root, writablePaths))
   initializedRoot = path.resolve(root)
+  initializedWritablePaths = writablePaths.slice().sort().join('\0')
 }
 
 export async function wrapImplementerInvocation(
   root: string,
   command: string,
   args: string[],
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  writablePaths: readonly string[] = []
 ): Promise<string> {
-  await initializeImplementerSandbox(root)
+  await initializeImplementerSandbox(root, writablePaths)
   return SandboxManager.wrapWithSandbox(
     quoteProcessInvocation(command, args),
     undefined,

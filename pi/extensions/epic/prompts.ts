@@ -41,7 +41,7 @@ export function implementerTask(
   const task = state.tasks?.[state.currentTaskIndex]
   const humanInstructions = extractReviewInstructions(taskArtifact)
   return [
-    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify plan.md, task artifacts, or .pi/epics. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
+    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify plan.md, task artifacts, or .pi/epics. You may write only scope.create and scope.modify paths; scope.read paths are immutable. Never delete a path unless it is in scope.delete. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
     `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     task
@@ -69,7 +69,7 @@ export function reviewerTask(
 ): string {
   const task = state.tasks?.[state.currentTaskIndex]
   return [
-    'Review only the current task semantically against its acceptance criteria and manual review steps. Do not modify files. Return valid JSON matching the ReviewResult contract from your role prompt.',
+    'Review only the current task semantically against its acceptance criteria and manual review steps. Do not modify files. Every actionable finding must include repairPaths containing only exact current scope.modify paths. Return valid JSON matching the ReviewResult contract from your role prompt.',
     `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     task
@@ -88,7 +88,7 @@ export function taskDecompositionTask(
   plan: string
 ): string {
   return [
-    'Break the approved implementation plan into the smallest independently implementable and reviewable tasks, preserving dependency order. Return JSON only with shape {tasks:[{id,title,objective,scope:{read,modify,create,delete},implementation,acceptanceCriteria,verification,manualReviewSteps,risks,requiredChecks,deferredChecks,reason}]}. For each task, requiredChecks lists checks that must pass before the task advances, deferredChecks lists checks that are intentionally not applicable until a later task, and reason explains the decision. Use stable check names such as install, diff-check, typecheck, lint, focused-tests, tests, build, and fallow. The install check verifies package dependencies using the repository lockfile when present. Deferred checks remain mandatory during final verification; never defer a check without a concrete dependency-based reason.',
+    "Break the approved implementation plan into the smallest independently implementable and reviewable tasks, preserving dependency order. Return JSON only with shape {tasks:[{id,title,objective,scope:{read,modify,create,delete},implementation,acceptanceCriteria,verification,manualReviewSteps,risks,requiredChecks,deferredChecks,reason}]}. For each task, requiredChecks lists checks that must pass before the task advances, deferredChecks lists checks that are intentionally not applicable until a later task, and reason explains the decision. When the approved plan creates project-specific generated output or local tooling artifacts, include a focused task that updates `.gitignore`; put `.gitignore` in that task's scope.modify and derive only the necessary rules from the plan. Use stable check names such as install, diff-check, typecheck, lint, focused-tests, tests, build, and fallow. The install check verifies package dependencies using the repository lockfile when present. Deferred checks remain mandatory during final verification; never defer a check without a concrete dependency-based reason.",
     `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     'Every task must have observable acceptance criteria and concrete manual review steps. Avoid mixing unrelated concerns.',

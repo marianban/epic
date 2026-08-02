@@ -110,6 +110,7 @@ function services(): EpicServices {
       },
     }),
     reviseTask: passthrough,
+    checkpointTask: passthrough,
   }
 }
 
@@ -605,14 +606,14 @@ test('injected timer rejects unsettled dispatches and is cleaned up', async () =
   actor.stop()
 })
 
-test('schema-4 envelope is the sole persisted state and schema 3/6 is rejected', async () => {
+test('schema-5 envelope is the sole persisted state and schema 4/7 is rejected', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-refactor-'))
   const machine = createEpicMachine(services())
   const actor = createActor(machine, { input: { state: domain(root) } })
   actor.start()
   const envelope = {
-    schemaVersion: 4 as const,
-    machineVersion: 7 as const,
+    schemaVersion: 5 as const,
+    machineVersion: 8 as const,
     epicId: 'run-1',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -634,18 +635,18 @@ test('schema-4 envelope is the sole persisted state and schema 3/6 is rejected',
     'updatedAt',
   ])
   const loaded = await loadActiveEpic(root)
-  assert.equal(loaded.schemaVersion, 4)
-  assert.equal(loaded.machineVersion, 7)
+  assert.equal(loaded.schemaVersion, 5)
+  assert.equal(loaded.machineVersion, 8)
   assert.equal(loaded.epicId, envelope.epicId)
-  stored.schemaVersion = 3
-  stored.machineVersion = 6
+  stored.schemaVersion = 4
+  stored.machineVersion = 7
   await fs.writeFile(
     path.join(root, '.pi/epics/runs/run-1/state.json'),
     JSON.stringify(stored)
   )
   await assert.rejects(
     loadActiveEpic(root),
-    /found schema\/machine version 3\/6.*Required schema\/machine version 4\/7/
+    /found schema\/machine version 4\/7.*Required schema\/machine version 5\/8/
   )
   await fs.writeFile(
     path.join(root, '.pi/epics/runs/run-1/state.json'),
@@ -664,8 +665,8 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   })
   actor.start()
   const envelope = {
-    schemaVersion: 4 as const,
-    machineVersion: 7 as const,
+    schemaVersion: 5 as const,
+    machineVersion: 8 as const,
     epicId: current.epicId,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -700,9 +701,9 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   await fs.rm(root, { recursive: true, force: true })
 })
 
-test('machine version constants accept only schema 4/machine 7', () => {
-  assert.equal(EPIC_SCHEMA_VERSION, 4)
-  assert.equal(EPIC_MACHINE_VERSION, 7)
+test('machine version constants accept only schema 5/machine 8', () => {
+  assert.equal(EPIC_SCHEMA_VERSION, 5)
+  assert.equal(EPIC_MACHINE_VERSION, 8)
 })
 
 test('malformed child completion output and reason-less escalation fail explicitly', () => {

@@ -71,6 +71,10 @@ export interface EpicDomainState {
   lastCheckResultPath?: string
   lastReviewResultPath?: string
   lastDiffPath?: string
+  /** Immutable Git commit used to calculate the current task's application delta. */
+  taskBaselineSha?: string
+  /** Most recently created local checkpoint. */
+  checkpoint?: { kind: 'plan' | 'task'; ordinal: number; sha: string; tag: string }
   failureReason?: string
 }
 
@@ -101,8 +105,8 @@ export interface EpicTimer {
 }
 
 export interface PersistedEpicEnvelope extends EpicRunMetadata {
-  schemaVersion: 4
-  machineVersion: 7
+  schemaVersion: 5
+  machineVersion: 8
   snapshot: unknown
 }
 
@@ -266,6 +270,7 @@ export interface ReviewResult {
     message: string
     failureScenario: string
     requiredFix: string
+    repairPaths: string[]
   }[]
   requiresPlanRevision: boolean
 }

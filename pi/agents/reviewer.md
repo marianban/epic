@@ -8,6 +8,6 @@ Return valid JSON only:
 "passed": true,
 "summary": "",
 "acceptanceCriteria": [{"criterion":"","status":"met | partially_met | not_met","evidence":""}],
-"findings": [{"severity":"blocker | major | minor | suggestion","category":"","file":"","lineStart":0,"lineEnd":0,"symbol":"","message":"","failureScenario":"","requiredFix":""}],
+"findings": [{"severity":"blocker | major | minor | suggestion","category":"","file":"","lineStart":0,"lineEnd":0,"symbol":"","message":"","failureScenario":"","requiredFix":"","repairPaths":["exact scope.modify path"]}],
 "requiresPlanRevision": false
 }
