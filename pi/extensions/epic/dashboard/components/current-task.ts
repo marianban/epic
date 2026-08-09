@@ -10,7 +10,14 @@ import type {
   CurrentTaskDashboardState,
   TaskDashboardStatus,
 } from '../types.ts'
-import { framedBottom, framedLine, framedTop } from './panel.ts'
+import {
+  framedBottom,
+  framedLine,
+  framedTop,
+  type PanelStyle,
+} from './panel.ts'
+
+const FOCUSED_TASK_STYLE: PanelStyle = { borderColor: 'borderAccent' }
 
 interface DetailRow {
   readonly label: string
@@ -107,6 +114,8 @@ function renderGrid(
 
 /** Renders the task operation currently owned by the epic workflow. */
 export class CurrentTask implements Component {
+  focused = false
+
   private state: CurrentTaskDashboardState | undefined
   private readonly theme: Theme
   private cachedWidth: number | undefined
@@ -115,6 +124,12 @@ export class CurrentTask implements Component {
   constructor(state: CurrentTaskDashboardState | undefined, theme: Theme) {
     this.state = state
     this.theme = theme
+  }
+
+  setFocused(focused: boolean): void {
+    if (this.focused === focused) return
+    this.focused = focused
+    this.invalidate()
   }
 
   setState(state: CurrentTaskDashboardState | undefined): void {
@@ -173,16 +188,20 @@ export class CurrentTask implements Component {
           ...renderGrid(rows.right, innerWidth, this.theme),
         ]
     const lines = [
-      framedTop(width, 'TASK', this.theme),
-      ...title.map((line) => framedLine(line, width, this.theme)),
-      framedLine(statusLine, width, this.theme),
-      framedLine('', width, this.theme),
-      ...details.map((line) => framedLine(line, width, this.theme)),
-      framedBottom(width, this.theme),
+      framedTop(width, 'TASK', this.theme, this.panelStyle()),
+      ...title.map((line) => framedLine(line, width, this.theme, this.panelStyle())),
+      framedLine(statusLine, width, this.theme, this.panelStyle()),
+      framedLine('', width, this.theme, this.panelStyle()),
+      ...details.map((line) => framedLine(line, width, this.theme, this.panelStyle())),
+      framedBottom(width, this.theme, this.panelStyle()),
     ]
     this.cachedWidth = width
     this.cachedLines = lines
     return lines
+  }
+
+  private panelStyle(): PanelStyle {
+    return this.focused ? FOCUSED_TASK_STYLE : {}
   }
 
   private renderTwoColumns(

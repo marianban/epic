@@ -34,6 +34,7 @@ import {
 import { applyPrerequisites, discoverPrerequisites } from './prerequisites.ts'
 import { runAgentActor } from './machines/actors.ts'
 import { finishAgentRun, startAgentRun } from './agent-activity.ts'
+import { resolveAgentProfile } from './agent-profiles.ts'
 import { getCurrentDiff, summarizeDiff } from './diff.ts'
 import { assertCleanWorktree, assertGitPreflight, bootstrapEpicGitignore, createCheckpoint, validateTaskDelta } from './git-checkpoints.ts'
 import { runCheckSuite } from './checks.ts'
@@ -115,6 +116,8 @@ export function createEpicServices(
     action: string,
     taskId: string | undefined
   ): Promise<AgentRunResult> => {
+    const profile = resolveAgentProfile(role, configuration)
+    const timeoutMs = profile.timeoutMs ?? configuration.agentTimeoutMs
     const agentRunDirectory = path.join(
       state.repositoryRoot,
       '.pi',
@@ -123,90 +126,129 @@ export function createEpicServices(
       state.epicId,
       'agent-runs'
     )
+    const invocationId = randomUUID()
     await appendEvent(
       state,
       getBoundary().stage,
       clock.now(),
       'agent_started',
       {
+        invocationId,
         role,
         action,
         agentRunDirectory,
+        ...(profile.provider === undefined ? {} : { provider: profile.provider }),
+        ...(profile.model === undefined ? {} : { model: profile.model }),
+        ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
         ...(taskId === undefined ? {} : { taskId }),
       }
     )
     notify(`${role} started: ${action}.`)
-    const runId = randomUUID()
     const runStartedAt = clock.nowMs()
     startAgentRun(
-      runId,
+      invocationId,
       state.repositoryRoot,
       state.epicId,
       runStartedAt,
       taskId,
-      role
+      role,
+      action,
+      {
+        ...(profile.provider === undefined ? {} : { provider: profile.provider }),
+        ...(profile.model === undefined ? {} : { model: profile.model }),
+        ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+      }
     )
     let result: AgentRunResult | undefined
     let failure: unknown
-    let failed = false
     try {
-      result = await runAgentActor({
-        repositoryRoot: state.repositoryRoot,
-        agentRunDirectory,
-        role,
-        prompt,
-        signal: ctx.signal,
-        configuration,
-        writablePaths: role === 'implementer'
-          ? [...(state.tasks?.[state.currentTaskIndex]?.scope.create ?? []), ...(state.tasks?.[state.currentTaskIndex]?.scope.modify ?? [])]
-          : undefined,
-        onProgress: (message) =>
-          ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
-      })
-    } catch (error) {
-      failed = true
-      failure = error
-    }
-    const durationMs = Math.max(0, clock.nowMs() - runStartedAt)
-    finishAgentRun(runId)
-    if (failed) {
+      try {
+        result = await runAgentActor({
+          repositoryRoot: state.repositoryRoot,
+          agentRunDirectory,
+          role,
+          prompt,
+          profile,
+          timeoutMs,
+          signal: ctx.signal,
+          writablePaths: role === 'implementer'
+            ? [...(state.tasks?.[state.currentTaskIndex]?.scope.create ?? []), ...(state.tasks?.[state.currentTaskIndex]?.scope.modify ?? [])]
+            : undefined,
+          onProgress: (message) =>
+            ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
+        })
+      } catch (error) {
+        failure = error
+      }
+      const durationMs = Math.max(0, clock.nowMs() - runStartedAt)
+      if (failure !== undefined) {
+        await appendEvent(
+          state,
+          getBoundary().stage,
+          clock.now(),
+          'agent_finished',
+          {
+            invocationId,
+            role,
+            action,
+            ...(taskId === undefined ? {} : { taskId }),
+            ...(profile.provider === undefined ? {} : { provider: profile.provider }),
+            ...(profile.model === undefined ? {} : { model: profile.model }),
+            ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+            exitCode: 1,
+            failureReason:
+              failure instanceof Error ? failure.message : String(failure),
+            durationMs,
+          }
+        )
+        throw failure
+      }
+      if (result === undefined) {
+        const error = new Error(`${role} agent finished without a result.`)
+        await appendEvent(
+          state,
+          getBoundary().stage,
+          clock.now(),
+          'agent_finished',
+          {
+            invocationId,
+            role,
+            action,
+            ...(taskId === undefined ? {} : { taskId }),
+            ...(profile.provider === undefined ? {} : { provider: profile.provider }),
+            ...(profile.model === undefined ? {} : { model: profile.model }),
+            ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+            exitCode: 1,
+            failureReason: error.message,
+            durationMs,
+          }
+        )
+        throw error
+      }
       await appendEvent(
         state,
         getBoundary().stage,
         clock.now(),
         'agent_finished',
         {
+          invocationId,
           role,
           action,
           ...(taskId === undefined ? {} : { taskId }),
-          exitCode: 1,
-          failureReason:
-            failure instanceof Error ? failure.message : String(failure),
+          provider: result.provider ?? profile.provider,
+          model: result.model ?? profile.model,
+          ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+          exitCode: result.exitCode,
+          stdoutLogPath: result.stdoutLogPath,
+          ...(result.failureReason === undefined ? {} : { failureReason: result.failureReason }),
+          ...(result.usage === undefined ? {} : { usage: result.usage }),
           durationMs,
         }
       )
-      throw failure
+      return result
+    } finally {
+      finishAgentRun(invocationId)
     }
-    if (result === undefined) {
-      throw new Error(`${role} agent finished without a result.`)
-    }
-    await appendEvent(
-      state,
-      getBoundary().stage,
-      clock.now(),
-      'agent_finished',
-      {
-        role,
-        action,
-        ...(taskId === undefined ? {} : { taskId }),
-        exitCode: result.exitCode,
-        stdoutLogPath: result.stdoutLogPath,
-        failureReason: result.failureReason,
-        usage: result.usage,
-        durationMs,
-      }
-    )
-    return result
   }
   return {
     ctx,

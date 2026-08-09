@@ -4,10 +4,11 @@ import type {
   Theme,
 } from '@earendil-works/pi-coding-agent'
 import type { Component, TUI } from '@earendil-works/pi-tui'
-import { isKeyRelease, truncateToWidth } from '@earendil-works/pi-tui'
+import { isKeyRelease, parseKey, truncateToWidth } from '@earendil-works/pi-tui'
 import { ActionRequired } from './components/action-required.ts'
 import { CurrentTask } from './components/current-task.ts'
 import { EpicStats } from './components/epic-stats.ts'
+import { Pipeline } from './components/pipeline.ts'
 import { loadActiveDashboardState } from './data.ts'
 import type { DashboardState } from './state.ts'
 import type { DashboardAction } from './types.ts'
@@ -15,7 +16,7 @@ import type { DashboardAction } from './types.ts'
 const EPIC_STATUS_WIDGET_KEY = 'epicstatus'
 export const EPIC_STATUS_REFRESH_INTERVAL_MS = 1_000
 
-type DashboardLoader = (
+export type DashboardLoader = (
   repositoryRoot: string,
   now: string
 ) => Promise<DashboardState | undefined>
@@ -24,7 +25,7 @@ type TerminalInputListener = (
   data: string
 ) => { consume?: boolean; data?: string } | undefined
 
-type RegisterTerminalInput = (handler: TerminalInputListener) => () => void
+export type RegisterTerminalInput = (handler: TerminalInputListener) => () => void
 
 export type EpicStatusActionExecutor = (
   action: DashboardAction,
@@ -36,7 +37,7 @@ export interface EpicStatusWidgetLifecycle {
   hide(ctx: ExtensionContext): void
 }
 
-class EpicStatusWidget implements Component {
+export class EpicStatusWidget implements Component {
   private readonly repositoryRoot: string
   private readonly tui: TUI
   private readonly theme: Theme
@@ -47,6 +48,7 @@ class EpicStatusWidget implements Component {
   private stats: EpicStats | undefined
   private actionRequired: ActionRequired | undefined
   private currentTask: CurrentTask | undefined
+  private pipeline: Pipeline | undefined
   private errorMessage: string | undefined
   private notifiedError: string | undefined
   private refreshInFlight = false
@@ -70,11 +72,50 @@ class EpicStatusWidget implements Component {
     this.notify = notify
     this.executeAction = executeAction
     this.unregisterTerminalInput = registerTerminalInput((data) => {
-      if (this.actionRequired?.focused !== true) return undefined
-      if (isKeyRelease(data)) return { consume: true }
-      return this.actionRequired.handleInput(data)
-        ? { consume: true }
-        : undefined
+      if (this.actionRequired?.focused === true) {
+        if (isKeyRelease(data)) return { consume: true }
+        return this.actionRequired.handleInput(data)
+          ? { consume: true }
+          : undefined
+      }
+      if (isKeyRelease(data)) return undefined
+      const key = parseKey(data)
+      if (key !== 'tab' && key !== 'shift+tab') return undefined
+      if (this.currentTask === undefined && this.pipeline === undefined) {
+        return undefined
+      }
+      if (this.currentTask?.focused === true) {
+        this.currentTask.setFocused(false)
+        this.pipeline?.setFocused(true)
+        this.pipeline?.selectTab(key === 'tab' ? 'agents' : 'models')
+        this.tui.requestRender()
+        return { consume: true }
+      }
+      if (this.pipeline?.focused === true) {
+        const selected = this.pipeline.getSelectedTab()
+        if (
+          (key === 'tab' && selected === 'agents') ||
+          (key === 'shift+tab' && selected === 'models')
+        ) {
+          this.pipeline.handleInput(data)
+        } else if (this.currentTask !== undefined) {
+          this.pipeline.setFocused(false)
+          this.currentTask.setFocused(true)
+        } else {
+          this.pipeline.handleInput(data)
+        }
+        this.tui.requestRender()
+        return { consume: true }
+      }
+      if (this.currentTask !== undefined) {
+        this.currentTask.setFocused(true)
+        this.tui.requestRender()
+        return { consume: true }
+      }
+      this.pipeline?.setFocused(true)
+      this.pipeline?.selectTab(key === 'tab' ? 'agents' : 'models')
+      this.tui.requestRender()
+      return { consume: true }
     })
     if (!Number.isInteger(refreshIntervalMs) || refreshIntervalMs <= 0) {
       throw new Error(
@@ -91,7 +132,8 @@ class EpicStatusWidget implements Component {
     const stats = this.stats?.render(width)
     const actions = this.actionRequired?.render(width) ?? []
     const currentTask = this.currentTask?.render(width) ?? []
-    const panels = [stats ?? [], currentTask, actions].filter(
+    const pipeline = this.pipeline?.render(width) ?? []
+    const panels = [stats ?? [], currentTask, pipeline, actions].filter(
       (panel) => panel.length > 0
     )
     if (panels.length > 0) {
@@ -115,6 +157,7 @@ class EpicStatusWidget implements Component {
     this.stats?.invalidate()
     this.actionRequired?.invalidate()
     this.currentTask?.invalidate()
+    this.pipeline?.invalidate()
   }
 
   dispose(): void {
@@ -122,6 +165,8 @@ class EpicStatusWidget implements Component {
     clearInterval(this.timer)
     this.unregisterTerminalInput()
     this.actionRequired?.setFocused(false)
+    this.currentTask?.setFocused(false)
+    this.pipeline?.setFocused(false)
   }
 
   async refresh(): Promise<void> {
@@ -138,9 +183,11 @@ class EpicStatusWidget implements Component {
       this.notifiedError = undefined
       if (next === undefined) {
         this.stats = undefined
-        this.actionRequired?.setState(undefined)
         this.actionRequired?.setFocused(false)
-        this.currentTask?.setState(undefined)
+        this.actionRequired = undefined
+        this.currentTask?.setFocused(false)
+        this.currentTask = undefined
+        this.pipeline = undefined
       } else if (this.stats === undefined) {
         this.stats = new EpicStats(next, this.theme)
         this.actionRequired = new ActionRequired(
@@ -150,7 +197,14 @@ class EpicStatusWidget implements Component {
         )
         this.actionRequired.setFocused(next.actionRequired !== undefined)
         this.currentTask = new CurrentTask(next.currentTask, this.theme)
+        this.pipeline = new Pipeline(next.pipeline, this.theme)
+        this.currentTask.setFocused(
+          next.actionRequired === undefined && next.currentTask !== undefined
+        )
       } else {
+        const hadCheckpoint = this.actionRequired?.focused === true
+        const hadCurrentFocus = this.currentTask?.focused === true
+        const hadPipelineFocus = this.pipeline?.focused === true
         this.stats.setState(next)
         if (this.actionRequired === undefined) {
           this.actionRequired = new ActionRequired(
@@ -167,15 +221,38 @@ class EpicStatusWidget implements Component {
         } else {
           this.currentTask.setState(next.currentTask)
         }
+        if (this.pipeline === undefined) {
+          this.pipeline = new Pipeline(next.pipeline, this.theme)
+        } else {
+          this.pipeline.setState(next.pipeline)
+        }
+        if (next.actionRequired !== undefined) {
+          this.currentTask.setFocused(false)
+          this.pipeline.setFocused(false)
+        } else if (hadCheckpoint) {
+          this.currentTask.setFocused(next.currentTask !== undefined)
+          this.pipeline.setFocused(false)
+        } else if (hadCurrentFocus) {
+          this.currentTask.setFocused(next.currentTask !== undefined)
+          this.pipeline.setFocused(false)
+        } else if (hadPipelineFocus) {
+          this.currentTask.setFocused(false)
+          this.pipeline.setFocused(true)
+        } else {
+          this.currentTask.setFocused(next.currentTask !== undefined)
+          this.pipeline.setFocused(false)
+        }
       }
       this.invalidate()
       this.tui.requestRender()
     } catch (error) {
       if (this.disposed) return
       this.stats = undefined
-      this.actionRequired?.setState(undefined)
       this.actionRequired?.setFocused(false)
-      this.currentTask?.setState(undefined)
+      this.actionRequired = undefined
+      this.currentTask?.setFocused(false)
+      this.currentTask = undefined
+      this.pipeline = undefined
       this.errorMessage = error instanceof Error ? error.message : String(error)
       if (this.notifiedError !== this.errorMessage) {
         this.notifiedError = this.errorMessage

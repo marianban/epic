@@ -14,3 +14,16 @@ export function formatDuration(durationMs: number): string {
     ? `${pad(minutes)}:${pad(seconds)}`
     : `${pad(hours)}:${pad(minutes)}:${pad(seconds)}`
 }
+
+export function formatTokens(total: number): string {
+  if (!Number.isFinite(total) || total < 0) {
+    throw new Error(`Tokens must be a finite non-negative number: ${total}`)
+  }
+  if (total < 1_000) return String(total)
+  if (total < 1_000_000) {
+    const value = total / 1_000
+    return `${value.toFixed(value < 100 ? 1 : 0).replace(/\.0$/, '')}k`
+  }
+  const value = total / 1_000_000
+  return `${value.toFixed(value < 10 ? 1 : 0).replace(/\.0$/, '')}M`
+}

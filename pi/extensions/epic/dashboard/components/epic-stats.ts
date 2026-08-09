@@ -8,7 +8,7 @@ import type { Theme } from '@earendil-works/pi-coding-agent'
 import { pathToFileURL } from 'node:url'
 import { DashboardState } from '../state.ts'
 import type { EpicDashboardState, ProgressMetric } from '../types.ts'
-import { formatDuration } from '../formatting.ts'
+import { formatDuration, formatTokens } from '../formatting.ts'
 import { framedBottom, framedLine, framedTop } from './panel.ts'
 
 const COMPACT_BREAKPOINT = 80
@@ -19,19 +19,6 @@ const RIGHT_COLUMN_GAP = 2
 interface RightColumnRow {
   readonly label: string
   readonly value: string
-}
-
-function formatTokens(total: number): string {
-  if (!Number.isFinite(total) || total < 0) {
-    throw new Error(`Tokens must be a finite non-negative number: ${total}`)
-  }
-  if (total < 1_000) return String(total)
-  if (total < 1_000_000) {
-    const value = total / 1_000
-    return `${value.toFixed(value < 100 ? 1 : 0).replace(/\.0$/, '')}k`
-  }
-  const value = total / 1_000_000
-  return `${value.toFixed(value < 10 ? 1 : 0).replace(/\.0$/, '')}M`
 }
 
 function progressBar(

@@ -10,81 +10,10 @@ import type {
   AgentRole,
   PlannerContextRequest,
   EpicTask,
-  ResolvedEpicConfiguration,
 } from './types.ts'
 import { createAgentRunStdoutLog } from './agent-runs.ts'
 import { redactSecrets } from './tools.ts'
 import { wrapImplementerInvocation } from './implementer-sandbox.ts'
-
-const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
-  orchestrator: {
-    role: 'orchestrator',
-    systemPromptPath: '.pi/agents/orchestrator.md',
-    tools: [],
-    readOnly: true,
-  },
-  scout: {
-    role: 'scout',
-    systemPromptPath: '.pi/agents/scout.md',
-    tools: ['read', 'grep', 'find', 'ls', 'bash'],
-    readOnly: true,
-    temperature: 0.1,
-    thinking: 'low',
-  },
-  planner: {
-    role: 'planner',
-    systemPromptPath: '.pi/agents/planner.md',
-    tools: ['read', 'grep', 'find', 'ls'],
-    readOnly: true,
-    temperature: 0.1,
-    thinking: 'high',
-  },
-  'plan-reviewer': {
-    role: 'plan-reviewer',
-    systemPromptPath: '.pi/agents/plan-reviewer.md',
-    tools: ['read', 'grep', 'find', 'ls'],
-    readOnly: true,
-    temperature: 0.1,
-    thinking: 'low',
-  },
-  'task-reviewer': {
-    role: 'task-reviewer',
-    systemPromptPath: '.pi/agents/task-reviewer.md',
-    tools: ['read', 'grep', 'find', 'ls'],
-    readOnly: true,
-    temperature: 0.1,
-    thinking: 'low',
-  },
-  implementer: {
-    role: 'implementer',
-    systemPromptPath: '.pi/agents/implementer.md',
-    tools: ['read', 'grep', 'find', 'ls', 'bash', 'edit', 'write'],
-    readOnly: false,
-    temperature: 0.1,
-    thinking: 'high',
-  },
-  reviewer: {
-    role: 'reviewer',
-    systemPromptPath: '.pi/agents/reviewer.md',
-    tools: ['read', 'grep', 'find', 'ls', 'bash'],
-    readOnly: true,
-    temperature: 0.1,
-    thinking: 'high',
-  },
-}
-
-function getAgentProfile(role: AgentRole, configuration: ResolvedEpicConfiguration): AgentProfile {
-  const override = configuration.agents[role] ?? {}
-  const base = DEFAULT_AGENT_PROFILES[role]
-  return {
-    ...base,
-    ...override,
-    role,
-    systemPromptPath: override.systemPromptPath ?? base.systemPromptPath,
-    tools: override.tools ?? base.tools,
-    readOnly: override.readOnly ?? base.readOnly,
-  }
-}
 
 export interface AgentRunResult {
   role: AgentRole
@@ -94,12 +23,15 @@ export interface AgentRunResult {
   stdoutLogPath: string
   failureReason?: string
   usage?: Record<string, unknown>
+  provider?: string
+  model?: string
 }
 export interface AgentRunOptions {
   agentRunDirectory: string
   signal?: AbortSignal
   onProgress?: (message: string) => void
   writablePaths?: string[]
+  timeoutMs: number
 }
 
 const MAX_STDOUT_DIAGNOSTIC_CHARS = 100_000
@@ -163,11 +95,49 @@ function assistantText(event: Record<string, unknown>): string | undefined {
   return output || undefined
 }
 
+interface AssistantIdentity {
+  readonly provider?: string
+  readonly model?: string
+}
+
+function assistantIdentity(
+  message: Record<string, unknown>
+): AssistantIdentity | undefined {
+  if (message.role !== 'assistant') return undefined
+  const provider = message.provider
+  const model = message.model
+  if (provider === undefined && model === undefined) return undefined
+  if (
+    (provider !== undefined &&
+      (typeof provider !== 'string' || provider.length === 0)) ||
+    (model !== undefined &&
+      (typeof model !== 'string' || model.length === 0))
+  ) {
+    throw new Error('Assistant message has invalid provider/model metadata.')
+  }
+  return {
+    ...(provider === undefined ? {} : { provider }),
+    ...(model === undefined ? {} : { model }),
+  }
+}
+
+function assistantMessages(event: Record<string, unknown>): Record<string, unknown>[] {
+  if (event.type === 'message_end' && isRecord(event.message)) {
+    return [event.message]
+  }
+  if (event.type === 'agent_end' && Array.isArray(event.messages)) {
+    return event.messages.filter(isRecord)
+  }
+  return []
+}
+
 export interface AgentOutputSummary {
   output: string
   diagnosticTail: string
   failureReason?: string
   usage?: Record<string, unknown>
+  provider?: string
+  model?: string
 }
 
 function protocolFailureReason(
@@ -197,6 +167,8 @@ export class AgentOutputCollector {
   private diagnosticTail = ''
   private failureReason: string | undefined
   private usage: Record<string, unknown> | undefined
+  private provider: string | undefined
+  private model: string | undefined
 
   append(chunk: Buffer): void {
     const text = chunk.toString('utf8')
@@ -219,6 +191,8 @@ export class AgentOutputCollector {
       diagnosticTail: this.diagnosticTail,
       failureReason: this.failureReason,
       usage: this.usage,
+      provider: this.provider,
+      model: this.model,
     }
   }
 
@@ -261,6 +235,31 @@ export class AgentOutputCollector {
     }
     for (const usage of usageRecords(event))
       this.usage = mergeUsage(this.usage, usage)
+
+    for (const message of assistantMessages(event)) {
+      const identity = assistantIdentity(message)
+      if (identity === undefined) continue
+      if (
+        this.provider !== undefined &&
+        identity.provider !== undefined &&
+        this.provider !== identity.provider
+      ) {
+        throw new Error(
+          `Agent reported inconsistent provider identity: ${this.provider} and ${identity.provider}.`
+        )
+      }
+      if (
+        this.model !== undefined &&
+        identity.model !== undefined &&
+        this.model !== identity.model
+      ) {
+        throw new Error(
+          `Agent reported inconsistent model identity: ${this.model} and ${identity.model}.`
+        )
+      }
+      this.provider ??= identity.provider
+      this.model ??= identity.model
+    }
   }
 }
 
@@ -317,9 +316,13 @@ export async function runAgent(
   role: AgentRole,
   userPrompt: string,
   options: AgentRunOptions,
-  configuration: ResolvedEpicConfiguration
+  profile: AgentProfile
 ): Promise<AgentRunResult> {
-  const profile = getAgentProfile(role, configuration)
+  if (profile.role !== role) {
+    throw new Error(
+      `Agent profile role ${profile.role} does not match invocation role ${role}.`
+    )
+  }
   const systemPrompt = await readPrompt(root, profile.systemPromptPath)
   // The guard belongs to the loaded extension package, not necessarily to the
   // target repository. This allows `pi -e /path/to/epic/index.ts` to run
@@ -351,7 +354,10 @@ export async function runAgent(
     mode: 0o600,
   })
   args.push('--append-system-prompt', promptPath, userPrompt)
-  const timeoutMs = profile.timeoutMs ?? configuration.agentTimeoutMs
+  const timeoutMs = options.timeoutMs
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0) {
+    throw new Error(`Agent timeout must be a positive integer: ${timeoutMs}`)
+  }
   const invocation = getPiInvocation(args)
   let childCommand = invocation.command
   let childArgs = invocation.args
@@ -444,7 +450,14 @@ export async function runAgent(
     child.on('close', (exitCode) => {
       if (settled) return
       settled = true
-      const output = outputCollector.finish()
+      let output: AgentOutputSummary
+      try {
+        output = outputCollector.finish()
+      } catch (error) {
+        cleanup()
+        reject(error instanceof Error ? error : new Error(String(error)))
+        return
+      }
       cleanup()
       const failureReason = output.failureReason
       resolve({
@@ -455,6 +468,8 @@ export async function runAgent(
         stdoutLogPath: stdoutLog.filePath,
         failureReason: failureReason ? redactSecrets(failureReason) : undefined,
         usage: output.usage,
+        provider: output.provider,
+        model: output.model,
       })
     })
   })

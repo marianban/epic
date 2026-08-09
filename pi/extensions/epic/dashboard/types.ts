@@ -1,4 +1,5 @@
 import type {
+  AgentProfile,
   EpicBoundaryView,
   EpicDomainState,
   EpicEvent,
@@ -6,9 +7,14 @@ import type {
 } from '../types.ts'
 
 export interface ActiveAgentRun {
+  readonly invocationId: string
   readonly startedAtMs: number
+  readonly role: string
+  readonly action: string
   readonly taskId?: string
-  readonly role?: string
+  readonly provider?: string
+  readonly model?: string
+  readonly thinking?: NonNullable<AgentProfile['thinking']>
 }
 
 export type EpicDashboardStatus =
@@ -33,6 +39,39 @@ export interface TokenUsage {
   readonly output?: number
   readonly cached?: number
   readonly reasoning?: number
+}
+
+export type PipelineAgentStatus =
+  | 'idle'
+  | 'running'
+  | 'failed'
+
+export interface PipelineAgentDashboardState {
+  readonly role: string
+  readonly provider?: string
+  readonly model?: string
+  readonly thinking?: AgentProfile['thinking']
+  readonly status: PipelineAgentStatus
+  readonly runCount: number
+  readonly agentTimeMs: number
+  readonly tokens?: TokenUsage
+}
+
+export interface PipelineModelDashboardState {
+  readonly id: string
+  readonly provider?: string
+  readonly model?: string
+  readonly thinkingLevels: readonly NonNullable<AgentProfile['thinking']>[]
+  readonly roles: readonly string[]
+  readonly status: PipelineAgentStatus
+  readonly runCount: number
+  readonly agentTimeMs: number
+  readonly tokens?: TokenUsage
+}
+
+export interface PipelineDashboardState {
+  readonly agents: readonly PipelineAgentDashboardState[]
+  readonly models: readonly PipelineModelDashboardState[]
 }
 
 export type TaskDashboardStatus =
@@ -100,6 +139,7 @@ export interface DashboardProjectionInput {
   readonly metadata: EpicRunMetadata
   readonly boundary: EpicBoundaryView
   readonly events: readonly EpicEvent[]
+  readonly agentProfiles: readonly AgentProfile[]
   readonly activeAgentRuns?: readonly ActiveAgentRun[]
   readonly activeOperation?: boolean
   readonly completedAt?: string
@@ -108,6 +148,7 @@ export interface DashboardProjectionInput {
 
 export interface DashboardProjection {
   readonly epic: EpicDashboardState
+  readonly pipeline: PipelineDashboardState
   readonly actionRequired?: DashboardActionRequest
   readonly currentTask?: CurrentTaskDashboardState
 }

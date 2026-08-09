@@ -12,6 +12,7 @@ import { validateTaskExecutionResult } from '../pi/extensions/epic/machines/epic
 import { parsePersistedEpicEnvelope } from '../pi/extensions/epic/persistence.ts'
 import { parseRepairAttempts } from '../pi/extensions/epic/machines/actor-system-projection.ts'
 import { activeAgentRuns, finishAgentRun, startAgentRun } from '../pi/extensions/epic/agent-activity.ts'
+import { resolveAgentProfile, resolveAgentProfiles } from '../pi/extensions/epic/agent-profiles.ts'
 import { currentTaskArtifactPath } from '../pi/extensions/epic/artifact-paths.ts'
 import { isImplementerSandboxSupported, quoteProcessInvocation } from '../pi/extensions/epic/implementer-sandbox.ts'
 import { formatDuration } from '../pi/extensions/epic/dashboard/formatting.ts'
@@ -19,7 +20,7 @@ import { extractReviewInstructions, hashPlan, validatePlanCompleteness } from '.
 import { humanContinuation } from '../pi/extensions/epic/human-actions.ts'
 import { discoverPrerequisites, packageInstallCommand } from '../pi/extensions/epic/prerequisites.ts'
 import { assertRepositoryPath, isSafeReadOnlyCommand, redactSecrets } from '../pi/extensions/epic/tools.ts'
-import type { EpicDomainState } from '../pi/extensions/epic/types.ts'
+import type { AgentRole, EpicDomainState, ResolvedEpicConfiguration } from '../pi/extensions/epic/types.ts'
 
 function domain(root: string): EpicDomainState {
   return { epicId: 'run', epic: 'test', repositoryRoot: root, epicComplexity: 'moderate', scoutRound: 0, maxScoutRounds: 3, planPath: `${root}/plan.md`, planRevision: 0, planApproved: false, currentTaskIndex: 0, taskApproved: false, implementationAttempt: 0, maxFastRepairs: 2, maxFullRepairs: 1, maxSemanticRepairs: 2 }
@@ -91,6 +92,37 @@ test('agent output collector reports protocol failures independently of process 
   const collector = new AgentOutputCollector()
   collector.append(Buffer.from(`${JSON.stringify({ type: 'agent_end', errorMessage: 'provider unavailable' })}\n`))
   assert.equal(collector.finish().failureReason, 'provider unavailable')
+})
+
+test('agent profiles merge defaults and partial overrides into a complete canonical collection', () => {
+  const configuration = {
+    agents: { scout: { model: 'scout-model' } },
+  } as ResolvedEpicConfiguration
+  assert.equal(resolveAgentProfile('scout', configuration).thinking, 'low')
+  assert.equal(resolveAgentProfile('scout', configuration).model, 'scout-model')
+  const roles = resolveAgentProfiles(configuration).map((profile) => profile.role)
+  const expected: AgentRole[] = [
+    'orchestrator',
+    'scout',
+    'planner',
+    'implementer',
+    'reviewer',
+    'plan-reviewer',
+    'task-reviewer',
+  ]
+  assert.deepEqual(roles, expected)
+})
+
+test('agent output collector captures Pi identity and rejects identity changes', () => {
+  const collector = new AgentOutputCollector()
+  collector.append(Buffer.from(`${JSON.stringify({ type: 'message_end', message: { role: 'assistant', provider: 'openai', model: 'model-a', content: [{ type: 'text', text: 'done' }] } })}\n`))
+  const result = collector.finish()
+  assert.equal(result.provider, 'openai')
+  assert.equal(result.model, 'model-a')
+
+  const inconsistent = new AgentOutputCollector()
+  inconsistent.append(Buffer.from('{"type":"message_end","message":{"role":"assistant","provider":"openai","model":"model-a","content":[]}}\n'))
+  assert.throws(() => inconsistent.append(Buffer.from('{"type":"message_end","message":{"role":"assistant","provider":"openai","model":"model-b","content":[]}}\n')), /inconsistent model identity/)
 })
 
 test('task decomposition parser requires independently reviewable task fields', () => {

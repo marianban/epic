@@ -28,6 +28,7 @@ import {
   type ProgressMetric,
   type TokenUsage,
 } from './types.ts'
+import { projectPipelineState } from './pipeline-projection.ts'
 
 const STAGE_STATUS: Record<EpicStage, EpicDashboardStatus> = {
   idle: 'in-progress',
@@ -149,8 +150,8 @@ function linkedFile(filePath: string, label: string): string {
 
 function planMessage(state: DashboardRunState): string {
   const verb = state.planRevision > 1 ? 'refined' : 'created'
-  const plan = linkedFile(state.planPath, `plan.md has been ${verb}`)
-  return `${plan}. Comments marked with R: will be refined.`
+  const plan = linkedFile(state.planPath, 'plan.md')
+  return `${plan} has been ${verb}. Comments marked with R: will be refined.`
 }
 
 function taskMessage(state: DashboardRunState): string {
@@ -700,6 +701,12 @@ export function projectDashboardState(
 
   return {
     epic,
+    pipeline: projectPipelineState(
+      input.events,
+      input.activeAgentRuns ?? [],
+      input.agentProfiles,
+      nowMs
+    ),
     actionRequired: actionRequired(state, input.activeOperation === true),
     currentTask: currentTask(input, state, tasks, nowMs),
   }

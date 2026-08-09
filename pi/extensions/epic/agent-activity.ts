@@ -1,35 +1,53 @@
+import type { AgentProfile } from './types.ts'
+
 export interface ActiveAgentRun {
   readonly repositoryRoot: string
   readonly epicId: string
+  readonly invocationId: string
   readonly startedAtMs: number
+  readonly role: string
+  readonly action: string
   readonly taskId?: string
-  readonly role?: string
+  readonly provider?: string
+  readonly model?: string
+  readonly thinking?: NonNullable<AgentProfile['thinking']>
 }
 
 const activeRuns = new Map<string, ActiveAgentRun>()
 
 export function startAgentRun(
-  runId: string,
+  invocationId: string,
   repositoryRoot: string,
   epicId: string,
   startedAtMs: number,
   taskId: string | undefined,
-  role: string
+  role: string,
+  action = 'unknown',
+  metadata: {
+    readonly provider?: string
+    readonly model?: string
+    readonly thinking?: NonNullable<AgentProfile['thinking']>
+  } = {}
 ): void {
-  if (activeRuns.has(runId)) {
-    throw new Error(`Agent run ${runId} is already active.`)
+  if (activeRuns.has(invocationId)) {
+    throw new Error(`Agent run ${invocationId} is already active.`)
   }
-  activeRuns.set(runId, {
+  activeRuns.set(invocationId, {
     repositoryRoot,
     epicId,
+    invocationId,
     startedAtMs,
     ...(taskId === undefined ? {} : { taskId }),
     role,
+    action,
+    ...(metadata.provider === undefined ? {} : { provider: metadata.provider }),
+    ...(metadata.model === undefined ? {} : { model: metadata.model }),
+    ...(metadata.thinking === undefined ? {} : { thinking: metadata.thinking }),
   })
 }
 
-export function finishAgentRun(runId: string): void {
-  activeRuns.delete(runId)
+export function finishAgentRun(invocationId: string): void {
+  activeRuns.delete(invocationId)
 }
 
 export function activeAgentRuns(
