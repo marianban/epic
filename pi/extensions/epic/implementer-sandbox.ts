@@ -32,7 +32,11 @@ function implementerSandboxConfig(root: string, writablePaths: readonly string[]
         path.join(repositoryRoot, '**', '*.pem'),
         path.join(repositoryRoot, '**', '*.key'),
       ],
-      allowWrite: [...writablePaths.map((file) => path.resolve(repositoryRoot, file)), tmpdir(), getAgentDir()],
+      // The implementer works in the repository as a whole. Task paths still
+      // describe the intended change and are validated after the run, but
+      // they cannot be the sandbox's filesystem boundary because normal
+      // workflows create derived files and directories such as node_modules.
+      allowWrite: [repositoryRoot, ...writablePaths.map((file) => path.resolve(repositoryRoot, file)), tmpdir(), getAgentDir()],
       denyWrite: [
         path.join(repositoryRoot, '.git'),
         path.join(repositoryRoot, 'plan.md'),
