@@ -39,7 +39,6 @@ function implementerSandboxConfig(root: string, writablePaths: readonly string[]
       allowWrite: [repositoryRoot, ...writablePaths.map((file) => path.resolve(repositoryRoot, file)), tmpdir(), getAgentDir()],
       denyWrite: [
         path.join(repositoryRoot, '.git'),
-        path.join(repositoryRoot, 'plan.md'),
         path.join(repositoryRoot, '.pi', 'epics'),
         path.join(repositoryRoot, '.env'),
         path.join(repositoryRoot, '.env.*'),

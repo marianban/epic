@@ -44,8 +44,11 @@ test('getCurrentDiff includes untracked files alongside tracked changes', async 
 
     await writeFile(join(root, 'tracked.txt'), 'before\nafter\n')
     await writeFile(join(root, 'untracked.txt'), 'new\nfile\n')
-    await writeFile(join(root, 'plan.md'), 'workflow plan\n')
-    await mkdir(join(root, '.pi', 'epics'), { recursive: true })
+    await mkdir(join(root, '.pi', 'epics', 'runs', 'run-1'), { recursive: true })
+    await writeFile(
+      join(root, '.pi', 'epics', 'runs', 'run-1', 'plan.md'),
+      'workflow plan\n'
+    )
     await writeFile(join(root, '.pi', 'epics', 'state.json'), '{}\n')
 
     const summary = summarizeDiff(await getCurrentDiff(root))

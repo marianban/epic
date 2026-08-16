@@ -140,7 +140,7 @@ export async function resolveGitCommit(root: string, revision: string): Promise<
 export async function inspectApplicationWorktree(root: string): Promise<ApplicationWorktreeStatus> {
   const [headSha, rawStatus] = await Promise.all([
     resolveGitCommit(root, 'HEAD'),
-    git(root, ['status', '--porcelain=v1', '-z']),
+    git(root, ['status', '--porcelain=v1', '--untracked-files=all', '-z']),
   ])
   const changes = parsePorcelainStatus(rawStatus)
     .flatMap(classifyPorcelainEntry)
@@ -205,7 +205,7 @@ export async function createCheckpoint(root: string, state: EpicDomainState, kin
   await assertGitPreflight(root)
   const allowlist = [
     ...applicationPaths,
-    ...(kind === 'plan' ? ['plan.md', '.gitignore'] : []),
+    ...(kind === 'plan' ? ['.gitignore'] : []),
     '.pi/epic.config.json', '.pi/epic.config.local.json', '.pi/epics/active.json', `.pi/epics/runs/${state.epicId}`,
   ]
   const existing = await Promise.all(allowlist.map(async (file) => { try { await fs.lstat(path.join(root, file)); return file } catch { return undefined } }))

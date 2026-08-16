@@ -46,7 +46,7 @@ function commandError(error: unknown): {
 }
 
 function isEpicManagedPath(filePath: string): boolean {
-  return filePath === 'plan.md' || filePath.startsWith('.pi/epics/')
+  return filePath.startsWith('.pi/epics/')
 }
 
 async function getUntrackedPaths(repositoryRoot: string): Promise<string[]> {

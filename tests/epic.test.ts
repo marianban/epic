@@ -29,7 +29,7 @@ function domain(root = '/repo'): EpicDomainState {
     epicComplexity: 'moderate',
     scoutRound: 0,
     maxScoutRounds: 3,
-    planPath: `${root}/plan.md`,
+    planPath: path.join(root, '.pi', 'epics', 'runs', 'run-1', 'plan.md'),
     planRevision: 0,
     planApproved: true,
     currentTaskIndex: 0,

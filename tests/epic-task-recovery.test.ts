@@ -84,8 +84,10 @@ async function fixture(): Promise<{
   await git(root, ['config', 'user.email', 'epic-test@example.com'])
   await bootstrapEpicGitignore(root)
   const plan = '# Approved plan\n'
-  await fs.writeFile(path.join(root, 'plan.md'), plan)
-  await git(root, ['add', 'plan.md', '.gitignore'])
+  const runDirectory = path.join(root, '.pi', 'epics', 'runs', 'run-1')
+  await fs.mkdir(runDirectory, { recursive: true })
+  await fs.writeFile(path.join(runDirectory, 'plan.md'), plan)
+  await git(root, ['add', runDirectory, '.gitignore'])
   await git(root, ['commit', '-m', 'plan checkpoint'])
   const checkpointSha = await gitOutput(root, ['rev-parse', 'HEAD'])
   const checkpointTag = 'pi-epic/run-1/plan/checkpoint'
@@ -99,7 +101,7 @@ async function fixture(): Promise<{
     epicComplexity: 'simple',
     scoutRound: 0,
     maxScoutRounds: 3,
-    planPath: path.join(root, 'plan.md'),
+    planPath: path.join(runDirectory, 'plan.md'),
     planRevision: 1,
     planApproved: true,
     approvedPlanHash: hashPlan(plan),

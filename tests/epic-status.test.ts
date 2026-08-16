@@ -22,7 +22,7 @@ test('dashboard reads stage from the persisted actor snapshot', async () => {
     epicComplexity: 'simple',
     scoutRound: 0,
     maxScoutRounds: 1,
-    planPath: `${root}/plan.md`,
+    planPath: path.join(root, '.pi', 'epics', 'runs', 'run', 'plan.md'),
     planRevision: 0,
     planApproved: false,
     currentTaskIndex: 0,

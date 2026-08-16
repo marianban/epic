@@ -41,7 +41,7 @@ export function implementerTask(
   const task = state.tasks?.[state.currentTaskIndex]
   const humanInstructions = extractReviewInstructions(taskArtifact)
   return [
-    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify plan.md, task artifacts, or .pi/epics. You may write only scope.create and scope.modify paths; scope.read paths are immutable. Never delete a path unless it is in scope.delete. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
+    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify the run plan, task artifacts, or .pi/epics. You may write only scope.create and scope.modify paths; scope.read paths are immutable. Never delete a path unless it is in scope.delete. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
     `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     task
@@ -101,7 +101,7 @@ export function taskReviewTask(
   instructions: PlanReviewInstruction[]
 ): string {
   return [
-    'Revise only the current task artifact in response to every human R: instruction. Do not modify application code, plan.md, or epic state. Preserve unaffected task details, including the check policy, update scope, implementation, acceptance criteria, verification, manual review steps, and risks consistently, remove handled R: lines, and return the complete task Markdown only.',
+    'Revise only the current task artifact in response to every human R: instruction. Do not modify application code, the run plan, or epic state. Preserve unaffected task details, including the check policy, update scope, implementation, acceptance criteria, verification, manual review steps, and risks consistently, remove handled R: lines, and return the complete task Markdown only.',
     `Epic:\n${state.epic}`,
     `Current task artifact:\n${taskMarkdown}`,
     `Human R: instructions:\n${instructions.map((item) => `- line ${item.lineNumber}: ${item.text}`).join('\n')}`,

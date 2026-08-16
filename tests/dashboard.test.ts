@@ -20,7 +20,7 @@ function domain(): EpicDomainState {
     epicComplexity: 'simple',
     scoutRound: 0,
     maxScoutRounds: 3,
-    planPath: '/repo/plan.md',
+    planPath: '/repo/.pi/epics/runs/run/plan.md',
     planRevision: 1,
     planApproved: true,
     currentTaskIndex: 0,
@@ -111,6 +111,10 @@ test('plan checkpoint links only plan.md', () => {
     now: '2026-01-01T02:00:00.000Z',
   })
   const message = waiting.actionRequired?.message
-  assert.ok(message?.startsWith('\u001b]8;;file:///repo/plan.md\u001b\\plan.md'))
+  assert.ok(
+    message?.startsWith(
+      '\u001b]8;;file:///repo/.pi/epics/runs/run/plan.md\u001b\\plan.md'
+    )
+  )
   assert.ok(message?.includes('\u001b]8;;\u001b\\ has been created.'))
 })

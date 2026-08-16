@@ -37,7 +37,14 @@ function domain(repositoryRoot: string): EpicDomainState {
     epicComplexity: 'simple',
     scoutRound: 0,
     maxScoutRounds: 3,
-    planPath: path.join(repositoryRoot, 'plan.md'),
+    planPath: path.join(
+      repositoryRoot,
+      '.pi',
+      'epics',
+      'runs',
+      'run-1',
+      'plan.md'
+    ),
     planRevision: 1,
     planApproved: false,
     currentTaskIndex: 0,

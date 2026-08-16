@@ -32,8 +32,7 @@ export function assertRepositoryPath(
     throw new Error(`Access to sensitive path is blocked: ${candidate}`)
   if (
     !allowPlan &&
-    (resolved === path.join(root, 'plan.md') ||
-      resolved.startsWith(path.join(root, '.pi', 'epics')))
+    resolved.startsWith(path.join(root, '.pi', 'epics'))
   ) {
     throw new Error(`Epic-managed path is protected: ${candidate}`)
   }
@@ -100,7 +99,7 @@ export default function epicToolGuard(pi: ExtensionAPI): void {
           block: true,
           reason: `${role} may only run read-only commands.`,
         }
-      if (/plan\.md|\.pi[/\\]epics/i.test(command))
+      if (/\.pi[/\\]epics/i.test(command))
         return {
           block: true,
           reason: 'Epic-managed files cannot be changed by an agent.',

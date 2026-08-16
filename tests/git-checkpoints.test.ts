@@ -103,6 +103,34 @@ test('task delta validates staged, unstaged, and untracked scoped creates', asyn
   }
 })
 
+test('task delta validates nested untracked files against file-level create scope', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-delta-'))
+  try {
+    await git(root, ['init'])
+    await git(root, ['config', 'user.name', 'Epic Test'])
+    await git(root, ['config', 'user.email', 'epic-test@example.com'])
+    await fs.writeFile(path.join(root, 'README.md'), 'initial\n')
+    await git(root, ['add', 'README.md'])
+    await git(root, ['commit', '-m', 'initial'])
+    const baseline = await gitOutput(root, ['rev-parse', 'HEAD'])
+
+    await fs.mkdir(path.join(root, 'src', 'game'), { recursive: true })
+    await fs.writeFile(path.join(root, 'src', 'main.js'), 'export {}\n')
+    await fs.writeFile(path.join(root, 'src', 'game', 'ArkanoidScene.js'), 'export {}\n')
+
+    assert.deepEqual(
+      (await validateTaskDelta(
+        root,
+        baseline,
+        scopedTask({ create: ['src/main.js', 'src/game/ArkanoidScene.js'] })
+      )).sort(),
+      ['src/game/ArkanoidScene.js', 'src/main.js']
+    )
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 test('task delta rejects a moved HEAD and out-of-scope application paths', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-delta-'))
   try {

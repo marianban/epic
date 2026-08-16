@@ -23,7 +23,7 @@ import { assertRepositoryPath, isSafeReadOnlyCommand, redactSecrets } from '../p
 import type { AgentRole, EpicDomainState, ResolvedEpicConfiguration } from '../pi/extensions/epic/types.ts'
 
 function domain(root: string): EpicDomainState {
-  return { epicId: 'run', epic: 'test', repositoryRoot: root, epicComplexity: 'moderate', scoutRound: 0, maxScoutRounds: 3, planPath: `${root}/plan.md`, planRevision: 0, planApproved: false, currentTaskIndex: 0, taskApproved: false, implementationAttempt: 0, maxFastRepairs: 2, maxFullRepairs: 1, maxSemanticRepairs: 2 }
+  return { epicId: 'run', epic: 'test', repositoryRoot: root, epicComplexity: 'moderate', scoutRound: 0, maxScoutRounds: 3, planPath: path.join(root, '.pi', 'epics', 'runs', 'run', 'plan.md'), planRevision: 0, planApproved: false, currentTaskIndex: 0, taskApproved: false, implementationAttempt: 0, maxFastRepairs: 2, maxFullRepairs: 1, maxSemanticRepairs: 2 }
 }
 
 test('review instructions retain line numbers across Windows line endings', () => {

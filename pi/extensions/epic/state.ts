@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import * as path from 'node:path'
 import type { EpicDomainState, EpicRunMetadata, ResolvedEpicConfiguration } from './types.ts'
 
 export function createEpicState(
@@ -16,7 +17,14 @@ export function createEpicState(
       epicComplexity: 'moderate',
       scoutRound: 0,
       maxScoutRounds: configuration.maxScoutRounds,
-      planPath: `${repositoryRoot}/plan.md`,
+      planPath: path.join(
+        repositoryRoot,
+        '.pi',
+        'epics',
+        'runs',
+        epicId,
+        'plan.md'
+      ),
       planRevision: 0,
       planApproved: false,
       currentTaskIndex: 0,

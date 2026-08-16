@@ -2,7 +2,7 @@
 
 This project-local extension provides one sequential, human-gated epic:
 
-`/epic` → Scout → Planner → `plan.md` review → approval → task decomposition → prerequisite check/approval → (human task review/approval → Implementer → deterministic checks → Reviewer → post-implementation human task review) for each task → final verification.
+`/epic` → Scout → Planner → run-scoped `plan.md` review → approval → task decomposition → prerequisite check/approval → (human task review/approval → Implementer → deterministic checks → Reviewer → post-implementation human task review) for each task → final verification.
 
 ## Installation
 
@@ -24,7 +24,7 @@ The initial Scout is not necessarily the only discovery pass. A Planner may retu
 
 ## Commands
 
-- `/epic <epic>` starts one epic, writes `Epic.md`, and always pauses after writing `plan.md`.
+- `/epic <epic>` starts one epic, writes the run's `Epic.md`, and always pauses after writing its run-scoped `plan.md`.
 - `/epic-status` shows persisted state and the pending human action.
 - `/epic-resume` resumes safe in-progress work or retries a failed pre-plan run as a new audited run.
 - `/epic-exit` hides the Epic widgets without changing persisted Epic state.
@@ -41,7 +41,7 @@ After approval, the Planner writes a persisted task manifest and one artifact pe
 
 ## Persistence and checks
 
-Runs are stored under `.pi/epics/runs/<epic-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `epic.log`, per-invocation raw stdout files under `agent-runs/`, `Epic.md`, task, and plan revisions. Agent stdout is written incrementally to a new private file for every role invocation so it remains available if the parent process crashes. `.pi/epics/` is ignored; `plan.md` is intentionally not ignored.
+Runs are stored under `.pi/epics/runs/<epic-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `epic.log`, per-invocation raw stdout files under `agent-runs/`, `Epic.md`, the active `plan.md`, task artifacts, and plan revisions. Agent stdout is written incrementally to a new private file for every role invocation so it remains available if the parent process crashes. `.pi/epics/` owns all run artifacts, including the active plan.
 
 `state.json` contains a versioned hierarchical XState persisted snapshot together with durable epic context and artifact references. The current schema/machine version is `3/6`. Older or malformed snapshots, including snapshots from before this domain rename and snapshots from machine version `5`, are reported as incompatible and are not silently migrated; start a new epic unless an explicit migration is added later.
 
@@ -53,4 +53,4 @@ Fast, full, semantic-repair, and final-verification stages are persisted indepen
 
 ## Security boundaries
 
-The extension rejects paths outside the repository and sensitive paths such as `.env`, SSH keys, credentials, and token files. Scout, Planner, and Reviewer cannot write; the Implementer may write repository files but cannot write `plan.md`, epic state, or `.git`. Implementer processes are sandboxed with macOS `sandbox-exec` or Linux `bubblewrap`; writes are limited to the repository, temporary files, and Pi's global agent directory (needed for Pi settings and credential lock files), while network access is unrestricted. This means the Implementer can modify global Pi settings or authentication storage and reach any external service; review the configured commands and role models before trusting a project-local epic. Native Windows is unsupported for Implementers; run Pi from WSL. If the OS sandbox cannot initialize, the Implementer fails instead of falling back to an unrestricted process. Repository-level `git init` and dependency installation still require the dedicated human approval command, while an explicitly approved task-local install is permitted for the Implementer.
+The extension rejects paths outside the repository and sensitive paths such as `.env`, SSH keys, credentials, and token files. Scout, Planner, and Reviewer cannot write; the Implementer may write repository files but cannot write the run plan, epic state, or `.git`. Implementer processes are sandboxed with macOS `sandbox-exec` or Linux `bubblewrap`; writes are limited to the repository, temporary files, and Pi's global agent directory (needed for Pi settings and credential lock files), while network access is unrestricted. This means the Implementer can modify global Pi settings or authentication storage and reach any external service; review the configured commands and role models before trusting a project-local epic. Native Windows is unsupported for Implementers; run Pi from WSL. If the OS sandbox cannot initialize, the Implementer fails instead of falling back to an unrestricted process. Repository-level `git init` and dependency installation still require the dedicated human approval command, while an explicitly approved task-local install is permitted for the Implementer.
