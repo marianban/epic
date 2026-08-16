@@ -172,7 +172,8 @@ function implementedTaskMessage(state: DashboardRunState): string {
 
 function actionRequired(
   state: DashboardRunState,
-  activeOperation: boolean
+  activeOperation: boolean,
+  boundaryFailureReason?: string
 ): DashboardActionRequest | undefined {
   if (activeOperation) return undefined
 
@@ -224,10 +225,11 @@ function actionRequired(
         message: implementedTaskMessage(state),
         actions: taskActions(),
       }
-    case 'escalating':
+    case 'escalating': {
+      const failureReason = state.failureReason ?? boundaryFailureReason
       if (
-        typeof state.failureReason !== 'string' ||
-        state.failureReason.length === 0
+        typeof failureReason !== 'string' ||
+        failureReason.length === 0
       ) {
         throw new Error('Escalating epics must have a failure reason.')
       }
@@ -235,7 +237,7 @@ function actionRequired(
         id: 'epic-escalation',
         severity: 'critical',
         title: 'Epic requires intervention',
-        message: state.failureReason,
+        message: failureReason,
         actions: [
           action(
             EPIC_COMMANDS.resume,
@@ -246,6 +248,7 @@ function actionRequired(
           action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
         ],
       }
+    }
     default:
       return undefined
   }
@@ -295,9 +298,13 @@ function agentTimeMs(
 
     const key = eventKey(event)
     if (event.type === 'agent_started') {
+      const previous = active.get(key)
+      if (previous !== undefined) {
+        intervals.push([previous, eventMs])
+      }
       // A repeated start means the previous invocation was abandoned before
-      // it could write its finish event. It must not keep contributing time
-      // forever while the dashboard refreshes.
+      // it could write its finish event. Close it at the retry start instead
+      // of dropping the elapsed time or letting it contribute forever.
       active.set(key, eventMs)
       continue
     }
@@ -315,6 +322,10 @@ function agentTimeMs(
     const finishedAt = startedAt + (duration ?? eventMs - startedAt)
     intervals.push([startedAt, finishedAt])
     active.delete(key)
+  }
+
+  for (const startedAt of active.values()) {
+    intervals.push([startedAt, nowMs])
   }
 
   for (const run of activeAgentRuns) {
@@ -707,7 +718,11 @@ export function projectDashboardState(
       input.agentProfiles,
       nowMs
     ),
-    actionRequired: actionRequired(state, input.activeOperation === true),
+    actionRequired: actionRequired(
+      state,
+      input.activeOperation === true,
+      input.boundary.failureDiagnostics?.reason
+    ),
     currentTask: currentTask(input, state, tasks, nowMs),
   }
 }

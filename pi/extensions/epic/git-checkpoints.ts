@@ -40,6 +40,18 @@ async function git(root: string, args: string[]): Promise<string> {
   }
 }
 
+export type TaskDeltaKind = 'create' | 'modify' | 'delete'
+
+export interface ApplicationChange {
+  readonly path: string
+  readonly kind: TaskDeltaKind
+}
+
+export interface ApplicationWorktreeStatus {
+  readonly headSha: string
+  readonly changes: readonly ApplicationChange[]
+}
+
 function managedIgnoreBlock(): string {
   return [MANAGED_BEGIN, '!.pi/', '!.pi/epic.config.json', '!.pi/epic.config.local.json', '!.pi/epics/', '!.pi/epics/**', ...epicArtifactOsPatterns, ...diagnosticPatterns, MANAGED_END].join('\n')
 }
@@ -64,38 +76,129 @@ export async function assertGitPreflight(root: string): Promise<void> {
   if (tracked) throw new Error(`Diagnostic epic artifacts are already tracked and must be removed from the index before continuing: ${tracked.split('\n').join(', ')}.`)
 }
 
+interface PorcelainEntry {
+  readonly indexStatus: string
+  readonly worktreeStatus: string
+  readonly path: string
+  readonly otherPath?: string
+}
+
+function parsePorcelainStatus(raw: string): PorcelainEntry[] {
+  const tokens = raw.split('\0')
+  const entries: PorcelainEntry[] = []
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]
+    if (!token) continue
+    if (token.length < 4 || token[2] !== ' ')
+      throw new Error(`Unable to parse Git porcelain status entry: ${JSON.stringify(token)}`)
+    const indexStatus = token[0]
+    const worktreeStatus = token[1]
+    const path = token.slice(3)
+    const renamed = indexStatus === 'R' || indexStatus === 'C' || worktreeStatus === 'R' || worktreeStatus === 'C'
+    const otherPath = renamed ? tokens[index + 1] : undefined
+    if (renamed && !otherPath)
+      throw new Error(`Git reported an incomplete rename/copy status for ${path}.`)
+    if (renamed) index += 1
+    entries.push({ indexStatus, worktreeStatus, path, ...(otherPath === undefined ? {} : { otherPath }) })
+  }
+  return entries
+}
+
+function applicationPath(filePath: string): boolean {
+  return !filePath.startsWith('.pi/')
+}
+
+function classifyPorcelainEntry(entry: PorcelainEntry): ApplicationChange[] {
+  const statuses = `${entry.indexStatus}${entry.worktreeStatus}`
+  const changes: ApplicationChange[] = []
+  const add = (filePath: string, kind: TaskDeltaKind): void => {
+    if (applicationPath(filePath)) changes.push({ path: filePath, kind })
+  }
+
+  if (entry.indexStatus === 'R' || entry.worktreeStatus === 'R') {
+    add(entry.otherPath ?? entry.path, 'delete')
+    add(entry.path, 'create')
+    return changes
+  }
+  if (entry.indexStatus === 'C' || entry.worktreeStatus === 'C') {
+    add(entry.path, 'create')
+    return changes
+  }
+  if (statuses.includes('U'))
+    throw new Error(`Unmerged Git state cannot be used for an epic task: ${entry.path}`)
+  if (statuses.includes('D')) add(entry.path, 'delete')
+  else if (statuses.includes('A') || statuses === '??') add(entry.path, 'create')
+  else add(entry.path, 'modify')
+  return changes
+}
+
+export async function resolveGitCommit(root: string, revision: string): Promise<string> {
+  if (!revision.trim()) throw new Error('Git commit revision must not be empty.')
+  return git(root, ['rev-parse', '--verify', `${revision}^{commit}`])
+}
+
+export async function inspectApplicationWorktree(root: string): Promise<ApplicationWorktreeStatus> {
+  const [headSha, rawStatus] = await Promise.all([
+    resolveGitCommit(root, 'HEAD'),
+    git(root, ['status', '--porcelain=v1', '-z']),
+  ])
+  const changes = parsePorcelainStatus(rawStatus)
+    .flatMap(classifyPorcelainEntry)
+  const unique = new Map<string, ApplicationChange>()
+  for (const change of changes) {
+    const previous = unique.get(change.path)
+    if (previous?.kind === 'delete' || change.kind === 'delete') unique.set(change.path, { path: change.path, kind: 'delete' })
+    else if (previous?.kind === 'create' || change.kind === 'create') unique.set(change.path, { path: change.path, kind: 'create' })
+    else unique.set(change.path, change)
+  }
+  return { headSha, changes: [...unique.values()] }
+}
+
 export async function assertCleanWorktree(root: string): Promise<void> {
-  const status = await git(root, ['status', '--porcelain=v1'])
+  const status = await inspectApplicationWorktree(root)
   // The actor snapshot is persisted after each transition. It is engine-owned
   // state, not an application change, and will be included by the next
   // checkpoint. Everything else must be clean before an implementer starts.
-  const applicationChanges = status.split('\n').filter(Boolean).filter((line) => !line.slice(3).startsWith('.pi/'))
-  if (applicationChanges.length) throw new Error(`Epic checkpoints require a clean index and worktree. Found: ${applicationChanges.join(', ')}`)
+  if (status.changes.length) {
+    const found = status.changes.map(({ kind, path: filePath }) => `${kind} ${filePath}`)
+    throw new Error(`Epic checkpoints require a clean index and worktree. Found: ${found.join(', ')}`)
+  }
 }
 
 function safeScopePath(value: string): string {
-  if (!value || path.isAbsolute(value) || value.split('/').includes('..') || value === '.git' || value.startsWith('.git/')) throw new Error(`Invalid task scope path: ${value}`)
-  return value.replaceAll('\\', '/')
+  const normalized = value.replaceAll('\\', '/')
+  if (!normalized || path.isAbsolute(value) || normalized.split('/').includes('..') || normalized === '.git' || normalized.startsWith('.git/')) throw new Error(`Invalid task scope path: ${value}`)
+  return normalized
 }
 function permits(scope: readonly string[], file: string): boolean {
   return scope.map(safeScopePath).some((allowed) => file === allowed || file.startsWith(`${allowed}/`))
 }
 
 export async function validateTaskDelta(root: string, baselineSha: string, task: EpicTask): Promise<string[]> {
-  const head = await git(root, ['rev-parse', 'HEAD'])
-  if (head !== baselineSha) throw new Error(`HEAD moved since task baseline ${baselineSha}; refusing to validate a mixed task delta.`)
-  const tracked = await git(root, ['diff', '--name-status', '-z', baselineSha, '--'])
-  const untracked = await git(root, ['ls-files', '--others', '--exclude-standard', '-z'])
-  const entries = tracked.split('\0').filter(Boolean).flatMap((entry) => entry.split('\t').slice(-1)).concat(untracked.split('\0').filter(Boolean))
-  for (const file of new Set(entries)) {
-    if (file.startsWith('.pi/')) continue
-    const status = tracked.includes(`D\t${file}\0`) ? 'delete' : tracked.includes(`A\t${file}\0`) || untracked.split('\0').includes(file) ? 'create' : 'modify'
-    if (!permits(task.scope[status], file)) throw new Error(`Task ${task.id} changed ${file}, but scope.${status} does not allow it.`)
+  const resolvedBaseline = await resolveGitCommit(root, baselineSha)
+  const status = await inspectApplicationWorktree(root)
+  if (status.headSha !== resolvedBaseline) throw new Error(`HEAD moved since task baseline ${baselineSha}; refusing to validate a mixed task delta.`)
+  const rootReal = await fs.realpath(root)
+  for (const change of status.changes) {
+    const file = change.path
+    const kind = change.kind
+    if (!permits(task.scope[kind], file)) throw new Error(`Task ${task.id} changed ${file}, but scope.${kind} does not allow it.`)
     const real = path.resolve(root, file)
-    const rootReal = await fs.realpath(root)
-    try { if (!path.resolve(await fs.realpath(real)).startsWith(`${rootReal}${path.sep}`)) throw new Error(`Task path escapes repository through symlink: ${file}`) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    let existing = real
+    while (true) {
+      try {
+        const resolved = await fs.realpath(existing)
+        if (resolved !== rootReal && !resolved.startsWith(`${rootReal}${path.sep}`)) throw new Error(`Task path escapes repository through symlink: ${file}`)
+        break
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+        const parent = path.dirname(existing)
+        if (parent === existing) throw error
+        existing = parent
+      }
+    }
   }
-  return [...new Set(entries)].filter((file) => !file.startsWith('.pi/'))
+  return status.changes.map(({ path: file }) => file)
 }
 
 export async function createCheckpoint(root: string, state: EpicDomainState, kind: 'plan' | 'task', ordinal: number, applicationPaths: readonly string[]): Promise<{ sha: string; tag: string }> {

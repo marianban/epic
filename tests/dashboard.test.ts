@@ -77,6 +77,30 @@ test('dashboard projects waiting, active, and terminal boundary read models', ()
   assert.equal(terminal.epic.completedAt, '2026-01-01T01:00:00.000Z')
 })
 
+test('dashboard uses child escalation diagnostics when parent domain has no reason', () => {
+  const escalation = projectDashboardState({
+    domain: domain(),
+    metadata,
+    boundary: {
+      stage: 'escalating',
+      wait: 'awaiting-human',
+      pendingHumanAction: 'resolve_escalation',
+      failureDiagnostics: {
+        reason: 'semantic review repair limit exhausted.',
+        repairs: { fast: 0, full: 0, semantic: 2 },
+      },
+    },
+    events: [],
+    agentProfiles: [],
+    now: '2026-01-01T02:00:00.000Z',
+  })
+  assert.equal(escalation.actionRequired?.id, 'epic-escalation')
+  assert.equal(
+    escalation.actionRequired?.message,
+    'semantic review repair limit exhausted.'
+  )
+})
+
 test('plan checkpoint links only plan.md', () => {
   const waiting = projectDashboardState({
     domain: domain(),

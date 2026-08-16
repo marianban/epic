@@ -14,6 +14,8 @@ import { currentTaskArtifactPath } from './artifact-paths.ts'
 import { withActiveEpicOperation } from './operation-status.ts'
 import { domainFromActorSnapshot } from './domain-validation.ts'
 import { resolveEpicConfiguration } from './configuration.ts'
+import { activeAgentRuns } from './agent-activity.ts'
+import { recoverInterruptedAgentRuns } from './agent-recovery.ts'
 import type { EpicMachineEvent } from './machines/epic-machine.ts'
 import type {
   EpicBoundaryView,
@@ -42,6 +44,17 @@ async function dispatch(
   const domain = domainFromActorSnapshot(envelope.snapshot)
   const configuration = await resolveEpicConfiguration(domain.repositoryRoot)
   return withActiveEpicOperation(envelope.epicId, async () => {
+    const recoveryTimestamp = systemClock.now()
+    const recoveryNowMs = Date.parse(recoveryTimestamp)
+    if (Number.isNaN(recoveryNowMs)) {
+      throw new Error(`System clock returned an invalid timestamp: ${recoveryTimestamp}`)
+    }
+    await recoverInterruptedAgentRuns(
+      domain,
+      recoveryTimestamp,
+      recoveryNowMs,
+      activeAgentRuns(domain.repositoryRoot, domain.epicId, recoveryNowMs)
+    )
     const runtime = await createEpicRuntime(
       domain,
       envelope,
@@ -69,9 +82,11 @@ export function formatEscalationMessage(
   view: Pick<EpicRunView, 'domain' | 'boundary'>,
   next?: string
 ): string | undefined {
-  if (view.boundary.stage !== 'escalating' || !view.domain.failureReason)
+  const failureReason =
+    view.domain.failureReason ?? view.boundary.failureDiagnostics?.reason
+  if (view.boundary.stage !== 'escalating' || !failureReason)
     return next
-  return [view.domain.failureReason, next].filter(Boolean).join(' ')
+  return [failureReason, next].filter(Boolean).join(' ')
 }
 function notifyNextAction(
   ctx: ExtensionContext,

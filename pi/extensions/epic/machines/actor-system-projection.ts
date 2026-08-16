@@ -11,7 +11,11 @@ interface Snapshot {
 }
 export interface TaskChildSnapshot {
   value: unknown
-  context?: { repairs?: unknown }
+  context?: {
+    repairs?: unknown
+    domain?: unknown
+    failureReason?: unknown
+  }
 }
 
 const parentStages: Record<string, EpicStage> = {
@@ -102,7 +106,27 @@ function projectChild(snapshot: TaskChildSnapshot): EpicBoundaryView {
   if (!snapshot.context || !('repairs' in snapshot.context))
     throw new Error('task actor context is missing repair attempts.')
   const repairs = parseRepairAttempts(snapshot.context.repairs)
-  return boundary(stage, { state: key, repairs })
+  return boundary(stage, { state: key, repairs }, taskFailureDiagnostics(snapshot, stage, repairs))
+}
+
+function taskFailureDiagnostics(
+  snapshot: TaskChildSnapshot,
+  stage: EpicStage,
+  repairs: RepairAttempts
+): EpicBoundaryView['failureDiagnostics'] {
+  if (stage !== 'escalating') return undefined
+  const context = snapshot.context
+  if (!context) throw new Error('Task actor escalation context is missing.')
+
+  const domain = context.domain
+  const domainFailureReason =
+    domain && typeof domain === 'object' && !Array.isArray(domain)
+      ? (domain as { failureReason?: unknown }).failureReason
+      : undefined
+  const reason = domainFailureReason ?? context.failureReason
+  if (typeof reason !== 'string' || reason.length === 0)
+    throw new Error('Task actor escalation requires a failure reason.')
+  return { reason, repairs }
 }
 
 function assertChildSnapshot(value: unknown): TaskChildSnapshot {

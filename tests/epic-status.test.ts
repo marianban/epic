@@ -5,7 +5,11 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { createActor } from 'xstate'
 import { createEpicMachine } from '../pi/extensions/epic/machines/epic-machine.ts'
-import { saveState } from '../pi/extensions/epic/persistence.ts'
+import {
+  appendEvent,
+  loadEpicEvents,
+  saveState,
+} from '../pi/extensions/epic/persistence.ts'
 import { loadActiveDashboardState } from '../pi/extensions/epic/dashboard/data.ts'
 import type { EpicDomainState } from '../pi/extensions/epic/types.ts'
 import type { EpicServices } from '../pi/extensions/epic/services.ts'
@@ -61,11 +65,34 @@ test('dashboard reads stage from the persisted actor snapshot', async () => {
     updatedAt: '2026-01-01T00:00:01.000Z',
     snapshot: actor.getPersistedSnapshot(),
   })
+  await appendEvent(
+    domain,
+    'classifying',
+    '2026-01-01T00:00:01.000Z',
+    'agent_started',
+    {
+      invocationId: 'orphaned-agent',
+      role: 'planner',
+      action: 'planning',
+    }
+  )
   const dashboard = await loadActiveDashboardState(
     root,
     '2026-01-01T00:00:02.000Z'
   )
   assert.equal(dashboard?.epic.status, 'in-progress')
+  assert.equal(dashboard?.epic.agentTimeMs, 1_000)
+  const recovered = await loadActiveDashboardState(
+    root,
+    '2026-01-01T01:00:02.000Z'
+  )
+  assert.equal(recovered?.epic.agentTimeMs, 1_000)
+  assert.equal(
+    (await loadEpicEvents(domain)).filter(
+      (event) => event.type === 'agent_finished'
+    ).length,
+    1
+  )
   actor.stop()
   await fs.rm(root, { recursive: true, force: true })
 })

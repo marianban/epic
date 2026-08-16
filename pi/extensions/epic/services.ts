@@ -11,6 +11,7 @@ import {
 } from './agents.ts'
 import {
   appendEvent,
+  loadEpicEvents,
   persistJsonArtifact,
   persistScoutReport,
   persistEpicTasks,
@@ -36,7 +37,15 @@ import { runAgentActor } from './machines/actors.ts'
 import { finishAgentRun, startAgentRun } from './agent-activity.ts'
 import { resolveAgentProfile } from './agent-profiles.ts'
 import { getCurrentDiff, summarizeDiff } from './diff.ts'
-import { assertCleanWorktree, assertGitPreflight, bootstrapEpicGitignore, createCheckpoint, validateTaskDelta } from './git-checkpoints.ts'
+import {
+  assertCleanWorktree,
+  assertGitPreflight,
+  bootstrapEpicGitignore,
+  createCheckpoint,
+  inspectApplicationWorktree,
+  resolveGitCommit,
+  validateTaskDelta,
+} from './git-checkpoints.ts'
 import { runCheckSuite } from './checks.ts'
 import type {
   CheckSuiteResult,
@@ -46,6 +55,8 @@ import type {
   EpicClock,
   EpicDomainState,
   EpicBoundaryView,
+  EpicEvent,
+  EpicTask,
   ResolvedEpicConfiguration,
 } from './types.ts'
 
@@ -84,6 +95,106 @@ export interface EpicServices {
   checkpointTask(state: EpicDomainState): Promise<EpicDomainState>
 }
 
+export interface EpicServiceDependencies {
+  runAgentActor: typeof runAgentActor
+}
+
+interface TaskBaselineResolution {
+  state: EpicDomainState
+  recovered: boolean
+  skipImplementer: boolean
+}
+
+function eventString(event: EpicEvent, field: string): string | undefined {
+  const value = event.payload[field]
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+function recoveryError(reason: string): Error {
+  return new Error(`Incomplete task recovery: ${reason}`)
+}
+
+function recoveryInvocationDecision(
+  events: readonly EpicEvent[],
+  task: EpicTask
+): boolean {
+  const starts = events
+    .map((event, journalOrder) => ({ event, journalOrder }))
+    .filter(({ event }) => event.type === 'agent_started')
+    .filter(({ event }) => event.payload.role === 'implementer' && event.payload.taskId === task.id)
+
+  if (!starts.length)
+    throw recoveryError(`the event journal has no implementer start for task ${task.id}.`)
+
+  const latest = starts[starts.length - 1]
+  if (!latest) throw recoveryError(`the latest implementer start for task ${task.id} is missing.`)
+  const invocationId = eventString(latest.event, 'invocationId')
+  if (!invocationId)
+    throw recoveryError(`the implementer start for task ${task.id} has no invocationId.`)
+
+  const finishes = events
+    .map((event, journalOrder) => ({ event, journalOrder }))
+    .filter(({ event, journalOrder }) =>
+      journalOrder > latest.journalOrder &&
+      event.type === 'agent_finished' &&
+      event.payload.role === 'implementer' &&
+      event.payload.taskId === task.id &&
+      event.payload.invocationId === invocationId
+    )
+  const finish = finishes[finishes.length - 1]
+  if (!finish) return false
+  const exitCode = finish.event.payload.exitCode
+  if (typeof exitCode !== 'number' || !Number.isInteger(exitCode))
+    throw recoveryError(`the implementer completion for invocation ${invocationId} has an invalid exitCode.`)
+  return exitCode === 0
+}
+
+async function resolveTaskBaseline(
+  state: EpicDomainState,
+  task: EpicTask
+): Promise<TaskBaselineResolution> {
+  const status = await inspectApplicationWorktree(state.repositoryRoot)
+  if (state.taskBaselineSha) {
+    const baselineSha = await resolveGitCommit(state.repositoryRoot, state.taskBaselineSha)
+    const next = { ...state, taskBaselineSha: baselineSha }
+    await validateTaskDelta(state.repositoryRoot, baselineSha, task)
+    return { state: next, recovered: false, skipImplementer: false }
+  }
+
+  if (!status.changes.length) {
+    await assertCleanWorktree(state.repositoryRoot)
+    return {
+      state: { ...state, taskBaselineSha: status.headSha },
+      recovered: false,
+      skipImplementer: false,
+    }
+  }
+
+  const checkpoint = state.checkpoint
+  if (!checkpoint) {
+    throw recoveryError('the dirty worktree has no task checkpoint evidence.')
+  }
+
+  let checkpointSha: string
+  let tagSha: string
+  try {
+    checkpointSha = await resolveGitCommit(state.repositoryRoot, checkpoint.sha)
+    tagSha = await resolveGitCommit(state.repositoryRoot, checkpoint.tag)
+  } catch (error) {
+    throw recoveryError(`the latest checkpoint cannot be resolved: ${String(error)}`)
+  }
+  if (checkpointSha !== tagSha)
+    throw recoveryError('the latest checkpoint SHA and tag resolve to different commits.')
+  if (checkpointSha !== status.headSha)
+    throw recoveryError(`HEAD ${status.headSha} does not match checkpoint ${checkpointSha}.`)
+
+  const events = await loadEpicEvents(state)
+  const skipImplementer = recoveryInvocationDecision(events, task)
+  const next = { ...state, taskBaselineSha: checkpointSha }
+  await validateTaskDelta(state.repositoryRoot, checkpointSha, task)
+  return { state: next, recovered: true, skipImplementer }
+}
+
 async function readApprovedPlan(state: EpicDomainState): Promise<string> {
   if (!state.planApproved)
     throw new Error('The plan must be approved before this task phase.')
@@ -101,7 +212,8 @@ export function createEpicServices(
   ctx: ExtensionContext,
   getBoundary: () => EpicBoundaryView,
   clock: EpicClock,
-  configuration: ResolvedEpicConfiguration
+  configuration: ResolvedEpicConfiguration,
+  dependencies: EpicServiceDependencies
 ): EpicServices {
   const notify = (
     message: string,
@@ -163,7 +275,7 @@ export function createEpicServices(
     let failure: unknown
     try {
       try {
-        result = await runAgentActor({
+        result = await dependencies.runAgentActor({
           repositoryRoot: state.repositoryRoot,
           agentRunDirectory,
           role,
@@ -444,28 +556,30 @@ export function createEpicServices(
           `Cannot implement missing task at index ${state.currentTaskIndex}.`
         )
       }
-      if (!state.taskBaselineSha) {
-        await assertCleanWorktree(state.repositoryRoot)
-        const { execFile } = await import('node:child_process')
-        const { promisify } = await import('node:util')
-        state = { ...state, taskBaselineSha: String((await promisify(execFile)('git', ['rev-parse', 'HEAD'], { cwd: state.repositoryRoot })).stdout).trim() }
-      }
+      const baseline = await resolveTaskBaseline(state, task)
+      state = baseline.state
       const baselineSha = state.taskBaselineSha
       if (!baselineSha) throw new Error('Task baseline was not recorded.')
-      const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
-      const run = await runRole(
-        state,
-        'implementer',
-        implementerTask(state, plan, feedback, artifact),
-        feedback ? 'bounded repair' : 'implementation',
-        task.id
-      )
-      if (run.exitCode !== 0)
-        throw new Error(`Implementer failed: ${agentFailure(run)}`)
+      const shouldRunImplementer = !baseline.skipImplementer || feedback.length > 0
+      if (shouldRunImplementer) {
+        const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
+        const run = await runRole(
+          state,
+          'implementer',
+          implementerTask(state, plan, feedback, artifact),
+          feedback ? 'bounded repair' : 'implementation',
+          task.id
+        )
+        if (run.exitCode !== 0)
+          throw new Error(`Implementer failed: ${agentFailure(run)}`)
+      }
       await validateTaskDelta(state.repositoryRoot, baselineSha, task)
+      const implementationAttempt = baseline.recovered
+        ? Math.max(state.implementationAttempt + (feedback ? 0 : 1), 1)
+        : state.implementationAttempt + (feedback ? 0 : 1)
       const next = {
         ...state,
-        implementationAttempt: state.implementationAttempt + (feedback ? 0 : 1),
+        implementationAttempt,
       }
       const diff = await getCurrentDiff(next.repositoryRoot)
       const taskId = task.id

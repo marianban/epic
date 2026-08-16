@@ -5,12 +5,46 @@ import test from 'node:test'
 import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { assertCleanWorktree, bootstrapEpicGitignore } from '../pi/extensions/epic/git-checkpoints.ts'
+import {
+  assertCleanWorktree,
+  bootstrapEpicGitignore,
+  validateTaskDelta,
+} from '../pi/extensions/epic/git-checkpoints.ts'
+import type { EpicTask } from '../pi/extensions/epic/types.ts'
 
 const exec = promisify(execFile)
 
 async function git(root: string, args: string[]): Promise<void> {
   await exec('git', args, { cwd: root })
+}
+
+async function gitOutput(root: string, args: string[]): Promise<string> {
+  return String((await exec('git', args, { cwd: root })).stdout).trim()
+}
+
+function scopedTask(
+  scope: Partial<EpicTask['scope']> = {}
+): EpicTask {
+  return {
+    id: 'T1',
+    title: 'Task one',
+    objective: 'Test task',
+    scope: {
+      read: [],
+      modify: [],
+      create: [],
+      delete: [],
+      ...scope,
+    },
+    implementation: [],
+    acceptanceCriteria: [],
+    verification: [],
+    manualReviewSteps: [],
+    risks: [],
+    requiredChecks: [],
+    deferredChecks: [],
+    reason: '',
+  }
 }
 
 test('clean-worktree checks ignore persisted epic state but reject application files', async () => {
@@ -38,5 +72,84 @@ test('clean-worktree checks ignore persisted epic state but reject application f
     )
   } finally {
     await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('task delta validates staged, unstaged, and untracked scoped creates', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-delta-'))
+  try {
+    await git(root, ['init'])
+    await git(root, ['config', 'user.name', 'Epic Test'])
+    await git(root, ['config', 'user.email', 'epic-test@example.com'])
+    await fs.writeFile(path.join(root, 'README.md'), 'initial\n')
+    await git(root, ['add', 'README.md'])
+    await git(root, ['commit', '-m', 'initial'])
+    const baseline = await gitOutput(root, ['rev-parse', 'HEAD'])
+
+    await fs.writeFile(path.join(root, 'package.json'), '{}\n')
+    await git(root, ['add', 'package.json'])
+    await fs.writeFile(path.join(root, 'package-lock.json'), '{}\n')
+
+    assert.deepEqual(
+      (await validateTaskDelta(
+        root,
+        baseline,
+        scopedTask({ create: ['package.json', 'package-lock.json'] })
+      )).sort(),
+      ['package-lock.json', 'package.json']
+    )
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('task delta rejects a moved HEAD and out-of-scope application paths', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-delta-'))
+  try {
+    await git(root, ['init'])
+    await git(root, ['config', 'user.name', 'Epic Test'])
+    await git(root, ['config', 'user.email', 'epic-test@example.com'])
+    await fs.writeFile(path.join(root, 'README.md'), 'initial\n')
+    await git(root, ['add', 'README.md'])
+    await git(root, ['commit', '-m', 'initial'])
+    const baseline = await gitOutput(root, ['rev-parse', 'HEAD'])
+
+    await fs.writeFile(path.join(root, 'README.md'), 'changed\n')
+    await assert.rejects(
+      () => validateTaskDelta(root, baseline, scopedTask()),
+      /scope\.modify does not allow it/
+    )
+
+    await git(root, ['add', 'README.md'])
+    await git(root, ['commit', '-m', 'move HEAD'])
+    await assert.rejects(
+      () => validateTaskDelta(root, baseline, scopedTask({ modify: ['README.md'] })),
+      /HEAD moved since task baseline/
+    )
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('task delta rejects application paths that escape through symlinks', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-delta-'))
+  const outside = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-outside-'))
+  try {
+    await git(root, ['init'])
+    await git(root, ['config', 'user.name', 'Epic Test'])
+    await git(root, ['config', 'user.email', 'epic-test@example.com'])
+    await fs.writeFile(path.join(root, 'README.md'), 'initial\n')
+    await git(root, ['add', 'README.md'])
+    await git(root, ['commit', '-m', 'initial'])
+    const baseline = await gitOutput(root, ['rev-parse', 'HEAD'])
+    await fs.symlink(outside, path.join(root, 'link'), 'dir')
+
+    await assert.rejects(
+      () => validateTaskDelta(root, baseline, scopedTask({ create: ['link'] })),
+      /Task path escapes repository through symlink/
+    )
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+    await fs.rm(outside, { recursive: true, force: true })
   }
 })

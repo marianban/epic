@@ -27,7 +27,6 @@ export type EpicStage =
 
 export type EpicComplexity = 'simple' | 'moderate' | 'complex'
 export type AgentRole =
-  | 'orchestrator'
   | 'scout'
   | 'planner'
   | 'plan-reviewer'

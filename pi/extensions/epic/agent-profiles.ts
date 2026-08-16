@@ -5,12 +5,6 @@ import type {
 } from './types.ts'
 
 const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
-  orchestrator: {
-    role: 'orchestrator',
-    systemPromptPath: '.pi/agents/orchestrator.md',
-    tools: [],
-    readOnly: true,
-  },
   scout: {
     role: 'scout',
     systemPromptPath: '.pi/agents/scout.md',
@@ -62,7 +56,6 @@ const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
 }
 
 export const CANONICAL_AGENT_ROLE_ORDER: readonly AgentRole[] = [
-  'orchestrator',
   'scout',
   'planner',
   'implementer',

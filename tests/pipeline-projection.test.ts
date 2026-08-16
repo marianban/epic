@@ -226,14 +226,33 @@ test('malformed lifecycle telemetry fails with event context', () => {
     ], [], [profile('scout')], baseMs + 10_000),
     /event orphan.*matching start/
   )
-  assert.throws(
-    () => projectPipelineState([
-      event('stale', 'agent_started', 1_000, {
-        invocationId: 'stale',
-        role: 'scout',
-        action: 'discovery',
-      }),
-    ], [], [profile('scout')], baseMs + 10_000),
-    /stale unmatched start/
-  )
+})
+
+test('orphaned starts remain visible as failed telemetry after a restart', () => {
+  const state = projectPipelineState([
+    event('stale', 'agent_started', 1_000, {
+      invocationId: 'stale',
+      role: 'scout',
+      action: 'discovery',
+    }),
+  ], [], [profile('scout')], baseMs + 10_000)
+
+  assert.equal(state.agents[0]?.status, 'failed')
+  assert.equal(state.agents[0]?.runCount, 1)
+  assert.equal(state.agents[0]?.agentTimeMs, 9_000)
+})
+
+test('an interrupted invocation can be followed by a retry', () => {
+  const state = projectPipelineState([
+    event('stale', 'agent_started', 1_000, {
+      invocationId: 'stale',
+      role: 'scout',
+      action: 'discovery',
+    }),
+    ...lifecycle('retry', 'scout', 'discovery', 2_000, 3_000),
+  ], [], [profile('scout')], baseMs + 10_000)
+
+  assert.equal(state.agents[0]?.status, 'idle')
+  assert.equal(state.agents[0]?.runCount, 2)
+  assert.equal(state.agents[0]?.agentTimeMs, 2_000)
 })

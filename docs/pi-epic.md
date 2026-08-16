@@ -8,7 +8,7 @@ This project-local extension provides one sequential, human-gated epic:
 
 Load the extension from this repository with Pi, or install the project as a Pi package after reviewing the code. The extension entry point is `.pi/extensions/epic/index.ts`. Copy `.pi/epic.config.example.json` to `.pi/epic.config.json` to configure commands and role models.
 
-Each enabled role runs in a separate `pi --mode json --no-session` process. Model/provider profiles are configured independently in the epic config. The Orchestrator, Scout, and Planner are read-only. When loaded from another directory with `pi -e`, bundled role prompts are used automatically; project-local `.pi/agents/*.md` files override them.
+Each enabled role runs in a separate `pi --mode json --no-session` process. Model/provider profiles are configured independently in the epic config. All roles except the Implementer are read-only. When loaded from another directory with `pi -e`, bundled role prompts are used automatically; project-local `.pi/agents/*.md` files override them.
 
 Implementer sandbox prerequisites are `rg` on macOS, and `rg`, `bubblewrap` (`bwrap`), and `socat` on Linux. Windows Implementers are unsupported; use WSL.
 

@@ -102,7 +102,6 @@ test('agent profiles merge defaults and partial overrides into a complete canoni
   assert.equal(resolveAgentProfile('scout', configuration).model, 'scout-model')
   const roles = resolveAgentProfiles(configuration).map((profile) => profile.role)
   const expected: AgentRole[] = [
-    'orchestrator',
     'scout',
     'planner',
     'implementer',
@@ -131,6 +130,7 @@ test('task decomposition parser requires independently reviewable task fields', 
 
 test('escalation formatting retains the durable failure reason', () => {
   assert.equal(formatEscalationMessage({ domain: { ...domain('/repo'), failureReason: 'task failed' }, boundary: { stage: 'escalating', wait: 'awaiting-human' } }, 'resume'), 'task failed resume')
+  assert.equal(formatEscalationMessage({ domain: domain('/repo'), boundary: { stage: 'escalating', wait: 'awaiting-human', failureDiagnostics: { reason: 'child task failed', repairs: { fast: 0, full: 0, semantic: 1 } } } }, 'resume'), 'child task failed resume')
 })
 
 test('task completion validation rejects malformed domains and repair counters before parent use', () => {

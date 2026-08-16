@@ -298,6 +298,34 @@ function normalizeInvocations(
   activeRuns: readonly ActiveAgentRun[],
   nowMs: number
 ): readonly Invocation[] {
+  for (const run of activeRuns) validateActiveRun(run, nowMs)
+
+  const isLive = (invocation: Invocation): boolean =>
+    activeRuns.some(
+      (run) =>
+        run.invocationId === invocation.invocationId ||
+        (invocation.invocationId === undefined &&
+          run.role === invocation.role &&
+          run.action === invocation.action &&
+          run.taskId === invocation.taskId)
+    )
+
+  const abandon = (
+    invocation: Invocation,
+    finishAtMs: number,
+    finishOrder: number
+  ): void => {
+    invocation.finishAtMs = finishAtMs
+    invocation.finishOrder = finishOrder
+    invocation.failureReason =
+      'Invocation has no live activity record; it may have been interrupted.'
+    open.delete(invocation)
+    const roleAction = invocationKey(invocation.role, invocation.action)
+    if (pendingByRoleAction.get(roleAction) === invocation) {
+      pendingByRoleAction.delete(roleAction)
+    }
+  }
+
   const byId = new Map<string, Invocation>()
   const pendingByRoleAction = new Map<string, Invocation>()
   const open = new Set<Invocation>()
@@ -312,10 +340,15 @@ function normalizeInvocations(
       if (id !== undefined && byId.has(id)) {
         fail(`event ${event.id}`, `starts duplicate invocation ${id}.`)
       }
+      for (const previous of [...open]) {
+        if (isLive(previous)) {
+          fail(`event ${event.id}`, 'overlaps another invocation.')
+        }
+        abandon(previous, startedAtMs, eventOrder)
+      }
       if (pendingByRoleAction.has(invocationKey(role, action))) {
         fail(`event ${event.id}`, 'overlaps another invocation.')
       }
-      if (open.size > 0) fail(`event ${event.id}`, 'overlaps another invocation.')
       const invocation: Invocation = {
         key,
         ...(id === undefined ? {} : { invocationId: id }),
@@ -372,7 +405,6 @@ function normalizeInvocations(
   const matchedActive = new Set<Invocation>()
   const activeIds = new Set<string>()
   for (const run of activeRuns) {
-    validateActiveRun(run, nowMs)
     if (activeIds.has(run.invocationId)) {
       fail(`active invocation ${run.invocationId}`, 'is duplicated.')
     }
@@ -417,10 +449,7 @@ function normalizeInvocations(
 
   for (const invocation of open) {
     if (!matchedActive.has(invocation)) {
-      fail(
-        `invocation ${invocation.invocationId ?? invocation.key}`,
-        'has a stale unmatched start.'
-      )
+      abandon(invocation, nowMs, invocation.startOrder)
     }
   }
 
@@ -536,7 +565,7 @@ function modelSortKey(model: ModelAccumulator): [number, string, string] {
   const firstRole = [...model.roles].sort(compareAgentRoles)[0] ?? ''
   const roleIndex = [...model.roles]
     .map((role) => {
-      const canonical = ['orchestrator', 'scout', 'planner', 'implementer', 'reviewer', 'plan-reviewer', 'task-reviewer'].indexOf(role)
+      const canonical = ['scout', 'planner', 'implementer', 'reviewer', 'plan-reviewer', 'task-reviewer'].indexOf(role)
       return canonical === -1 ? Number.MAX_SAFE_INTEGER : canonical
     })
     .sort((left, right) => left - right)[0] ?? Number.MAX_SAFE_INTEGER

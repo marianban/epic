@@ -5,7 +5,7 @@ import type { AgentProfile, AgentRole } from '../types.ts'
 interface AgentActorInput {
   repositoryRoot: string
   agentRunDirectory: string
-  role: Exclude<AgentRole, 'orchestrator'>
+  role: AgentRole
   prompt: string
   profile: AgentProfile
   timeoutMs: number

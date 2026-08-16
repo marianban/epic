@@ -1,5 +1,6 @@
 import { loadEpicEvents, loadOptionalActiveEpic } from '../persistence.ts'
 import { activeAgentRuns } from '../agent-activity.ts'
+import { recoverInterruptedAgentRuns } from '../agent-recovery.ts'
 import { isEpicOperationActive } from '../operation-status.ts'
 import { DashboardState } from './state.ts'
 import { projectActorSystemSnapshot } from '../machines/actor-system-projection.ts'
@@ -22,6 +23,15 @@ export async function loadActiveDashboardState(
   const domain = domainFromActorSnapshot(snapshot)
   const boundary = projectActorSystemSnapshot(snapshot)
   const configuration = await resolveEpicConfiguration(repositoryRoot)
+  const activeOperation = isEpicOperationActive(envelope.epicId)
+  const nowMs = Date.parse(now)
+  if (Number.isNaN(nowMs)) {
+    throw new Error(`Dashboard timestamp is invalid: ${now}`)
+  }
+  const liveRuns = activeAgentRuns(repositoryRoot, envelope.epicId, nowMs)
+  if (!activeOperation) {
+    await recoverInterruptedAgentRuns(domain, now, nowMs, liveRuns)
+  }
 
   return DashboardState.fromRun({
     domain,
@@ -31,12 +41,8 @@ export async function loadActiveDashboardState(
       domain
     ),
     agentProfiles: resolveAgentProfiles(configuration),
-    activeAgentRuns: activeAgentRuns(
-      repositoryRoot,
-      envelope.epicId,
-      Date.parse(now)
-    ),
-    activeOperation: isEpicOperationActive(envelope.epicId),
+    activeAgentRuns: liveRuns,
+    activeOperation,
     ...(TERMINAL_STAGES.has(boundary.stage)
       ? { completedAt: envelope.updatedAt }
       : {}),

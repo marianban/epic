@@ -12,6 +12,7 @@ import {
   createEpicMachine,
   type EpicMachineEvent,
 } from './machines/epic-machine.ts'
+import { runAgentActor } from './machines/actors.ts'
 import { createEpicServices } from './services.ts'
 import { projectActorSystemSnapshot } from './machines/actor-system-projection.ts'
 import { liveTaskChild, type LiveTaskChild } from './machines/actor-system-projection.ts'
@@ -78,7 +79,8 @@ export async function createEpicRuntime(
         return runtime.boundary()
       },
       clock,
-      configuration
+      configuration,
+      { runAgentActor }
     )
   )
   const actor = snapshot

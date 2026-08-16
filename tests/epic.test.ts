@@ -193,10 +193,54 @@ test('projection characterizes every configured parent and task state', () => {
   for (const [value, stage] of children) {
     const view = projectActorSystemSnapshot({
       value: 'taskExecution',
-      children: { 'task-execution': { snapshot: { value, context: { repairs: { fast: 0, full: 0, semantic: 0 } } } } },
+      children: {
+        'task-execution': {
+          snapshot: {
+            value,
+            context: {
+              repairs: { fast: 0, full: 0, semantic: 0 },
+              ...(value === 'escalating'
+                ? { domain: { failureReason: 'task actor failed.' } }
+                : {}),
+            },
+          },
+        },
+      },
     })
     assert.equal(view.stage, stage)
   }
+})
+
+test('child escalation projects its failure diagnostics', () => {
+  assert.deepEqual(
+    projectActorSystemSnapshot({
+      value: 'taskExecution',
+      children: {
+        'task-execution': {
+          snapshot: {
+            value: 'escalating',
+            context: {
+              domain: { failureReason: 'semantic review repair limit exhausted.' },
+              repairs: { fast: 0, full: 0, semantic: 2 },
+            },
+          },
+        },
+      },
+    }),
+    {
+      stage: 'escalating',
+      wait: 'awaiting-human',
+      pendingHumanAction: 'resolve_escalation',
+      task: {
+        state: 'escalating',
+        repairs: { fast: 0, full: 0, semantic: 2 },
+      },
+      failureDiagnostics: {
+        reason: 'semantic review repair limit exhausted.',
+        repairs: { fast: 0, full: 0, semantic: 2 },
+      },
+    }
+  )
 })
 
 test('projection uses the persisted child snapshot and rejects malformed child state', () => {
