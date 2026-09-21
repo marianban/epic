@@ -41,7 +41,7 @@ After approval, the Task Planner writes a persisted task manifest and one artifa
 
 ## Persistence and checks
 
-Runs are stored under `.pi/epics/runs/<epic-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `epic.log`, per-invocation raw stdout files under `agent-runs/`, `Epic.md`, the active `plan.md`, task artifacts, and plan revisions. Agent stdout is written incrementally to a new private file for every role invocation so it remains available if the parent process crashes. `.pi/epics/` owns all run artifacts, including the active plan.
+Runs are stored under `.pi/epics/runs/<epic-id>/`, with atomic `state.json`, append-only `events.jsonl`, detailed `epic.log`, per-invocation filtered diagnostic JSONL files under `agent-runs/`, `Epic.md`, the active `plan.md`, task artifacts, and plan revisions. Each agent diagnostic log retains complete prompts, responses, tool starts and results, lifecycle events, errors, and unexpected output while discarding redundant streaming and aggregate records. Retained records are written incrementally to a new private file for every role invocation so they remain available if the parent process crashes. `.pi/epics/` owns all run artifacts, including the active plan.
 
 `state.json` contains a versioned hierarchical XState persisted snapshot together with durable epic context and artifact references. The current schema/machine version is `3/6`. Older or malformed snapshots, including snapshots from before this domain rename and snapshots from machine version `5`, are reported as incompatible and are not silently migrated; start a new epic unless an explicit migration is added later.
 

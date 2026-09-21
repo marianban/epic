@@ -158,7 +158,7 @@ function protocolFailureReason(
 
 /**
  * Extracts the small part of Pi's JSONL stream needed by the parent process.
- * The complete stream is persisted separately by createAgentRunStdoutLog.
+ * A filtered diagnostic stream is persisted by createAgentRunStdoutLog.
  */
 export class AgentOutputCollector {
   private readonly decoder = new StringDecoder('utf8')

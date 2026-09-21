@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import * as path from 'node:path'
+import { StringDecoder } from 'node:string_decoder'
+import { shouldPersistAgentRunLogLine } from './agent-run-log-records.ts'
 
 const FLUSH_BYTES = 64 * 1024
 const FLUSH_INTERVAL_MS = 250
@@ -22,8 +24,10 @@ function writeAll(fileDescriptor: number, chunk: Buffer): void {
 }
 
 /**
- * Create a private, per-invocation stdout log. Chunks are written immediately
- * and periodically synced so a parent-process crash leaves an inspectable log.
+ * Create a private, per-invocation diagnostic log. Complete JSONL records that
+ * duplicate terminal protocol events are discarded; retained records are
+ * written unchanged and periodically synced so a parent-process crash leaves
+ * an inspectable log.
  */
 export function createAgentRunStdoutLog(
   directory: string,
@@ -36,8 +40,31 @@ export function createAgentRunStdoutLog(
     `${timestamp}-${role}-${randomUUID()}.stdout.log`
   )
   const fileDescriptor = openSync(filePath, 'wx', 0o600)
+  const decoder = new StringDecoder('utf8')
   let closed = false
   let bytesSinceSync = 0
+  let pendingLine = ''
+  const persist = (line: string) => {
+    if (!shouldPersistAgentRunLogLine(line)) return
+    const chunk = Buffer.from(line, 'utf8')
+    writeAll(fileDescriptor, chunk)
+    bytesSinceSync += chunk.length
+    if (bytesSinceSync >= FLUSH_BYTES) sync()
+  }
+  const consume = (text: string) => {
+    let offset = 0
+    while (offset < text.length) {
+      const newline = text.indexOf('\n', offset)
+      if (newline === -1) {
+        pendingLine += text.slice(offset)
+        return
+      }
+      const line = `${pendingLine}${text.slice(offset, newline + 1)}`
+      pendingLine = ''
+      persist(line)
+      offset = newline + 1
+    }
+  }
   const sync = () => {
     if (!closed) fsyncSync(fileDescriptor)
     bytesSinceSync = 0
@@ -49,12 +76,15 @@ export function createAgentRunStdoutLog(
     filePath,
     append(chunk) {
       if (closed) throw new Error(`Agent stdout log is closed: ${filePath}`)
-      writeAll(fileDescriptor, chunk)
-      bytesSinceSync += chunk.length
-      if (bytesSinceSync >= FLUSH_BYTES) sync()
+      consume(decoder.write(chunk))
     },
     close() {
       if (closed) return
+      consume(decoder.end())
+      if (pendingLine) {
+        persist(pendingLine)
+        pendingLine = ''
+      }
       closed = true
       clearInterval(flushTimer)
       fsyncSync(fileDescriptor)
