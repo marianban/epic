@@ -4,7 +4,10 @@ import type {
   ScoutReport,
   EpicDomainState,
   TaskFailureDiagnostics,
+  RecoveryDiagnostics,
+  RecoveryOperation,
 } from '../types.ts'
+import { RecoverableRepositoryError } from '../git-checkpoints.ts'
 import { parseEpicDomainState } from '../domain-validation.ts'
 import {
   createTaskExecutionMachine,
@@ -19,10 +22,12 @@ interface EpicMachineContext {
   report?: ScoutReport
   focusedQuestions?: string[]
   failureDiagnostics?: TaskFailureDiagnostics
+  recovery?: RecoveryDiagnostics
 }
 export type EpicMachineEvent =
   | { type: 'EPIC.START' }
   | { type: 'EPIC.RESUME' }
+  | { type: 'RECOVERY.APPROVE' }
   | { type: 'PLAN.REVIEW'; force?: boolean }
   | { type: 'PLAN.APPROVE' }
   | { type: 'PLAN.REVISE' }
@@ -56,6 +61,19 @@ export function validateTaskExecutionResult(
 }
 
 export function createEpicMachine(services: EpicServices) {
+  const recovery = (operation: RecoveryOperation, error: unknown): RecoveryDiagnostics => {
+    const reason = error instanceof Error ? error.message : String(error)
+    if (error instanceof RecoverableRepositoryError) {
+      return {
+        operation, reason, action: error.action,
+        baselineSha: error.baselineSha,
+        candidateHeadSha: error.candidateHeadSha,
+        changedPaths: [...error.changedPaths],
+        requiresRevalidation: error.requiresRevalidation,
+      }
+    }
+    return { operation, reason, action: 'retry', changedPaths: [], requiresRevalidation: false }
+  }
   const task = createTaskExecutionMachine(services)
   const classify = fromPromise<EpicDomainState, { state: EpicDomainState }>(
     ({ input }) => Promise.resolve(services.classify(input.state))
@@ -92,6 +110,12 @@ export function createEpicMachine(services: EpicServices) {
   const checkpoint = fromPromise<EpicDomainState, { state: EpicDomainState }>(
     ({ input }) => services.checkpointTask(input.state)
   )
+  const recordRecovery = fromPromise<EpicDomainState, { state: EpicDomainState; recovery: RecoveryDiagnostics }>(
+    ({ input }) => services.recordRecovery(input.state, input.recovery)
+  )
+  const approveRecovery = fromPromise<EpicDomainState, { state: EpicDomainState; recovery: RecoveryDiagnostics }>(
+    ({ input }) => services.approveRecovery(input.state, input.recovery)
+  )
   return setup({
     types: {
       context: {} as EpicMachineContext,
@@ -109,6 +133,8 @@ export function createEpicMachine(services: EpicServices) {
       prepare,
       finalChecks,
       checkpoint,
+      recordRecovery,
+      approveRecovery,
       task,
     },
     actions: {
@@ -117,6 +143,7 @@ export function createEpicMachine(services: EpicServices) {
         'task-execution',
         ({ event }) => event as unknown as TaskExecutionEvent
       ),
+      clearRecovery: assign({ recovery: undefined }),
     },
   }).createMachine({
     id: 'epic',
@@ -141,7 +168,7 @@ export function createEpicMachine(services: EpicServices) {
             target: 'planning.scouting',
             actions: assign({ state: ({ event }) => event.output }),
           },
-          onError: 'terminal.failed',
+          onError: { target: 'recovering', actions: assign({ recovery: ({ event }) => recovery('classify', event.error) }) },
         },
       },
       planning: {
@@ -163,7 +190,7 @@ export function createEpicMachine(services: EpicServices) {
                   focusedQuestions: undefined,
                 }),
               },
-              onError: '#epic.terminal.failed',
+              onError: { target: '#epic.recovering', actions: assign({ recovery: ({ event }) => recovery('scout', event.error) }) },
             },
           },
           generating: {
@@ -197,7 +224,7 @@ export function createEpicMachine(services: EpicServices) {
                   }),
                 },
               ],
-              onError: '#epic.terminal.failed',
+              onError: { target: '#epic.recovering', actions: assign({ recovery: ({ event }) => recovery('plan', event.error) }) },
             },
           },
           awaitingReview: {
@@ -223,7 +250,7 @@ export function createEpicMachine(services: EpicServices) {
                   state: ({ event }) => event.output.state,
                 }),
               },
-              onError: '#epic.terminal.failed',
+              onError: { target: '#epic.recovering', actions: assign({ recovery: ({ event }) => recovery('review-plan', event.error) }) },
             },
           },
           awaitingApproval: {
@@ -242,7 +269,7 @@ export function createEpicMachine(services: EpicServices) {
                 target: '#epic.decomposingTasks',
                 actions: assign({ state: ({ event }) => event.output }),
               },
-              onError: '#epic.terminal.failed',
+              onError: { target: '#epic.recovering', actions: assign({ recovery: ({ event }) => recovery('approve-plan', event.error) }) },
             },
           },
         },
@@ -256,7 +283,7 @@ export function createEpicMachine(services: EpicServices) {
             target: 'prerequisites.checking',
             actions: assign({ state: ({ event }) => event.output }),
           },
-          onError: 'terminal.failed',
+          onError: { target: 'recovering', actions: assign({ recovery: ({ event }) => recovery('decompose', event.error) }) },
         },
       },
       prerequisites: {
@@ -283,7 +310,7 @@ export function createEpicMachine(services: EpicServices) {
                   }),
                 },
               ],
-              onError: '#epic.terminal.failed',
+              onError: { target: '#epic.recovering', actions: assign({ recovery: ({ event }) => recovery('check-prerequisites', event.error) }) },
             },
           },
           awaitingApproval: {
@@ -302,7 +329,7 @@ export function createEpicMachine(services: EpicServices) {
                   state: ({ event }) => event.output,
                 }),
               },
-              onError: '#epic.terminal.failed',
+              onError: { target: '#epic.recovering', actions: assign({ recovery: ({ event }) => recovery('prepare-prerequisites', event.error) }) },
             },
           },
         },
@@ -312,7 +339,10 @@ export function createEpicMachine(services: EpicServices) {
         invoke: {
           id: 'task-execution',
           src: 'task',
-          input: ({ context }) => ({ domain: context.state }),
+          input: ({ context }) => ({
+            domain: context.state,
+            mode: context.state.taskRevalidationRequired ? 'revalidate' as const : 'normal' as const,
+          }),
           onDone: [
             {
               guard: ({ event }) =>
@@ -380,7 +410,69 @@ export function createEpicMachine(services: EpicServices) {
             },
             { target: 'finalVerification', actions: assign({ state: ({ event }) => event.output }) },
           ],
-          onError: 'terminal.failed',
+          onError: { target: 'recovering', actions: assign({ recovery: ({ event }) => recovery('checkpoint-task', event.error) }) },
+        },
+      },
+      recovering: {
+        initial: 'recording',
+        states: {
+          recording: {
+            invoke: {
+              src: 'recordRecovery',
+              input: ({ context }) => {
+                if (!context.recovery) throw new Error('Recovery diagnostics are missing.')
+                return { state: context.state, recovery: context.recovery }
+              },
+              onDone: {
+                target: 'awaitingApproval',
+                actions: assign({ state: ({ event }) => event.output }),
+              },
+              onError: {
+                target: '#epic.terminal.failed',
+                actions: assign({
+                  state: ({ context, event }) => ({
+                    ...context.state,
+                    failureReason: event.error instanceof Error
+                      ? event.error.message
+                      : String(event.error),
+                  }),
+                }),
+              },
+            },
+          },
+          awaitingApproval: {
+            tags: ['awaiting-human', 'awaiting-recovery-approval'],
+            on: { 'RECOVERY.APPROVE': 'approving' },
+          },
+          approving: {
+            invoke: {
+              src: 'approveRecovery',
+              input: ({ context }) => {
+                if (!context.recovery) throw new Error('Recovery diagnostics are missing.')
+                return { state: context.state, recovery: context.recovery }
+              },
+              onDone: [
+                { guard: ({ context }) => context.recovery?.operation === 'classify', target: '#epic.classifying', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'scout', target: '#epic.planning.scouting', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'plan', target: '#epic.planning.generating', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'review-plan', target: '#epic.planning.revising', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'approve-plan', target: '#epic.planning.approving', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'decompose', target: '#epic.decomposingTasks', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'check-prerequisites', target: '#epic.prerequisites.checking', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'prepare-prerequisites', target: '#epic.prerequisites.preparing', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'task-execution', target: '#epic.taskExecution', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context, event }) => context.recovery?.operation === 'checkpoint-task' && event.output.taskRevalidationRequired === true, target: '#epic.taskExecution', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'checkpoint-task', target: '#epic.checkpointing', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+                { guard: ({ context }) => context.recovery?.operation === 'final-verification', target: '#epic.finalVerification', actions: assign({ state: ({ event }) => event.output, recovery: undefined }) },
+              ],
+              onError: {
+                target: 'recording',
+                actions: assign({
+                  recovery: ({ context, event }) => recovery(context.recovery?.operation ?? 'checkpoint-task', event.error),
+                }),
+              },
+            },
+          },
         },
       },
       escalating: {
@@ -403,16 +495,17 @@ export function createEpicMachine(services: EpicServices) {
               }),
             },
             {
-              target: 'terminal.failed',
+              target: 'recovering',
               actions: assign({
                 state: ({ event }) => ({
                   ...event.output.state,
                   failureReason: 'Final verification failed.',
                 }),
+                recovery: () => ({ operation: 'final-verification', reason: 'Final verification failed.', action: 'retry', changedPaths: [], requiresRevalidation: false }),
               }),
             },
           ],
-          onError: 'terminal.failed',
+          onError: { target: 'recovering', actions: assign({ recovery: ({ event }) => recovery('final-verification', event.error) }) },
         },
       },
       terminal: {

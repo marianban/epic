@@ -41,7 +41,7 @@ export function implementerTask(
   const task = state.tasks?.[state.currentTaskIndex]
   const humanInstructions = extractReviewInstructions(taskArtifact)
   return [
-    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify the run plan, task artifacts, or .pi/epics. You may write only scope.create and scope.modify paths; scope.read paths are immutable. Never delete a path unless it is in scope.delete. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
+    'Implement only the current approved task from the approved plan. Make the smallest complete change, preserve existing APIs unless the task says otherwise, and do not modify the run plan, task artifacts, or .pi/epics. Treat files.context and files.expectedChanges as planning guidance, not a write allowlist: you may change any repository file when the task or its tools require it, including generated manifests and lockfiles. Keep every additional change relevant to the task and report it in your summary. If the task artifact contains human R: instructions, treat every one as a mandatory implementation requirement and address them in the application code.',
     `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     task
@@ -65,11 +65,12 @@ export function reviewerTask(
   plan: string,
   diff: string,
   checks: string,
-  taskArtifact = ''
+  taskArtifact: string,
+  changedPaths: readonly string[]
 ): string {
   const task = state.tasks?.[state.currentTaskIndex]
   return [
-    'Review only the current task semantically against its acceptance criteria using the implementation diff and deterministic check results. Do not perform or judge the manual review steps; they belong to the subsequent human checkpoint. When an acceptance criterion can only be confirmed by those manual steps and there is no independently evidenced code defect, give it status manual_review_pending, do not create a finding for the missing observation, and do not fail the review for that reason. Every actionable finding must describe a code or configuration repair and include at least one repairPaths entry containing only an exact current scope.modify path. Set passed=false only when there is an actionable finding or requiresPlanRevision=true. Do not modify files. Return valid JSON matching the ReviewResult contract from your role prompt.',
+    'Review only the current task semantically against its acceptance criteria using the complete implementation diff and deterministic check results. files.context and files.expectedChanges are planning guidance, not a hard allowlist; relevant tool-generated and otherwise necessary changes outside them are valid task changes and must be reviewed normally. Do not perform or judge the manual review steps; they belong to the subsequent human checkpoint. When an acceptance criterion can only be confirmed by those manual steps and there is no independently evidenced code defect, give it status manual_review_pending, do not create a finding for the missing observation, and do not fail the review for that reason. Every actionable finding must describe a code or configuration repair and provide at least one exact, safe repository-relative repairPath. A repairPath may name any relevant existing or new file regardless of the advisory file metadata. Set passed=false only when a finding is actionable. Do not modify files. Return valid JSON matching the ReviewResult contract from your role prompt.',
     `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
     task
@@ -78,16 +79,38 @@ export function reviewerTask(
     taskArtifact
       ? `Human-approved task artifact:\n${taskArtifact}`
       : 'No separate task artifact was supplied.',
+    `Current task delta paths:\n${changedPaths.length ? changedPaths.map((path) => `- ${path}`).join('\n') : '- None'}`,
     `Implementation diff:\n${diff}`,
     `Deterministic check summary:\n${checks}`,
   ].join('\n\n')
 }
 
-export function taskPlannerTask(state: EpicDomainState, plan: string): string {
+export interface TaskPlannerRepairContext {
+  previousOutput: string
+  errors: string[]
+  repairAttempt: number
+  maxRepairAttempts: number
+}
+
+export function taskPlannerTask(
+  state: EpicDomainState,
+  plan: string,
+  availableChecks: readonly string[],
+  repair?: TaskPlannerRepairContext
+): string {
   return [
-    'Decompose the approved implementation plan into bounded, cohesive tasks suitable for implementation by a less capable local LLM, preserving dependency order. Optimize for reliable execution rather than the fewest tasks. Each task should have one focused objective, limited context, explicit implementation guidance, and few unresolved decisions. Split setup from non-trivial feature work and split distinct behaviors, subsystems, lifecycle phases, or integration concerns when combining them would require broad reasoning. As a judgment aid, split a candidate with more than one substantial implementation concern or more than about five distinct behavioral acceptance criteria. Intermediate milestones are valid when they leave the repository consistent and verifiable. Do not split merely by file or layer, and keep each behavior with its focused tests. Merge only mechanical or trivial adjacent tasks when the combination remains suitable for one focused local-model run. Treat the approved plan as authoritative: do not redesign it, expand its scope, or create a separate plan. Return JSON only with shape {tasks:[{id,title,objective,scope:{read,modify,create,delete},implementation,acceptanceCriteria,verification,manualReviewSteps,risks,requiredChecks,deferredChecks,reason}]}. For each task, requiredChecks lists checks that must pass before the task advances, deferredChecks lists checks that are intentionally not applicable until a later task, and reason explains the decision. When the approved plan creates project-specific generated output or local tooling artifacts, include the necessary `.gitignore` change in the setup or tooling task that introduces those artifacts. Use stable check names such as install, diff-check, typecheck, lint, focused-tests, tests, build, and fallow. The install check verifies package dependencies using the repository lockfile when present. Deferred checks remain mandatory during final verification; never defer a check without a concrete dependency-based reason.',
+    'Decompose the approved implementation plan into bounded, cohesive tasks suitable for implementation by a less capable local LLM, preserving dependency order. Optimize for reliable execution rather than the fewest tasks. Each task should have one focused objective, limited context, explicit implementation guidance, and few unresolved decisions. Split setup from non-trivial feature work and split distinct behaviors, subsystems, lifecycle phases, or integration concerns when combining them would require broad reasoning. As a judgment aid, split a candidate with more than one substantial implementation concern or more than about five distinct behavioral acceptance criteria. Intermediate milestones are valid when they leave the repository consistent and verifiable. Do not split merely by file or layer, and keep each behavior with its focused tests. Merge only mechanical or trivial adjacent tasks when the combination remains suitable for one focused local-model run. Treat the approved plan as authoritative: do not redesign it, expand its scope, or create a separate plan. Return JSON only with shape {tasks:[{id,title,objective,files:{context,expectedChanges},implementation,acceptanceCriteria,verification,manualReviewSteps,risks,requiredChecks,deferredChecks,reason}]}. files.context lists repository paths useful for understanding the task; files.expectedChanges lists anticipated edits. Both are planning guidance, not permissions, and Git determines actual create, modify, and delete operations. For each task, requiredChecks lists executable checks that must pass before the task advances, deferredChecks lists executable checks that are intentionally not applicable until a later task, and reason explains the decision. When the approved plan creates project-specific generated output or local tooling artifacts, mention the anticipated `.gitignore` update in files.expectedChanges without trying to enumerate tool-dependent generated paths. Use stable check names such as install, diff-check, typecheck, lint, focused-tests, tests, build, and fallow only when a matching executable verification command exists initially or is introduced by the task plan. The install check verifies package dependencies using the repository lockfile when present. The focused-tests check requires checks.focusedTests configuration or an npm test script; manual browser verification belongs only in manualReviewSteps and never provides focused-tests. Deferred checks remain mandatory during final verification; never defer an unavailable check or defer a check without a concrete dependency-based reason.',
     `Epic:\n${state.epic}`,
     `Approved plan:\n${plan}`,
+    `Currently executable checks:\n${availableChecks.length ? availableChecks.join(', ') : '(none)'}`,
+    repair
+      ? [
+          `Repair task decomposition attempt ${repair.repairAttempt} of ${repair.maxRepairAttempts}.`,
+          `Deterministic validation errors:\n${repair.errors.map((error) => `- ${error}`).join('\n')}`,
+          `Previous invalid response:\n${repair.previousOutput}`,
+          'Return a complete corrected task manifest, not a patch or explanation.',
+        ].join('\n\n')
+      : 'This is the initial task decomposition attempt.',
     'Every task must have observable acceptance criteria and concrete manual review steps for that intermediate or final milestone. Write implementation steps for the local model: name relevant paths, components, interfaces, behaviors, invariants, and connections to prior tasks when known. Avoid broad instructions or single steps that bundle multiple subsystems. Before returning, split tasks that require broad reasoning and merge tasks that are too trivial for a separate run. A compact low-risk change may be one task; a small application built from scratch usually should not be.',
   ].join('\n\n')
 }
@@ -98,7 +121,7 @@ export function taskReviewTask(
   instructions: PlanReviewInstruction[]
 ): string {
   return [
-    'Revise only the current task artifact in response to every human R: instruction. Do not modify application code, the run plan, or epic state. Preserve unaffected task details, including the check policy, update scope, implementation, acceptance criteria, verification, manual review steps, and risks consistently, remove handled R: lines, and return the complete task Markdown only.',
+    'Revise only the current task artifact in response to every human R: instruction. Do not modify application code, the run plan, or epic state. Preserve unaffected task details, including the check policy, file guidance, implementation, acceptance criteria, verification, manual review steps, and risks consistently, remove handled R: lines, and return the complete task Markdown only.',
     `Epic:\n${state.epic}`,
     `Current task artifact:\n${taskMarkdown}`,
     `Human R: instructions:\n${instructions.map((item) => `- line ${item.lineNumber}: ${item.text}`).join('\n')}`,

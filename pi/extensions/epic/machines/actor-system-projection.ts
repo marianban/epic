@@ -24,6 +24,7 @@ const parentStages: Record<string, EpicStage> = {
   decomposingTasks: 'decomposing_tasks',
   checkpointing: 'final_verification',
   escalating: 'escalating',
+  recovering: 'recovering',
   finalVerification: 'final_verification',
 }
 const planningStages: Record<string, EpicStage> = {
@@ -64,12 +65,14 @@ const humanActions: Partial<Record<EpicStage, PendingHumanAction>> = {
   awaiting_task_approval: 'approve_task',
   awaiting_task_review: 'review_task',
   escalating: 'resolve_escalation',
+  recovering: 'approve_recovery',
 }
 
 function boundary(
   stage: EpicStage,
   task?: EpicBoundaryView['task'],
-  failureDiagnostics?: EpicBoundaryView['failureDiagnostics']
+  failureDiagnostics?: EpicBoundaryView['failureDiagnostics'],
+  recoveryDiagnostics?: EpicBoundaryView['recoveryDiagnostics']
 ): EpicBoundaryView {
   const terminal = stage === 'completed' || stage === 'failed'
   const pendingHumanAction = humanActions[stage]
@@ -83,20 +86,34 @@ function boundary(
     ...(pendingHumanAction ? { pendingHumanAction } : {}),
     ...(task ? { task } : {}),
     ...(failureDiagnostics ? { failureDiagnostics } : {}),
+    ...(recoveryDiagnostics ? { recoveryDiagnostics } : {}),
   }
 }
 
-export function parseRepairAttempts(value: unknown, source = 'task actor repairs'): RepairAttempts {
+export function parseRepairAttempts(
+  value: unknown,
+  source = 'task actor repairs'
+): RepairAttempts {
   if (!value || typeof value !== 'object' || Array.isArray(value))
-    throw new Error(`${source} must be an object with fast, full, and semantic counters.`)
+    throw new Error(
+      `${source} must be an object with fast, full, and semantic counters.`
+    )
   const repairs = value as Record<string, unknown>
   for (const key of ['fast', 'full', 'semantic']) {
     if (!Number.isInteger(repairs[key]) || (repairs[key] as number) < 0)
       throw new Error(`${source}.${key} must be a non-negative integer.`)
   }
-  if (Object.keys(repairs).some((key) => !['fast', 'full', 'semantic'].includes(key)))
+  if (
+    Object.keys(repairs).some(
+      (key) => !['fast', 'full', 'semantic'].includes(key)
+    )
+  )
     throw new Error(`${source} contains unsupported counter fields.`)
-  return { fast: repairs.fast as number, full: repairs.full as number, semantic: repairs.semantic as number }
+  return {
+    fast: repairs.fast as number,
+    full: repairs.full as number,
+    semantic: repairs.semantic as number,
+  }
 }
 
 function projectChild(snapshot: TaskChildSnapshot): EpicBoundaryView {
@@ -106,7 +123,11 @@ function projectChild(snapshot: TaskChildSnapshot): EpicBoundaryView {
   if (!snapshot.context || !('repairs' in snapshot.context))
     throw new Error('task actor context is missing repair attempts.')
   const repairs = parseRepairAttempts(snapshot.context.repairs)
-  return boundary(stage, { state: key, repairs }, taskFailureDiagnostics(snapshot, stage, repairs))
+  return boundary(
+    stage,
+    { state: key, repairs },
+    taskFailureDiagnostics(snapshot, stage, repairs)
+  )
 }
 
 function taskFailureDiagnostics(
@@ -136,22 +157,33 @@ function assertChildSnapshot(value: unknown): TaskChildSnapshot {
 }
 export interface LiveTaskChild {
   getSnapshot(): TaskChildSnapshot & { can(event: unknown): boolean }
-  subscribe(observer: { next(value: TaskChildSnapshot): void; error?(error: unknown): void }): { unsubscribe(): void }
+  subscribe(observer: {
+    next(value: TaskChildSnapshot): void
+    error?(error: unknown): void
+  }): { unsubscribe(): void }
 }
 export function liveTaskChild(parent: Snapshot): LiveTaskChild | undefined {
   const child = parent.children?.['task-execution']
   if (child === undefined) return undefined
-  if (!child || typeof child !== 'object' || !('getSnapshot' in child) || typeof (child as { getSnapshot?: unknown }).getSnapshot !== 'function')
+  if (
+    !child ||
+    typeof child !== 'object' ||
+    !('getSnapshot' in child) ||
+    typeof (child as { getSnapshot?: unknown }).getSnapshot !== 'function'
+  )
     throw new Error('live task-execution child is malformed.')
   const live = child as LiveTaskChild
   assertChildSnapshot(live.getSnapshot())
   return live
 }
 function childSnapshot(parent: Snapshot): TaskChildSnapshot {
-  const child = parent.children?.['task-execution'] as { getSnapshot?: () => unknown; snapshot?: unknown } | undefined
+  const child = parent.children?.['task-execution'] as
+    { getSnapshot?: () => unknown; snapshot?: unknown } | undefined
   if (!child)
     throw new Error('taskExecution requires task-execution child snapshot.')
-  return child.getSnapshot ? assertChildSnapshot(child.getSnapshot()) : assertChildSnapshot(child.snapshot)
+  return child.getSnapshot
+    ? assertChildSnapshot(child.getSnapshot())
+    : assertChildSnapshot(child.snapshot)
 }
 
 export function projectActorSystemSnapshot(
@@ -180,6 +212,13 @@ export function projectActorSystemSnapshot(
       throw new Error(`Unknown prerequisites state: ${record.prerequisites}.`)
     return boundary(stage)
   }
+  if (typeof record.recovering === 'string') {
+    const context = (snapshot as { context?: { recovery?: unknown } }).context
+    const value = context?.recovery
+    if (!value || typeof value !== 'object')
+      throw new Error('Recovery state requires diagnostics.')
+    return boundary('recovering', undefined, undefined, value as EpicBoundaryView['recoveryDiagnostics'])
+  }
   if (
     typeof record.terminal === 'string' &&
     (record.terminal === 'completed' || record.terminal === 'failed')
@@ -188,14 +227,26 @@ export function projectActorSystemSnapshot(
   throw new Error(`Unknown epic actor state: ${JSON.stringify(value)}.`)
 }
 
-function failureDiagnostics(snapshot: Snapshot, stage: EpicStage): EpicBoundaryView['failureDiagnostics'] {
+function failureDiagnostics(
+  snapshot: Snapshot,
+  stage: EpicStage
+): EpicBoundaryView['failureDiagnostics'] {
   if (stage !== 'escalating') return undefined
   const context = (snapshot as { context?: unknown }).context
   if (!context || typeof context !== 'object') return undefined
-  const diagnostics = (context as { failureDiagnostics?: unknown }).failureDiagnostics
+  const diagnostics = (context as { failureDiagnostics?: unknown })
+    .failureDiagnostics
   if (diagnostics === undefined) return undefined
-  if (!diagnostics || typeof diagnostics !== 'object') throw new Error('Epic failure diagnostics are malformed.')
+  if (!diagnostics || typeof diagnostics !== 'object')
+    throw new Error('Epic failure diagnostics are malformed.')
   const record = diagnostics as { reason?: unknown; repairs?: unknown }
-  if (typeof record.reason !== 'string' || !record.reason) throw new Error('Epic failure diagnostics require a reason.')
-  return { reason: record.reason, repairs: parseRepairAttempts(record.repairs, 'epic failure diagnostics.repairs') }
+  if (typeof record.reason !== 'string' || !record.reason)
+    throw new Error('Epic failure diagnostics require a reason.')
+  return {
+    reason: record.reason,
+    repairs: parseRepairAttempts(
+      record.repairs,
+      'epic failure diagnostics.repairs'
+    ),
+  }
 }

@@ -37,7 +37,7 @@ import { validateReviewResult } from './review-validation.ts'
 import { runAgentActor } from './machines/actors.ts'
 import { finishAgentRun, startAgentRun } from './agent-activity.ts'
 import { resolveAgentProfile } from './agent-profiles.ts'
-import { getCurrentDiff, summarizeDiff } from './diff.ts'
+import { getTaskDiff, hashTaskDiff, summarizeDiff } from './diff.ts'
 import {
   assertCleanWorktree,
   assertGitPreflight,
@@ -45,9 +45,12 @@ import {
   createCheckpoint,
   inspectApplicationWorktree,
   resolveGitCommit,
+  RecoverableRepositoryError,
+  inspectTaskChanges,
   validateTaskDelta,
 } from './git-checkpoints.ts'
-import { runCheckSuite } from './checks.ts'
+import { resolveAvailableCheckNames, runCheckSuite } from './checks.ts'
+import { validateTaskCheckPolicies } from './task-check-policy.ts'
 import type {
   CheckSuiteResult,
   PlannerContextRequest,
@@ -59,6 +62,7 @@ import type {
   EpicEvent,
   EpicTask,
   ResolvedEpicConfiguration,
+  RecoveryDiagnostics,
 } from './types.ts'
 
 export interface EpicServices {
@@ -94,6 +98,8 @@ export interface EpicServices {
   ): Promise<{ state: EpicDomainState; result: ReviewResult }>
   reviseTask(state: EpicDomainState): Promise<EpicDomainState>
   checkpointTask(state: EpicDomainState): Promise<EpicDomainState>
+  recordRecovery(state: EpicDomainState, recovery: RecoveryDiagnostics): Promise<EpicDomainState>
+  approveRecovery(state: EpicDomainState, recovery: RecoveryDiagnostics): Promise<EpicDomainState>
 }
 
 export interface EpicServiceDependencies {
@@ -122,31 +128,44 @@ function recoveryInvocationDecision(
   const starts = events
     .map((event, journalOrder) => ({ event, journalOrder }))
     .filter(({ event }) => event.type === 'agent_started')
-    .filter(({ event }) => event.payload.role === 'implementer' && event.payload.taskId === task.id)
+    .filter(
+      ({ event }) =>
+        event.payload.role === 'implementer' && event.payload.taskId === task.id
+    )
 
   if (!starts.length)
-    throw recoveryError(`the event journal has no implementer start for task ${task.id}.`)
+    throw recoveryError(
+      `the event journal has no implementer start for task ${task.id}.`
+    )
 
   const latest = starts[starts.length - 1]
-  if (!latest) throw recoveryError(`the latest implementer start for task ${task.id} is missing.`)
+  if (!latest)
+    throw recoveryError(
+      `the latest implementer start for task ${task.id} is missing.`
+    )
   const invocationId = eventString(latest.event, 'invocationId')
   if (!invocationId)
-    throw recoveryError(`the implementer start for task ${task.id} has no invocationId.`)
+    throw recoveryError(
+      `the implementer start for task ${task.id} has no invocationId.`
+    )
 
   const finishes = events
     .map((event, journalOrder) => ({ event, journalOrder }))
-    .filter(({ event, journalOrder }) =>
-      journalOrder > latest.journalOrder &&
-      event.type === 'agent_finished' &&
-      event.payload.role === 'implementer' &&
-      event.payload.taskId === task.id &&
-      event.payload.invocationId === invocationId
+    .filter(
+      ({ event, journalOrder }) =>
+        journalOrder > latest.journalOrder &&
+        event.type === 'agent_finished' &&
+        event.payload.role === 'implementer' &&
+        event.payload.taskId === task.id &&
+        event.payload.invocationId === invocationId
     )
   const finish = finishes[finishes.length - 1]
   if (!finish) return false
   const exitCode = finish.event.payload.exitCode
   if (typeof exitCode !== 'number' || !Number.isInteger(exitCode))
-    throw recoveryError(`the implementer completion for invocation ${invocationId} has an invalid exitCode.`)
+    throw recoveryError(
+      `the implementer completion for invocation ${invocationId} has an invalid exitCode.`
+    )
   return exitCode === 0
 }
 
@@ -156,9 +175,12 @@ async function resolveTaskBaseline(
 ): Promise<TaskBaselineResolution> {
   const status = await inspectApplicationWorktree(state.repositoryRoot)
   if (state.taskBaselineSha) {
-    const baselineSha = await resolveGitCommit(state.repositoryRoot, state.taskBaselineSha)
+    const baselineSha = await resolveGitCommit(
+      state.repositoryRoot,
+      state.taskBaselineSha
+    )
     const next = { ...state, taskBaselineSha: baselineSha }
-    await validateTaskDelta(state.repositoryRoot, baselineSha, task)
+    await validateTaskDelta(state.repositoryRoot, baselineSha, state.approvedTaskHeadSha)
     return { state: next, recovered: false, skipImplementer: false }
   }
 
@@ -182,17 +204,23 @@ async function resolveTaskBaseline(
     checkpointSha = await resolveGitCommit(state.repositoryRoot, checkpoint.sha)
     tagSha = await resolveGitCommit(state.repositoryRoot, checkpoint.tag)
   } catch (error) {
-    throw recoveryError(`the latest checkpoint cannot be resolved: ${String(error)}`)
+    throw recoveryError(
+      `the latest checkpoint cannot be resolved: ${String(error)}`
+    )
   }
   if (checkpointSha !== tagSha)
-    throw recoveryError('the latest checkpoint SHA and tag resolve to different commits.')
+    throw recoveryError(
+      'the latest checkpoint SHA and tag resolve to different commits.'
+    )
   if (checkpointSha !== status.headSha)
-    throw recoveryError(`HEAD ${status.headSha} does not match checkpoint ${checkpointSha}.`)
+    throw recoveryError(
+      `HEAD ${status.headSha} does not match checkpoint ${checkpointSha}.`
+    )
 
   const events = await loadEpicEvents(state)
   const skipImplementer = recoveryInvocationDecision(events, task)
   const next = { ...state, taskBaselineSha: checkpointSha }
-  await validateTaskDelta(state.repositoryRoot, checkpointSha, task)
+  await validateTaskDelta(state.repositoryRoot, checkpointSha)
   return { state: next, recovered: true, skipImplementer }
 }
 
@@ -250,9 +278,13 @@ export function createEpicServices(
         role,
         action,
         agentRunDirectory,
-        ...(profile.provider === undefined ? {} : { provider: profile.provider }),
+        ...(profile.provider === undefined
+          ? {}
+          : { provider: profile.provider }),
         ...(profile.model === undefined ? {} : { model: profile.model }),
-        ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+        ...(profile.thinking === undefined
+          ? {}
+          : { thinking: profile.thinking }),
         ...(taskId === undefined ? {} : { taskId }),
       }
     )
@@ -267,9 +299,13 @@ export function createEpicServices(
       role,
       action,
       {
-        ...(profile.provider === undefined ? {} : { provider: profile.provider }),
+        ...(profile.provider === undefined
+          ? {}
+          : { provider: profile.provider }),
         ...(profile.model === undefined ? {} : { model: profile.model }),
-        ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+        ...(profile.thinking === undefined
+          ? {}
+          : { thinking: profile.thinking }),
       }
     )
     let result: AgentRunResult | undefined
@@ -284,9 +320,6 @@ export function createEpicServices(
           profile,
           timeoutMs,
           signal: ctx.signal,
-          writablePaths: role === 'implementer'
-            ? [...(state.tasks?.[state.currentTaskIndex]?.scope.create ?? []), ...(state.tasks?.[state.currentTaskIndex]?.scope.modify ?? [])]
-            : undefined,
           onProgress: (message) =>
             ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
         })
@@ -305,9 +338,13 @@ export function createEpicServices(
             role,
             action,
             ...(taskId === undefined ? {} : { taskId }),
-            ...(profile.provider === undefined ? {} : { provider: profile.provider }),
+            ...(profile.provider === undefined
+              ? {}
+              : { provider: profile.provider }),
             ...(profile.model === undefined ? {} : { model: profile.model }),
-            ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+            ...(profile.thinking === undefined
+              ? {}
+              : { thinking: profile.thinking }),
             exitCode: 1,
             failureReason:
               failure instanceof Error ? failure.message : String(failure),
@@ -328,9 +365,13 @@ export function createEpicServices(
             role,
             action,
             ...(taskId === undefined ? {} : { taskId }),
-            ...(profile.provider === undefined ? {} : { provider: profile.provider }),
+            ...(profile.provider === undefined
+              ? {}
+              : { provider: profile.provider }),
             ...(profile.model === undefined ? {} : { model: profile.model }),
-            ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+            ...(profile.thinking === undefined
+              ? {}
+              : { thinking: profile.thinking }),
             exitCode: 1,
             failureReason: error.message,
             durationMs,
@@ -350,10 +391,14 @@ export function createEpicServices(
           ...(taskId === undefined ? {} : { taskId }),
           provider: result.provider ?? profile.provider,
           model: result.model ?? profile.model,
-          ...(profile.thinking === undefined ? {} : { thinking: profile.thinking }),
+          ...(profile.thinking === undefined
+            ? {}
+            : { thinking: profile.thinking }),
           exitCode: result.exitCode,
           stdoutLogPath: result.stdoutLogPath,
-          ...(result.failureReason === undefined ? {} : { failureReason: result.failureReason }),
+          ...(result.failureReason === undefined
+            ? {}
+            : { failureReason: result.failureReason }),
           ...(result.usage === undefined ? {} : { usage: result.usage }),
           durationMs,
         }
@@ -480,16 +525,79 @@ export function createEpicServices(
     },
     async decompose(state) {
       const plan = await readApprovedPlan(state)
-      const run = await runRole(
-        state,
-        'task-planner',
-        taskPlannerTask(state, plan),
-        'task decomposition',
-        undefined
+      const availableChecks = await resolveAvailableCheckNames(
+        state.repositoryRoot,
+        configuration
       )
-      if (run.exitCode !== 0)
-        throw new Error(`Task decomposition failed: ${agentFailure(run)}`)
-      const tasks = parseTaskDecomposition(run.output)
+      const finalAvailableChecks = await resolveAvailableCheckNames(
+        state.repositoryRoot,
+        configuration,
+        ['fast', 'full', 'final']
+      )
+      let tasks: EpicTask[] | undefined
+      let previousOutput = ''
+      let errors: string[] = []
+      for (
+        let attempt = 0;
+        attempt <= configuration.maxTaskPlanRepairs;
+        attempt += 1
+      ) {
+        const run = await runRole(
+          state,
+          'task-planner',
+          taskPlannerTask(
+            state,
+            plan,
+            availableChecks,
+            attempt === 0
+              ? undefined
+              : {
+                  previousOutput,
+                  errors,
+                  repairAttempt: attempt,
+                  maxRepairAttempts: configuration.maxTaskPlanRepairs,
+                }
+          ),
+          attempt === 0
+            ? 'task decomposition'
+            : `task decomposition repair ${attempt}`,
+          undefined
+        )
+        if (run.exitCode !== 0)
+          throw new Error(`Task decomposition failed: ${agentFailure(run)}`)
+        previousOutput = run.output
+        try {
+          const candidate = parseTaskDecomposition(run.output)
+          const validation = validateTaskCheckPolicies(
+            candidate,
+            availableChecks,
+            finalAvailableChecks
+          )
+          if (validation.valid) {
+            tasks = candidate
+            break
+          }
+          errors = validation.errors
+        } catch (error) {
+          errors = [error instanceof Error ? error.message : String(error)]
+        }
+        await appendEvent(
+          state,
+          getBoundary().stage,
+          clock.now(),
+          'task_decomposition_rejected',
+          {
+            attempt: attempt + 1,
+            repairAttempt: attempt,
+            maxRepairAttempts: configuration.maxTaskPlanRepairs,
+            errors,
+          }
+        )
+      }
+      if (!tasks)
+        throw new Error(
+          `Task decomposition remained invalid after ${configuration.maxTaskPlanRepairs} repair attempts: ${errors.join(' ')}`
+        )
       const next = {
         ...state,
         tasks,
@@ -525,7 +633,13 @@ export function createEpicServices(
         prerequisites: await discoverPrerequisites(state.repositoryRoot),
       }
       if (!next.checkpoint) {
-        const checkpoint = await createCheckpoint(next.repositoryRoot, next, 'plan', 0, [])
+        const checkpoint = await createCheckpoint(
+          next.repositoryRoot,
+          next,
+          'plan',
+          0,
+          []
+        )
         next.checkpoint = { kind: 'plan', ordinal: 0, ...checkpoint }
       }
       return next
@@ -561,9 +675,13 @@ export function createEpicServices(
       state = baseline.state
       const baselineSha = state.taskBaselineSha
       if (!baselineSha) throw new Error('Task baseline was not recorded.')
-      const shouldRunImplementer = !baseline.skipImplementer || feedback.length > 0
+      const shouldRunImplementer =
+        !baseline.skipImplementer || feedback.length > 0
       if (shouldRunImplementer) {
-        const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
+        const artifact = await fs.readFile(
+          currentTaskArtifactPath(state),
+          'utf8'
+        )
         const run = await runRole(
           state,
           'implementer',
@@ -574,7 +692,7 @@ export function createEpicServices(
         if (run.exitCode !== 0)
           throw new Error(`Implementer failed: ${agentFailure(run)}`)
       }
-      await validateTaskDelta(state.repositoryRoot, baselineSha, task)
+      await validateTaskDelta(state.repositoryRoot, baselineSha, state.approvedTaskHeadSha)
       const implementationAttempt = baseline.recovered
         ? Math.max(state.implementationAttempt + (feedback ? 0 : 1), 1)
         : state.implementationAttempt + (feedback ? 0 : 1)
@@ -582,7 +700,7 @@ export function createEpicServices(
         ...state,
         implementationAttempt,
       }
-      const diff = await getCurrentDiff(next.repositoryRoot)
+      const diff = await getTaskDiff(next.repositoryRoot, baselineSha)
       const taskId = task.id
       const summary = summarizeDiff(diff)
       next.lastDiffPath = await persistJsonArtifact(
@@ -600,7 +718,12 @@ export function createEpicServices(
       return next
     },
     async checks(state, suite) {
-      const result = await runCheckSuite(suite, state, clock.now(), configuration)
+      const result = await runCheckSuite(
+        suite,
+        state,
+        clock.now(),
+        configuration
+      )
       const next = { ...state }
       next.lastCheckResultPath = await persistJsonArtifact(
         next,
@@ -623,12 +746,26 @@ export function createEpicServices(
     },
     async review(state, checks, semanticAttempt) {
       const plan = await readApprovedPlan(state)
-      const diff = await getCurrentDiff(state.repositoryRoot)
+      if (!state.taskBaselineSha)
+        throw new Error('Cannot review without a task baseline.')
+      const diff = await getTaskDiff(state.repositoryRoot, state.taskBaselineSha)
+      const taskChanges = await inspectTaskChanges(
+        state.repositoryRoot,
+        state.taskBaselineSha
+      )
+      const changedPaths = taskChanges.changes.map((change) => change.path)
       const artifact = await fs.readFile(currentTaskArtifactPath(state), 'utf8')
       const run = await runRole(
         state,
         'reviewer',
-        reviewerTask(state, plan, diff, JSON.stringify(checks), artifact),
+        reviewerTask(
+          state,
+          plan,
+          diff,
+          JSON.stringify(checks),
+          artifact,
+          changedPaths
+        ),
         'semantic review',
         state.tasks?.[state.currentTaskIndex]?.id
       )
@@ -636,9 +773,12 @@ export function createEpicServices(
         throw new Error(`Reviewer failed: ${agentFailure(run)}`)
       const parsed = parseJsonResponse<ReviewResult>(run.output, 'reviewer')
       const task = state.tasks?.[state.currentTaskIndex]
-      if (task === undefined) throw new Error('Cannot review without a current task.')
-      const result = validateReviewResult(parsed, task)
+      if (task === undefined)
+        throw new Error('Cannot review without a current task.')
+      const result = validateReviewResult(parsed)
       const next = { ...state }
+      next.reviewedTaskDiffHash = hashTaskDiff(diff)
+      next.taskRevalidationRequired = false
       next.lastReviewResultPath = await persistJsonArtifact(
         next,
         `reviews/review-${String(semanticAttempt + 1).padStart(3, '0')}.json`,
@@ -703,8 +843,21 @@ export function createEpicServices(
       const paths = await validateTaskDelta(
         state.repositoryRoot,
         state.taskBaselineSha,
-        task
+        state.approvedTaskHeadSha
       )
+      const diff = await getTaskDiff(state.repositoryRoot, state.taskBaselineSha)
+      const currentHash = hashTaskDiff(diff)
+      if (!state.reviewedTaskDiffHash || currentHash !== state.reviewedTaskDiffHash) {
+        const status = await inspectTaskChanges(state.repositoryRoot, state.taskBaselineSha)
+        throw new RecoverableRepositoryError(
+          'The application changed after semantic review. Approve the current changes to rerun checks and review before checkpointing.',
+          'adopt-and-revalidate',
+          state.taskBaselineSha,
+          status.headSha,
+          status.changes,
+          true
+        )
+      }
       const checkpoint = await createCheckpoint(
         state.repositoryRoot,
         state,
@@ -714,8 +867,51 @@ export function createEpicServices(
       )
       return {
         ...state,
-        checkpoint: { kind: 'task', ordinal: state.currentTaskIndex + 1, ...checkpoint },
+        approvedTaskHeadSha: undefined,
+        reviewedTaskDiffHash: undefined,
+        taskRevalidationRequired: false,
+        failureReason: undefined,
+        checkpoint: {
+          kind: 'task',
+          ordinal: state.currentTaskIndex + 1,
+          ...checkpoint,
+        },
       }
+    },
+    async recordRecovery(state, recovery) {
+      await appendEvent(state, getBoundary().stage, clock.now(), 'epic_recovery_requested', {
+        operation: recovery.operation,
+        reason: recovery.reason,
+        action: recovery.action,
+        baselineSha: recovery.baselineSha,
+        candidateHeadSha: recovery.candidateHeadSha,
+        changedPaths: recovery.changedPaths,
+        requiresRevalidation: recovery.requiresRevalidation,
+      })
+      return { ...state, failureReason: recovery.reason }
+    },
+    async approveRecovery(state, recovery) {
+      const next = { ...state }
+      if (recovery.candidateHeadSha) {
+        const status = await inspectApplicationWorktree(state.repositoryRoot)
+        if (status.headSha !== recovery.candidateHeadSha) {
+          throw new RecoverableRepositoryError(
+            `HEAD changed after recovery was proposed: expected ${recovery.candidateHeadSha}, found ${status.headSha}.`,
+            'retry', recovery.baselineSha ?? state.taskBaselineSha ?? status.headSha,
+            status.headSha, status.changes, true
+          )
+        }
+        next.approvedTaskHeadSha = status.headSha
+      }
+      next.taskRevalidationRequired = recovery.requiresRevalidation
+      next.failureReason = undefined
+      await appendEvent(next, getBoundary().stage, clock.now(), 'epic_recovery_approved', {
+        operation: recovery.operation,
+        action: recovery.action,
+        candidateHeadSha: recovery.candidateHeadSha,
+        changedPaths: recovery.changedPaths,
+      })
+      return next
     },
   }
 }

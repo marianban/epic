@@ -21,6 +21,7 @@ export type EpicStage =
   | 'reviewing'
   | 'repairing_review'
   | 'escalating'
+  | 'recovering'
   | 'final_verification'
   | 'completed'
   | 'failed'
@@ -40,6 +41,7 @@ export type PendingHumanAction =
   | 'review_task'
   | 'approve_task'
   | 'resolve_escalation'
+  | 'approve_recovery'
 export type CheckSuiteName = 'fast' | 'full' | 'final'
 export type Severity = 'error' | 'warning' | 'info'
 
@@ -73,8 +75,19 @@ export interface EpicDomainState {
   lastDiffPath?: string
   /** Immutable Git commit used to calculate the current task's application delta. */
   taskBaselineSha?: string
+  /** Descendant HEAD explicitly accepted by a human for the current task. */
+  approvedTaskHeadSha?: string
+  /** Hash of the baseline-to-worktree diff accepted by semantic review. */
+  reviewedTaskDiffHash?: string
+  /** Re-enter task execution at checks after repository drift is approved. */
+  taskRevalidationRequired?: boolean
   /** Most recently created local checkpoint. */
-  checkpoint?: { kind: 'plan' | 'task'; ordinal: number; sha: string; tag: string }
+  checkpoint?: {
+    kind: 'plan' | 'task'
+    ordinal: number
+    sha: string
+    tag: string
+  }
   failureReason?: string
 }
 
@@ -88,8 +101,48 @@ export interface EpicRunIdentity {
   epicId: string
   repositoryRoot: string
 }
-export interface RepairAttempts { fast: number; full: number; semantic: number }
-export interface TaskFailureDiagnostics { reason: string; repairs: RepairAttempts }
+export interface RepairAttempts {
+  fast: number
+  full: number
+  semantic: number
+}
+export interface TaskFailureDiagnostics {
+  reason: string
+  repairs: RepairAttempts
+}
+
+export type RecoveryOperation =
+  | 'classify'
+  | 'scout'
+  | 'plan'
+  | 'review-plan'
+  | 'approve-plan'
+  | 'decompose'
+  | 'check-prerequisites'
+  | 'prepare-prerequisites'
+  | 'task-execution'
+  | 'checkpoint-task'
+  | 'final-verification'
+
+export type RecoveryAction =
+  | 'retry'
+  | 'adopt-head'
+  | 'adopt-and-revalidate'
+
+export interface RecoveryDiagnostics {
+  operation: RecoveryOperation
+  reason: string
+  action: RecoveryAction
+  baselineSha?: string
+  candidateHeadSha?: string
+  changedPaths: ApplicationChange[]
+  requiresRevalidation: boolean
+}
+
+export interface ApplicationChange {
+  path: string
+  kind: 'create' | 'modify' | 'delete'
+}
 
 export interface EpicClock {
   now(): string
@@ -105,8 +158,8 @@ export interface EpicTimer {
 }
 
 export interface PersistedEpicEnvelope extends EpicRunMetadata {
-  schemaVersion: 5
-  machineVersion: 8
+  schemaVersion: 6
+  machineVersion: 10
   snapshot: unknown
 }
 
@@ -121,17 +174,16 @@ export interface EpicBoundaryView {
   pendingHumanAction?: PendingHumanAction
   task?: TaskDisplayState
   failureDiagnostics?: TaskFailureDiagnostics
+  recoveryDiagnostics?: RecoveryDiagnostics
 }
 
 export interface EpicTask {
   id: string
   title: string
   objective: string
-  scope: {
-    read: string[]
-    modify: string[]
-    create: string[]
-    delete: string[]
+  files: {
+    context: string[]
+    expectedChanges: string[]
   }
   implementation: string[]
   acceptanceCriteria: string[]
@@ -270,9 +322,9 @@ export interface ReviewResult {
     message: string
     failureScenario: string
     requiredFix: string
+    affectedPaths: string[]
     repairPaths: string[]
   }[]
-  requiresPlanRevision: boolean
 }
 
 export interface EpicEvent {
@@ -297,6 +349,7 @@ export interface EpicConfig {
   maxFastRepairs?: number
   maxFullRepairs?: number
   maxSemanticRepairs?: number
+  maxTaskPlanRepairs?: number
   checks?: {
     fast?: string[]
     full?: string[]
@@ -316,6 +369,7 @@ export interface ResolvedEpicConfiguration {
   maxFastRepairs: number
   maxFullRepairs: number
   maxSemanticRepairs: number
+  maxTaskPlanRepairs: number
   checks: NonNullable<EpicConfig['checks']>
   agents: Partial<Record<AgentRole, Partial<AgentProfile>>>
 }

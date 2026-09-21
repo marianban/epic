@@ -52,14 +52,16 @@ test('dashboard reads stage from the persisted actor snapshot', async () => {
     review: unavailable,
     reviseTask: unavailable,
     checkpointTask: unavailable,
+    recordRecovery: unavailable,
+    approveRecovery: unavailable,
   }
   const actor = createActor(createEpicMachine(services), {
     input: { state: domain },
   })
   actor.start()
   await saveState(domain, {
-    schemaVersion: 5,
-    machineVersion: 8,
+    schemaVersion: 6,
+    machineVersion: 10,
     epicId: 'run',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:01.000Z',

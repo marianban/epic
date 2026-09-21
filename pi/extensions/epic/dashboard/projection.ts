@@ -53,6 +53,7 @@ const STAGE_STATUS: Record<EpicStage, EpicDashboardStatus> = {
   reviewing: 'in-progress',
   repairing_review: 'in-progress',
   escalating: 'escalating',
+  recovering: 'escalating',
   final_verification: 'in-progress',
   completed: 'completed',
   failed: 'failed',
@@ -182,7 +183,8 @@ function currentTaskDefinition(state: DashboardRunState): EpicTask {
 function actionRequired(
   state: DashboardRunState,
   activeOperation: boolean,
-  boundaryFailureReason?: string
+  boundaryFailureReason?: string,
+  recovery?: DashboardProjectionInput['boundary']['recoveryDiagnostics']
 ): DashboardActionRequest | undefined {
   if (activeOperation) return undefined
 
@@ -262,6 +264,37 @@ function actionRequired(
         ],
       }
     }
+    case 'recovering': {
+      if (!recovery) throw new Error('Recovering epics require diagnostics.')
+      const paths = recovery.changedPaths.length
+        ? ` Changed paths: ${recovery.changedPaths.map(({ path, kind }) => `${kind} ${path}`).join(', ')}.`
+        : ''
+      const label = recovery.action === 'adopt-head'
+        ? 'Approve new HEAD & retry'
+        : recovery.requiresRevalidation
+          ? 'Adopt changes & revalidate'
+          : 'Approve retry'
+      return {
+        id: 'epic-recovery',
+        severity: 'critical',
+        title: 'Epic recovery requires approval',
+        message: `${recovery.reason}${paths}`,
+        actions: [
+          action(EPIC_COMMANDS.approveRecovery, label, EPIC_COMMANDS.approveRecovery, 'primary'),
+          action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
+        ],
+      }
+    }
+    case 'failed':
+      return {
+        id: 'epic-failure',
+        severity: 'critical',
+        title: 'Epic failed',
+        message: state.failureReason ?? 'The epic stopped because of an unrecoverable failure.',
+        actions: [
+          action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
+        ],
+      }
     default:
       return undefined
   }
@@ -734,7 +767,8 @@ export function projectDashboardState(
     actionRequired: actionRequired(
       state,
       input.activeOperation === true,
-      input.boundary.failureDiagnostics?.reason
+      input.boundary.failureDiagnostics?.reason,
+      input.boundary.recoveryDiagnostics
     ),
     currentTask: currentTask(input, state, tasks, nowMs),
   }

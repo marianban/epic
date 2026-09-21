@@ -5,7 +5,7 @@ import { promisify } from 'node:util'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
-import { getCurrentDiff, summarizeDiff } from '../pi/extensions/epic/diff.ts'
+import { getCurrentDiff, getTaskDiff, hashTaskDiff, summarizeDiff } from '../pi/extensions/epic/diff.ts'
 
 const execFileAsync = promisify(execFile)
 
@@ -30,6 +30,35 @@ test('summarizeDiff counts untracked-file style patches', () => {
     linesAdded: 2,
     linesDeleted: 0,
   })
+})
+
+test('task diff includes committed and working-tree changes while excluding epic state', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'pi-epic-task-diff-'))
+  try {
+    await git(root, ['init'])
+    await git(root, ['config', 'user.email', 'pi-epic@example.test'])
+    await git(root, ['config', 'user.name', 'Pi Epic Tests'])
+    await writeFile(join(root, 'theme.css'), 'black\n')
+    await mkdir(join(root, '.pi', 'epics'), { recursive: true })
+    await writeFile(join(root, '.pi', 'epics', 'state.json'), '{}\n')
+    await git(root, ['add', '.'])
+    await git(root, ['commit', '-m', 'baseline'])
+    const baseline = String((await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: root })).stdout).trim()
+
+    await writeFile(join(root, 'theme.css'), 'blue\n')
+    await git(root, ['add', 'theme.css'])
+    await git(root, ['commit', '-m', 'user color'])
+    await writeFile(join(root, 'game.js'), 'export {}\n')
+    await writeFile(join(root, '.pi', 'epics', 'state.json'), '{"updated":true}\n')
+
+    const diff = await getTaskDiff(root, baseline)
+    assert.match(diff, /theme\.css/)
+    assert.match(diff, /game\.js/)
+    assert.doesNotMatch(diff, /\.pi\/epics\/state\.json/)
+    assert.equal(hashTaskDiff(diff), hashTaskDiff(diff))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
 })
 
 test('getCurrentDiff includes untracked files alongside tracked changes', async () => {

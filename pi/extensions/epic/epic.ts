@@ -96,7 +96,9 @@ function notifyNextAction(
 ): void {
   ctx.ui.notify(
     [completed, formatEscalationMessage(view, next)].filter(Boolean).join(' '),
-    view.boundary.stage === 'escalating' ? 'warning' : 'info'
+    view.boundary.stage === 'escalating' || view.boundary.stage === 'recovering'
+      ? 'warning'
+      : 'info'
   )
 }
 export async function startEpic(
@@ -185,6 +187,14 @@ export async function approvePrerequisites(
 export async function resumeEpic(ctx: ExtensionContext): Promise<void> {
   const view = await active(ctx, { type: 'EPIC.RESUME' })
   notifyNextAction(ctx, view, `Epic ${view.metadata.epicId} resumed.`)
+}
+export async function approveRecovery(ctx: ExtensionContext): Promise<void> {
+  const view = await active(ctx, { type: 'RECOVERY.APPROVE' })
+  notifyNextAction(
+    ctx,
+    view,
+    `Recovery approved for epic ${view.metadata.epicId}.`
+  )
 }
 export async function approveTask(ctx: ExtensionContext): Promise<void> {
   const envelope = await loadActiveEpic(ctx.cwd)

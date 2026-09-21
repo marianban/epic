@@ -14,9 +14,11 @@ interface TaskExecutionContext {
   full?: CheckSuiteResult
   review?: ReviewResult
   repairs: RepairAttempts
+  revalidate?: boolean
 }
 interface TaskExecutionInput {
   domain: EpicDomainState
+  mode?: 'normal' | 'revalidate'
 }
 export type TaskExecutionEvent =
   | { type: 'TASK.APPROVE' }
@@ -130,7 +132,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
     },
   }).createMachine({
     id: 'taskExecution',
-    initial: 'awaitingApproval',
+    initial: 'routing',
     // Final-state output belongs to the compound machine actor. Without
     // forwarding the nested final state's output here, an invoking parent
     // receives xstate.done.actor.task-execution with event.output undefined.
@@ -138,8 +140,15 @@ export function createTaskExecutionMachine(services: EpicServices) {
     context: ({ input }) => ({
       domain: input.domain,
       repairs: { fast: 0, full: 0, semantic: 0 },
+      revalidate: input.mode === 'revalidate',
     }),
     states: {
+      routing: {
+        always: [
+          { guard: ({ context }) => context.revalidate === true, target: 'fastChecks' },
+          { target: 'awaitingApproval' },
+        ],
+      },
       awaitingApproval: {
         tags: ['awaiting-human', 'awaiting-task-approval'],
         on: {

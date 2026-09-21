@@ -2,6 +2,7 @@ export const EPIC_COMMANDS = {
   start: 'epic',
   status: 'epic-status',
   resume: 'epic-resume',
+  approveRecovery: 'epic-approve-recovery',
   exit: 'epic-exit',
   approvePrerequisites: 'epic-approve-prerequisites',
   approveTask: 'task-approve',

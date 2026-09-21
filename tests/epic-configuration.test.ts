@@ -17,6 +17,7 @@ test('configuration resolves documented defaults once at the composition boundar
       maxFastRepairs: 2,
       maxFullRepairs: 1,
       maxSemanticRepairs: 2,
+      maxTaskPlanRepairs: 2,
       checks: {},
       agents: {},
     })
@@ -36,6 +37,8 @@ test('configuration rejects malformed JSON and non-positive operational values',
     await assert.rejects(resolveEpicConfiguration(root), /agentTimeoutMs/)
     await fs.writeFile(configPath, JSON.stringify({ checks: { fast: [1] } }))
     await assert.rejects(resolveEpicConfiguration(root), /checks.fast/)
+    await fs.writeFile(configPath, JSON.stringify({ maxTaskPlanRepairs: 0 }))
+    await assert.rejects(resolveEpicConfiguration(root), /maxTaskPlanRepairs/)
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }

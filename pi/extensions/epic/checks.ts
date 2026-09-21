@@ -64,6 +64,22 @@ function checkNameForCommand(
   return `${suite}-${index + 1}`
 }
 
+function looksLikeExecutableVerification(command: string): boolean {
+  return /^(?:(?:[A-Za-z_][A-Za-z0-9_]*=\S+)\s+)*(?:git|npm|pnpm|yarn|fallow|npx\s+fallow)\b/i.test(
+    command.trim()
+  )
+}
+
+export function stableCheckNamesForVerification(command: string): string[] {
+  if (!looksLikeExecutableVerification(command)) return []
+  const names = new Set<string>()
+  for (const suite of ['fast', 'full'] as const) {
+    const name = checkNameForCommand(suite, command, 0)
+    if (name !== `${suite}-1`) names.add(name)
+  }
+  return [...names]
+}
+
 async function hasPackageManifest(root: string): Promise<boolean> {
   try {
     await fs.access(path.join(root, 'package.json'))
@@ -143,6 +159,21 @@ async function resolveCheckDefinitions(
     if (install) definitions.push(install)
   }
   return definitions
+}
+
+export async function resolveAvailableCheckNames(
+  root: string,
+  configuration: ResolvedEpicConfiguration,
+  suites: readonly CheckSuiteName[] = ['fast', 'full']
+): Promise<string[]> {
+  const definitions = (
+    await Promise.all(
+      suites.map((suite) =>
+        resolveCheckDefinitions(root, suite, configuration)
+      )
+    )
+  ).flat()
+  return [...new Set(definitions.map((definition) => definition.name))].sort()
 }
 
 async function resolveFinalCheckDefinitions(

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { redactSecrets } from './tools.ts'
+import { createHash } from 'node:crypto'
 
 const execFileAsync = promisify(execFile)
 const MAX_DIFF_BYTES = 150_000
@@ -46,7 +47,7 @@ function commandError(error: unknown): {
 }
 
 function isEpicManagedPath(filePath: string): boolean {
-  return filePath.startsWith('.pi/epics/')
+  return filePath.startsWith('.pi/')
 }
 
 async function getUntrackedPaths(repositoryRoot: string): Promise<string[]> {
@@ -119,4 +120,48 @@ export async function getCurrentDiff(repositoryRoot: string): Promise<string> {
       `${result.stdout ?? ''}\n${result.stderr ?? ''}`.slice(0, MAX_DIFF_BYTES)
     )
   }
+}
+
+/** Complete application delta, including commits made after the task baseline. */
+export async function getTaskDiff(
+  repositoryRoot: string,
+  baselineSha: string
+): Promise<string> {
+  try {
+    const result = await execFileAsync(
+      'git',
+      [
+        'diff',
+        '--no-ext-diff',
+        '--binary',
+        baselineSha,
+        '--',
+        '.',
+        ':(exclude).pi/**',
+      ],
+      { cwd: repositoryRoot, maxBuffer: MAX_COMMAND_OUTPUT_BYTES }
+    )
+    const untrackedPaths = await getUntrackedPaths(repositoryRoot)
+    const untrackedDiffs = await Promise.all(
+      untrackedPaths.map((filePath) =>
+        getUntrackedFileDiff(repositoryRoot, filePath)
+      )
+    )
+    return redactSecrets(
+      `${String(result.stdout)}${untrackedDiffs.join('')}`.slice(
+        0,
+        MAX_DIFF_BYTES
+      )
+    )
+  } catch (error) {
+    const result = commandError(error)
+    throw new Error(
+      `Unable to build task diff from ${baselineSha}: ${result.stderr ?? String(error)}`,
+      { cause: error }
+    )
+  }
+}
+
+export function hashTaskDiff(diff: string): string {
+  return createHash('sha256').update(diff).digest('hex')
 }

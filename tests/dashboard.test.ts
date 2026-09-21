@@ -101,6 +101,25 @@ test('dashboard uses child escalation diagnostics when parent domain has no reas
   )
 })
 
+test('dashboard renders contextual recovery approval', () => {
+  const recovery = projectDashboardState({
+    domain: domain(), metadata,
+    boundary: {
+      stage: 'recovering', wait: 'awaiting-human', pendingHumanAction: 'approve_recovery',
+      recoveryDiagnostics: {
+        operation: 'checkpoint-task', reason: 'HEAD moved.',
+        action: 'adopt-and-revalidate', baselineSha: 'base', candidateHeadSha: 'head',
+        changedPaths: [{ path: 'src/theme.css', kind: 'modify' }],
+        requiresRevalidation: true,
+      },
+    },
+    events: [], agentProfiles: [], now: '2026-01-01T02:00:00.000Z',
+  })
+  assert.equal(recovery.actionRequired?.id, 'epic-recovery')
+  assert.equal(recovery.actionRequired?.actions[0]?.id, 'epic-approve-recovery')
+  assert.match(recovery.actionRequired?.message ?? '', /modify src\/theme.css/)
+})
+
 test('plan checkpoint links only plan.md', () => {
   const waiting = projectDashboardState({
     domain: domain(),
@@ -128,7 +147,7 @@ test('implementation checkpoint includes the current task manual review steps', 
           id: 'task-007',
           title: 'Implement checkpoint guidance',
           objective: 'Show review guidance in the checkpoint.',
-          scope: { read: [], modify: [], create: [], delete: [] },
+          files: { context: [], expectedChanges: [] },
           implementation: ['Update the dashboard checkpoint.'],
           acceptanceCriteria: ['The checkpoint shows review guidance.'],
           verification: ['Run the focused tests.'],

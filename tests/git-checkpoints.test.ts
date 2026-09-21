@@ -10,7 +10,6 @@ import {
   bootstrapEpicGitignore,
   validateTaskDelta,
 } from '../pi/extensions/epic/git-checkpoints.ts'
-import type { EpicTask } from '../pi/extensions/epic/types.ts'
 
 const exec = promisify(execFile)
 
@@ -20,31 +19,6 @@ async function git(root: string, args: string[]): Promise<void> {
 
 async function gitOutput(root: string, args: string[]): Promise<string> {
   return String((await exec('git', args, { cwd: root })).stdout).trim()
-}
-
-function scopedTask(
-  scope: Partial<EpicTask['scope']> = {}
-): EpicTask {
-  return {
-    id: 'T1',
-    title: 'Task one',
-    objective: 'Test task',
-    scope: {
-      read: [],
-      modify: [],
-      create: [],
-      delete: [],
-      ...scope,
-    },
-    implementation: [],
-    acceptanceCriteria: [],
-    verification: [],
-    manualReviewSteps: [],
-    risks: [],
-    requiredChecks: [],
-    deferredChecks: [],
-    reason: '',
-  }
 }
 
 test('clean-worktree checks ignore persisted epic state but reject application files', async () => {
@@ -75,7 +49,7 @@ test('clean-worktree checks ignore persisted epic state but reject application f
   }
 })
 
-test('task delta validates staged, unstaged, and untracked scoped creates', async () => {
+test('task delta validates staged, unstaged, and untracked creates', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-delta-'))
   try {
     await git(root, ['init'])
@@ -91,11 +65,7 @@ test('task delta validates staged, unstaged, and untracked scoped creates', asyn
     await fs.writeFile(path.join(root, 'package-lock.json'), '{}\n')
 
     assert.deepEqual(
-      (await validateTaskDelta(
-        root,
-        baseline,
-        scopedTask({ create: ['package.json', 'package-lock.json'] })
-      )).sort(),
+      (await validateTaskDelta(root, baseline)).sort(),
       ['package-lock.json', 'package.json']
     )
   } finally {
@@ -103,7 +73,7 @@ test('task delta validates staged, unstaged, and untracked scoped creates', asyn
   }
 })
 
-test('task delta validates nested untracked files against file-level create scope', async () => {
+test('task delta validates nested untracked files without a planned file scope', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-delta-'))
   try {
     await git(root, ['init'])
@@ -119,11 +89,7 @@ test('task delta validates nested untracked files against file-level create scop
     await fs.writeFile(path.join(root, 'src', 'game', 'ArkanoidScene.js'), 'export {}\n')
 
     assert.deepEqual(
-      (await validateTaskDelta(
-        root,
-        baseline,
-        scopedTask({ create: ['src/main.js', 'src/game/ArkanoidScene.js'] })
-      )).sort(),
+      (await validateTaskDelta(root, baseline)).sort(),
       ['src/game/ArkanoidScene.js', 'src/main.js']
     )
   } finally {
@@ -131,7 +97,7 @@ test('task delta validates nested untracked files against file-level create scop
   }
 })
 
-test('task delta rejects a moved HEAD and out-of-scope application paths', async () => {
+test('task delta includes unplanned application paths but rejects an unapproved moved HEAD', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-delta-'))
   try {
     await git(root, ['init'])
@@ -143,16 +109,13 @@ test('task delta rejects a moved HEAD and out-of-scope application paths', async
     const baseline = await gitOutput(root, ['rev-parse', 'HEAD'])
 
     await fs.writeFile(path.join(root, 'README.md'), 'changed\n')
-    await assert.rejects(
-      () => validateTaskDelta(root, baseline, scopedTask()),
-      /scope\.modify does not allow it/
-    )
+    assert.deepEqual(await validateTaskDelta(root, baseline), ['README.md'])
 
     await git(root, ['add', 'README.md'])
     await git(root, ['commit', '-m', 'move HEAD'])
     await assert.rejects(
-      () => validateTaskDelta(root, baseline, scopedTask({ modify: ['README.md'] })),
-      /HEAD moved since task baseline/
+      () => validateTaskDelta(root, baseline),
+      /HEAD moved from task baseline/
     )
   } finally {
     await fs.rm(root, { recursive: true, force: true })
@@ -173,11 +136,41 @@ test('task delta rejects application paths that escape through symlinks', async 
     await fs.symlink(outside, path.join(root, 'link'), 'dir')
 
     await assert.rejects(
-      () => validateTaskDelta(root, baseline, scopedTask({ create: ['link'] })),
+      () => validateTaskDelta(root, baseline),
       /Task path escapes repository through symlink/
     )
   } finally {
     await fs.rm(root, { recursive: true, force: true })
     await fs.rm(outside, { recursive: true, force: true })
+  }
+})
+
+test('approved descendant HEAD preserves user commits and validates the combined task delta', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-git-adoption-'))
+  try {
+    await git(root, ['init'])
+    await git(root, ['config', 'user.name', 'Epic Test'])
+    await git(root, ['config', 'user.email', 'epic-test@example.com'])
+    await fs.writeFile(path.join(root, 'theme.css'), 'color: black\n')
+    await git(root, ['add', 'theme.css'])
+    await git(root, ['commit', '-m', 'initial'])
+    const baseline = await gitOutput(root, ['rev-parse', 'HEAD'])
+
+    await fs.writeFile(path.join(root, 'theme.css'), 'color: blue\n')
+    await git(root, ['add', 'theme.css'])
+    await git(root, ['commit', '-m', 'user changes color'])
+    const approvedHead = await gitOutput(root, ['rev-parse', 'HEAD'])
+    await fs.writeFile(path.join(root, 'game.js'), 'export {}\n')
+
+    assert.deepEqual(
+      (await validateTaskDelta(
+        root,
+        baseline,
+        approvedHead
+      )).sort(),
+      ['game.js', 'theme.css']
+    )
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
   }
 })

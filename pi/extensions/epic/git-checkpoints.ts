@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { EpicDomainState, EpicTask } from './types.ts'
+import type { EpicDomainState, RecoveryAction } from './types.ts'
 
 const exec = promisify(execFile)
 const MANAGED_BEGIN = '# >>> Pi epic managed ignores >>>'
@@ -50,6 +50,30 @@ export interface ApplicationChange {
 export interface ApplicationWorktreeStatus {
   readonly headSha: string
   readonly changes: readonly ApplicationChange[]
+}
+
+export class RecoverableRepositoryError extends Error {
+  readonly action: RecoveryAction
+  readonly baselineSha: string
+  readonly candidateHeadSha: string
+  readonly changedPaths: readonly ApplicationChange[]
+  readonly requiresRevalidation: boolean
+  constructor(
+    message: string,
+    action: RecoveryAction,
+    baselineSha: string,
+    candidateHeadSha: string,
+    changedPaths: readonly ApplicationChange[],
+    requiresRevalidation: boolean
+  ) {
+    super(message)
+    this.name = 'RecoverableRepositoryError'
+    this.action = action
+    this.baselineSha = baselineSha
+    this.candidateHeadSha = candidateHeadSha
+    this.changedPaths = changedPaths
+    this.requiresRevalidation = requiresRevalidation
+  }
 }
 
 function managedIgnoreBlock(): string {
@@ -165,24 +189,109 @@ export async function assertCleanWorktree(root: string): Promise<void> {
   }
 }
 
-function safeScopePath(value: string): string {
-  const normalized = value.replaceAll('\\', '/')
-  if (!normalized || path.isAbsolute(value) || normalized.split('/').includes('..') || normalized === '.git' || normalized.startsWith('.git/')) throw new Error(`Invalid task scope path: ${value}`)
-  return normalized
-}
-function permits(scope: readonly string[], file: string): boolean {
-  return scope.map(safeScopePath).some((allowed) => file === allowed || file.startsWith(`${allowed}/`))
+async function isAncestor(root: string, baseline: string, head: string): Promise<boolean> {
+  try {
+    await exec('git', ['merge-base', '--is-ancestor', baseline, head], { cwd: root })
+    return true
+  } catch (error) {
+    const code = (error as { code?: number }).code
+    if (code === 1) return false
+    throw error
+  }
 }
 
-export async function validateTaskDelta(root: string, baselineSha: string, task: EpicTask): Promise<string[]> {
-  const resolvedBaseline = await resolveGitCommit(root, baselineSha)
+function parseNameStatus(raw: string): ApplicationChange[] {
+  const tokens = raw.split('\0').filter(Boolean)
+  const changes: ApplicationChange[] = []
+  for (let index = 0; index < tokens.length;) {
+    const status = tokens[index++] ?? ''
+    const first = tokens[index++]
+    if (!first) break
+    if (status.startsWith('R') || status.startsWith('C')) {
+      const second = tokens[index++]
+      if (!second) throw new Error('Git returned an incomplete rename/copy delta.')
+      if (!first.startsWith('.pi/')) changes.push({ path: first, kind: 'delete' })
+      if (!second.startsWith('.pi/')) changes.push({ path: second, kind: 'create' })
+      continue
+    }
+    if (first.startsWith('.pi/')) continue
+    changes.push({
+      path: first,
+      kind: status.startsWith('A')
+        ? 'create'
+        : status.startsWith('D')
+          ? 'delete'
+          : 'modify',
+    })
+  }
+  return changes
+}
+
+export async function inspectTaskChanges(
+  root: string,
+  baselineSha: string
+): Promise<{ headSha: string; descendant: boolean; changes: ApplicationChange[] }> {
+  const baseline = await resolveGitCommit(root, baselineSha)
   const status = await inspectApplicationWorktree(root)
-  if (status.headSha !== resolvedBaseline) throw new Error(`HEAD moved since task baseline ${baselineSha}; refusing to validate a mixed task delta.`)
+  const descendant = await isAncestor(root, baseline, status.headSha)
+  const tracked = parseNameStatus(
+    await git(root, [
+      'diff',
+      '--name-status',
+      '-z',
+      baseline,
+      '--',
+      '.',
+      ':(exclude).pi/**',
+    ])
+  )
+  const merged = new Map<string, ApplicationChange>()
+  for (const change of [...tracked, ...status.changes]) merged.set(change.path, change)
+  return { headSha: status.headSha, descendant, changes: [...merged.values()] }
+}
+
+async function inspectCommittedApplicationChanges(
+  root: string,
+  baseline: string,
+  head: string
+): Promise<ApplicationChange[]> {
+  return parseNameStatus(await git(root, [
+    'diff', '--name-status', '-z', `${baseline}..${head}`, '--', '.',
+    ':(exclude).pi/**',
+  ]))
+}
+
+export async function validateTaskDelta(root: string, baselineSha: string, approvedHeadSha?: string): Promise<string[]> {
+  const resolvedBaseline = await resolveGitCommit(root, baselineSha)
+  const status = await inspectTaskChanges(root, resolvedBaseline)
+  if (status.headSha !== resolvedBaseline && status.headSha !== approvedHeadSha) {
+    const committedChanges = status.descendant
+      ? await inspectCommittedApplicationChanges(root, resolvedBaseline, status.headSha)
+      : status.changes
+    throw new RecoverableRepositoryError(
+      status.descendant
+        ? `HEAD moved from task baseline ${resolvedBaseline} to ${status.headSha}. Approval is required before continuing.`
+        : `HEAD ${status.headSha} is not a descendant of task baseline ${resolvedBaseline}. Restore a descendant HEAD before retrying.`,
+      status.descendant && committedChanges.length === 0
+        ? 'adopt-head'
+        : status.descendant
+          ? 'adopt-and-revalidate'
+          : 'retry',
+      resolvedBaseline,
+      status.headSha,
+      committedChanges,
+      committedChanges.length > 0
+    )
+  }
+  if (approvedHeadSha && status.headSha !== approvedHeadSha) {
+    throw new RecoverableRepositoryError(
+      `HEAD changed after approval from ${approvedHeadSha} to ${status.headSha}. Review the new repository state before continuing.`,
+      'retry', resolvedBaseline, status.headSha, status.changes, true
+    )
+  }
   const rootReal = await fs.realpath(root)
   for (const change of status.changes) {
     const file = change.path
-    const kind = change.kind
-    if (!permits(task.scope[kind], file)) throw new Error(`Task ${task.id} changed ${file}, but scope.${kind} does not allow it.`)
     const real = path.resolve(root, file)
     let existing = real
     while (true) {

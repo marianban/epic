@@ -148,7 +148,7 @@ test('task completion validation rejects malformed domains and repair counters b
 
 test('persisted envelope parser rejects extra fields, identity mismatches, and incomplete domains', () => {
   const state = domain('/repo')
-  const envelope = { schemaVersion: 5 as const, machineVersion: 8 as const, epicId: 'run', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', snapshot: { value: 'idle', context: { state } } }
+  const envelope = { schemaVersion: 6 as const, machineVersion: 10 as const, epicId: 'run', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', snapshot: { value: 'idle', context: { state } } }
   assert.equal(parsePersistedEpicEnvelope(envelope).epicId, 'run')
   assert.throws(() => parsePersistedEpicEnvelope({ ...envelope, legacyDomain: state }), /unsupported fields/)
   assert.throws(() => parsePersistedEpicEnvelope({ ...envelope, epicId: 'other' }), /does not match/)
@@ -218,12 +218,12 @@ test('agent output collector ignores malformed JSONL safely', () => {
 })
 
 test('task parser rejects duplicated required checks', () => {
-  const task = { id: 'T1', title: 'T', objective: 'O', implementation: [], acceptanceCriteria: ['done'], verification: [], manualReviewSteps: ['review'], requiredChecks: ['test', 'test'], deferredChecks: [], reason: 'needed' }
+  const task = { id: 'T1', title: 'T', objective: 'O', files: { context: [], expectedChanges: [] }, implementation: [], acceptanceCriteria: ['done'], verification: [], manualReviewSteps: ['review'], requiredChecks: ['test', 'test'], deferredChecks: [], reason: 'needed' }
   assert.throws(() => parseTaskDecomposition(JSON.stringify({ tasks: [task] })), /duplicate required checks/)
 })
 
 test('task parser rejects checks that are both required and deferred', () => {
-  const task = { id: 'T1', title: 'T', objective: 'O', implementation: [], acceptanceCriteria: ['done'], verification: [], manualReviewSteps: ['review'], requiredChecks: ['test'], deferredChecks: ['test'], reason: 'needed' }
+  const task = { id: 'T1', title: 'T', objective: 'O', files: { context: [], expectedChanges: [] }, implementation: [], acceptanceCriteria: ['done'], verification: [], manualReviewSteps: ['review'], requiredChecks: ['test'], deferredChecks: ['test'], reason: 'needed' }
   assert.throws(() => parseTaskDecomposition(JSON.stringify({ tasks: [task] })), /cannot require and defer/)
 })
 
@@ -265,8 +265,19 @@ test('plan validation reports broad-scope language as a warning', () => {
 })
 
 test('task parser requires acceptance criteria and manual review steps', () => {
-  const task = { id: 'T1', title: 'T', objective: 'O', implementation: [], acceptanceCriteria: [], verification: [], manualReviewSteps: [], requiredChecks: [], deferredChecks: [], reason: 'needed' }
+  const task = { id: 'T1', title: 'T', objective: 'O', files: { context: [], expectedChanges: [] }, implementation: [], acceptanceCriteria: [], verification: [], manualReviewSteps: [], requiredChecks: [], deferredChecks: [], reason: 'needed' }
   assert.throws(() => parseTaskDecomposition(JSON.stringify({ tasks: [task] })), /acceptance criteria and manual review/)
+})
+
+test('task parser rejects the legacy scope shape', () => {
+  const task = { id: 'T1', title: 'T', objective: 'O', scope: { read: [], modify: [], create: [], delete: [] }, implementation: [], acceptanceCriteria: ['done'], verification: [], manualReviewSteps: ['review'], requiredChecks: [], deferredChecks: [], reason: 'needed' }
+  assert.throws(() => parseTaskDecomposition(JSON.stringify({ tasks: [task] })), /invalid task/)
+})
+
+test('task parser requires string arrays for advisory file metadata', () => {
+  const task = { id: 'T1', title: 'T', objective: 'O', implementation: [], acceptanceCriteria: ['done'], verification: [], manualReviewSteps: ['review'], requiredChecks: [], deferredChecks: [], reason: 'needed' }
+  assert.throws(() => parseTaskDecomposition(JSON.stringify({ tasks: [task] })), /invalid task/)
+  assert.throws(() => parseTaskDecomposition(JSON.stringify({ tasks: [{ ...task, files: { context: ['src/main.ts'], expectedChanges: [1] } }] })), /invalid task/)
 })
 
 test('prerequisite discovery is empty for an initialized non-Node repository', async () => {

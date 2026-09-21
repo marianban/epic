@@ -18,7 +18,10 @@ import {
   saveState,
 } from '../pi/extensions/epic/persistence.ts'
 import { EpicRuntime } from '../pi/extensions/epic/runtime.ts'
-import type { EpicDomainState } from '../pi/extensions/epic/types.ts'
+import type {
+  EpicDomainState,
+  ReviewResult,
+} from '../pi/extensions/epic/types.ts'
 import type { EpicServices } from '../pi/extensions/epic/services.ts'
 
 function domain(root = '/repo'): EpicDomainState {
@@ -46,7 +49,7 @@ function task(id: string) {
     id,
     title: id,
     objective: id,
-    scope: { read: [], modify: [], create: [], delete: [] },
+    files: { context: [], expectedChanges: [] },
     implementation: [],
     acceptanceCriteria: [],
     verification: [],
@@ -106,11 +109,12 @@ function services(): EpicServices {
         summary: '',
         acceptanceCriteria: [],
         findings: [],
-        requiresPlanRevision: false,
       },
     }),
     reviseTask: passthrough,
     checkpointTask: passthrough,
+    recordRecovery: passthrough,
+    approveRecovery: passthrough,
   }
 }
 
@@ -154,6 +158,36 @@ test('projection exhaustively derives parent and configured human boundaries', (
     projectActorSystemSnapshot({ value: { terminal: 'completed' } }),
     { stage: 'completed', wait: 'terminal' }
   )
+})
+
+test('parent operational failures wait for explicit recovery approval and retry the failed operation', async () => {
+  let attempts = 0
+  const base = services()
+  const actor = createActor(
+    createEpicMachine({
+      ...base,
+      classify: (state) => {
+        attempts += 1
+        if (attempts === 1) throw new Error('provider temporarily unavailable')
+        return state
+      },
+      recordRecovery: async (state) => ({ ...state, failureReason: 'provider temporarily unavailable' }),
+      approveRecovery: async (state) => ({ ...state, failureReason: undefined }),
+    }),
+    { input: { state: domain() } }
+  )
+  actor.start()
+  actor.send({ type: 'EPIC.START' })
+  await nextTurn()
+  await nextTurn()
+  assert.deepEqual(actor.getSnapshot().value, { recovering: 'awaitingApproval' })
+  assert.equal(projectActorSystemSnapshot(actor.getSnapshot()).pendingHumanAction, 'approve_recovery')
+  actor.send({ type: 'RECOVERY.APPROVE' })
+  await nextTurn()
+  await nextTurn()
+  assert.equal(attempts, 2)
+  assert.deepEqual(actor.getSnapshot().value, { planning: 'awaitingReview' })
+  actor.stop()
 })
 
 test('projection characterizes every configured parent and task state', () => {
@@ -220,7 +254,9 @@ test('child escalation projects its failure diagnostics', () => {
           snapshot: {
             value: 'escalating',
             context: {
-              domain: { failureReason: 'semantic review repair limit exhausted.' },
+              domain: {
+                failureReason: 'semantic review repair limit exhausted.',
+              },
               repairs: { fast: 0, full: 0, semantic: 2 },
             },
           },
@@ -385,7 +421,6 @@ test('full and semantic repair limits escalate in the child without parent count
             summary: '',
             acceptanceCriteria: [],
             findings: [],
-            requiresPlanRevision: false,
           },
         }),
       },
@@ -437,7 +472,6 @@ test('semantic repair reruns implementation, fast checks, full checks, then revi
           summary: '',
           acceptanceCriteria: [],
           findings: [],
-          requiresPlanRevision: false,
         },
       }
     },
@@ -464,6 +498,68 @@ test('semantic repair reruns implementation, fast checks, full checks, then revi
     full: 0,
     semantic: 1,
   })
+  actor.stop()
+})
+
+test('semantic repairs may target an unplanned path without scope approval', async () => {
+  const calls: string[] = []
+  let reviewAttempt = 0
+  const scoped = domain()
+  scoped.tasks = [task('task-1')]
+  const tracked: EpicServices = {
+    ...services(),
+    implement: async (state, feedback) => {
+      calls.push(feedback ? 'implement-with-feedback' : 'implement')
+      return state
+    },
+    review: async (state) => {
+      calls.push('review')
+      reviewAttempt += 1
+      const result: ReviewResult =
+        reviewAttempt > 1
+          ? {
+              passed: true,
+              summary: 'The repair is complete.',
+              acceptanceCriteria: [],
+              findings: [],
+            }
+          : {
+              passed: false,
+              summary: 'A shared dependency must change.',
+              acceptanceCriteria: [],
+              findings: [
+                {
+                  severity: 'major',
+                  category: 'correctness',
+                  message: 'The shared dependency violates the task invariant.',
+                  failureScenario: 'The feature fails at runtime.',
+                  requiredFix: 'Update the shared dependency.',
+                  affectedPaths: ['src/shared.ts'],
+                  repairPaths: ['src/shared.ts'],
+                },
+              ],
+            }
+      return {
+        state,
+        result,
+      }
+    },
+  }
+  const actor = createActor(createTaskExecutionMachine(tracked), {
+    input: { domain: scoped },
+  })
+  actor.start()
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let turn = 0; turn < 8; turn += 1) await nextTurn()
+
+  assert.equal(actor.getSnapshot().value, 'awaitingReview')
+  assert.deepEqual(calls, [
+    'implement',
+    'review',
+    'implement-with-feedback',
+    'review',
+  ])
+  assert.equal(actor.getSnapshot().context.repairs.semantic, 1)
   actor.stop()
 })
 
@@ -650,14 +746,14 @@ test('injected timer rejects unsettled dispatches and is cleaned up', async () =
   actor.stop()
 })
 
-test('schema-5 envelope is the sole persisted state and schema 4/7 is rejected', async () => {
+test('schema-6 envelope is the sole persisted state and version 9 is rejected', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-refactor-'))
   const machine = createEpicMachine(services())
   const actor = createActor(machine, { input: { state: domain(root) } })
   actor.start()
   const envelope = {
-    schemaVersion: 5 as const,
-    machineVersion: 8 as const,
+    schemaVersion: 6 as const,
+    machineVersion: 10 as const,
     epicId: 'run-1',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -679,18 +775,18 @@ test('schema-5 envelope is the sole persisted state and schema 4/7 is rejected',
     'updatedAt',
   ])
   const loaded = await loadActiveEpic(root)
-  assert.equal(loaded.schemaVersion, 5)
-  assert.equal(loaded.machineVersion, 8)
+  assert.equal(loaded.schemaVersion, 6)
+  assert.equal(loaded.machineVersion, 10)
   assert.equal(loaded.epicId, envelope.epicId)
-  stored.schemaVersion = 4
-  stored.machineVersion = 7
+  stored.schemaVersion = 5
+  stored.machineVersion = 9
   await fs.writeFile(
     path.join(root, '.pi/epics/runs/run-1/state.json'),
     JSON.stringify(stored)
   )
   await assert.rejects(
     loadActiveEpic(root),
-    /found schema\/machine version 4\/7.*Required schema\/machine version 5\/8/
+    /found schema\/machine version 5\/9.*Required schema\/machine version 6\/10/
   )
   await fs.writeFile(
     path.join(root, '.pi/epics/runs/run-1/state.json'),
@@ -709,8 +805,8 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   })
   actor.start()
   const envelope = {
-    schemaVersion: 5 as const,
-    machineVersion: 8 as const,
+    schemaVersion: 6 as const,
+    machineVersion: 10 as const,
     epicId: current.epicId,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -745,9 +841,9 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   await fs.rm(root, { recursive: true, force: true })
 })
 
-test('machine version constants accept only schema 5/machine 8', () => {
-  assert.equal(EPIC_SCHEMA_VERSION, 5)
-  assert.equal(EPIC_MACHINE_VERSION, 8)
+test('machine version constants accept only schema 6/machine 10', () => {
+  assert.equal(EPIC_SCHEMA_VERSION, 6)
+  assert.equal(EPIC_MACHINE_VERSION, 10)
 })
 
 test('malformed child completion output and reason-less escalation fail explicitly', () => {

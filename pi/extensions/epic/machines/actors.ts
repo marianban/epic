@@ -11,7 +11,6 @@ interface AgentActorInput {
   timeoutMs: number
   signal?: AbortSignal
   onProgress?: (message: string) => void
-  writablePaths?: string[]
 }
 
 const agentActor = fromPromise<AgentRunResult, AgentActorInput>(({ input }) =>
@@ -19,7 +18,6 @@ const agentActor = fromPromise<AgentRunResult, AgentActorInput>(({ input }) =>
     agentRunDirectory: input.agentRunDirectory,
     signal: input.signal,
     onProgress: input.onProgress,
-    writablePaths: input.writablePaths,
     timeoutMs: input.timeoutMs,
   }, input.profile)
 )

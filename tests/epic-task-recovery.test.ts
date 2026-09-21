@@ -40,11 +40,9 @@ function task(): EpicTask {
     id: 'T1',
     title: 'Create package metadata',
     objective: 'Create package metadata.',
-    scope: {
-      read: [],
-      modify: [],
-      create: ['package.json', 'package-lock.json'],
-      delete: [],
+    files: {
+      context: [],
+      expectedChanges: ['package.json'],
     },
     implementation: [],
     acceptanceCriteria: [],
@@ -67,6 +65,7 @@ function configuration(): ResolvedEpicConfiguration {
     maxFastRepairs: 1,
     maxFullRepairs: 1,
     maxSemanticRepairs: 1,
+    maxTaskPlanRepairs: 2,
     checks: { fast: ['true'], full: ['true'], final: ['true'] },
     agents: {},
   }
@@ -150,7 +149,6 @@ function dependencies(calls: string[]): EpicServiceDependencies {
               summary: 'Recovered implementation is valid.',
               acceptanceCriteria: [],
               findings: [],
-              requiresPlanRevision: false,
             })
           : '',
       stderr: '',
@@ -178,11 +176,9 @@ test('task decomposition invokes task-planner with the approved plan and epic co
               id: 'T1',
               title: 'Create package metadata',
               objective: 'Create package metadata.',
-              scope: {
-                read: [],
-                modify: [],
-                create: ['package.json'],
-                delete: [],
+              files: {
+                context: [],
+                expectedChanges: ['package.json'],
               },
               implementation: ['Create package metadata.'],
               acceptanceCriteria: ['Package metadata exists.'],
@@ -221,6 +217,201 @@ test('task decomposition invokes task-planner with the approved plan and epic co
       next.tasks?.map((item) => item.id),
       ['T1']
     )
+    assert.deepEqual(next.tasks?.[0]?.files, {
+      context: [],
+      expectedChanges: ['package.json'],
+    })
+    const artifact = await fs.readFile(currentTaskArtifactPath(next), 'utf8')
+    assert.match(artifact, /## Files\n### Context/)
+    assert.match(artifact, /### Expected Changes\n- package\.json/)
+    assert.doesNotMatch(artifact, /## Scope/)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('task decomposition repairs an invalid check policy before persisting tasks', async () => {
+  const { root, state } = await fixture()
+  const calls: string[] = []
+  try {
+    const invalidTask = {
+      id: 'T1',
+      title: 'Interactive behavior',
+      objective: 'Add interaction.',
+      files: { context: [], expectedChanges: [] },
+      implementation: ['Add interaction.'],
+      acceptanceCriteria: ['Interaction works.'],
+      verification: ['Browser smoke test'],
+      manualReviewSteps: ['Exercise the interaction in a browser.'],
+      risks: [],
+      requiredChecks: ['focused-tests'],
+      deferredChecks: [],
+      reason: 'Browser verification is required.',
+    }
+    const validTask = {
+      ...invalidTask,
+      requiredChecks: [],
+      reason: 'Browser verification is manual.',
+    }
+    const runAgentActor: EpicServiceDependencies['runAgentActor'] = async (
+      input
+    ) => {
+      calls.push(input.prompt)
+      return {
+        role: input.role,
+        exitCode: 0,
+        output: JSON.stringify({
+          tasks: [calls.length === 1 ? invalidTask : validTask],
+        }),
+        stderr: '',
+        stdoutLogPath: path.join(input.agentRunDirectory, 'fake.log'),
+      }
+    }
+    const decompositionServices = createEpicServices(
+      context(),
+      () => ({ stage: 'decomposing_tasks', wait: 'active' }),
+      { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
+      configuration(),
+      { runAgentActor }
+    )
+
+    const next = await decompositionServices.decompose(state)
+
+    assert.equal(calls.length, 2)
+    assert.match(calls[1] ?? '', /Task T1 requires focused-tests/)
+    assert.match(calls[1] ?? '', /Previous invalid response/)
+    assert.deepEqual(next.tasks?.[0]?.requiredChecks, [])
+    const events = await loadEpicEvents(state)
+    assert.equal(
+      events.filter((event) => event.type === 'task_decomposition_rejected')
+        .length,
+      1
+    )
+    assert.equal(
+      events.filter((event) => event.type === 'tasks_decomposed').length,
+      1
+    )
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('task decomposition repairs malformed JSON and escalates after its repair budget', async () => {
+  const { root, state } = await fixture()
+  let calls = 0
+  try {
+    const runAgentActor: EpicServiceDependencies['runAgentActor'] = async (
+      input
+    ) => {
+      calls += 1
+      return {
+        role: input.role,
+        exitCode: 0,
+        output: 'not-json',
+        stderr: '',
+        stdoutLogPath: path.join(input.agentRunDirectory, 'fake.log'),
+      }
+    }
+    const decompositionServices = createEpicServices(
+      context(),
+      () => ({ stage: 'decomposing_tasks', wait: 'active' }),
+      { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
+      configuration(),
+      { runAgentActor }
+    )
+
+    await assert.rejects(
+      decompositionServices.decompose(state),
+      /remained invalid after 2 repair attempts/
+    )
+    assert.equal(calls, 3)
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('task decomposition can repair malformed JSON with a valid manifest', async () => {
+  const { root, state } = await fixture()
+  let calls = 0
+  try {
+    const runAgentActor: EpicServiceDependencies['runAgentActor'] = async (
+      input
+    ) => {
+      calls += 1
+      return {
+        role: input.role,
+        exitCode: 0,
+        output:
+          calls === 1
+            ? 'not-json'
+            : JSON.stringify({
+                tasks: [
+                  {
+                    id: 'T1',
+                    title: 'Valid task',
+                    objective: 'Produce a valid task.',
+                    files: { context: [], expectedChanges: [] },
+                    implementation: ['Implement the task.'],
+                    acceptanceCriteria: ['The task is complete.'],
+                    verification: ['git diff --check'],
+                    manualReviewSteps: ['Review the result.'],
+                    risks: [],
+                    requiredChecks: ['diff-check'],
+                    deferredChecks: [],
+                    reason: 'The diff must be valid.',
+                  },
+                ],
+              }),
+        stderr: '',
+        stdoutLogPath: path.join(input.agentRunDirectory, 'fake.log'),
+      }
+    }
+    const decompositionServices = createEpicServices(
+      context(),
+      () => ({ stage: 'decomposing_tasks', wait: 'active' }),
+      { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
+      configuration(),
+      { runAgentActor }
+    )
+
+    const next = await decompositionServices.decompose(state)
+
+    assert.equal(calls, 2)
+    assert.equal(next.tasks?.[0]?.id, 'T1')
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
+test('task decomposition does not retry an agent execution failure', async () => {
+  const { root, state } = await fixture()
+  let calls = 0
+  try {
+    const runAgentActor: EpicServiceDependencies['runAgentActor'] = async (
+      input
+    ) => {
+      calls += 1
+      return {
+        role: input.role,
+        exitCode: 1,
+        output: '',
+        stderr: 'provider unavailable',
+        stdoutLogPath: path.join(input.agentRunDirectory, 'fake.log'),
+      }
+    }
+    const decompositionServices = createEpicServices(
+      context(),
+      () => ({ stage: 'decomposing_tasks', wait: 'active' }),
+      { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
+      configuration(),
+      { runAgentActor }
+    )
+
+    await assert.rejects(
+      decompositionServices.decompose(state),
+      /Task decomposition failed: provider unavailable/
+    )
+    assert.equal(calls, 1)
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }
@@ -308,7 +499,7 @@ test('successful interrupted implementation is recovered without a duplicate age
   }
 })
 
-test('failed interrupted implementation retries while preserving scoped files', async () => {
+test('failed interrupted implementation retries while preserving planned and tool-generated files', async () => {
   const { root, state } = await fixture()
   try {
     await addDirtyPackageFiles(root)
@@ -365,7 +556,7 @@ test('recovered task reaches review, checkpoints once, and gives T2 a clean base
       ...task(),
       id: 'T2',
       title: 'Create second file',
-      scope: { read: [], modify: [], create: ['second.txt'], delete: [] },
+      files: { context: [], expectedChanges: ['second.txt'] },
     }
     const firstTask = state.tasks?.[0]
     assert.ok(firstTask)

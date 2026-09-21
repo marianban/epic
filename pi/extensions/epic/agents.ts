@@ -30,7 +30,6 @@ export interface AgentRunOptions {
   agentRunDirectory: string
   signal?: AbortSignal
   onProgress?: (message: string) => void
-  writablePaths?: string[]
   timeoutMs: number
 }
 
@@ -368,8 +367,7 @@ export async function runAgent(
         root,
         invocation.command,
         invocation.args,
-        options.signal,
-        options.writablePaths
+        options.signal
       )
       childCommand = '/bin/bash'
       childArgs = ['-c', sandboxedInvocation]
@@ -543,6 +541,12 @@ export function parseTaskDecomposition(output: string): EpicTask[] {
       typeof task.id !== 'string' ||
       typeof task.title !== 'string' ||
       typeof task.objective !== 'string' ||
+      !task.files ||
+      !Array.isArray(task.files.context) ||
+      !task.files.context.every((file) => typeof file === 'string') ||
+      !Array.isArray(task.files.expectedChanges) ||
+      !task.files.expectedChanges.every((file) => typeof file === 'string') ||
+      'scope' in task ||
       !Array.isArray(task.implementation) ||
       !Array.isArray(task.acceptanceCriteria) ||
       !Array.isArray(task.verification) ||

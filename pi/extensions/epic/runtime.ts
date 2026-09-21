@@ -234,8 +234,8 @@ export class EpicRuntime {
   // fallow-ignore-next-line unused-class-member -- consumed by epic lifecycle persistence.
   envelope(now: string): PersistedEpicEnvelope {
     return {
-      schemaVersion: 5,
-      machineVersion: 8,
+      schemaVersion: 6,
+      machineVersion: 10,
       epicId: this.metadataState.epicId,
       createdAt: this.metadataState.createdAt,
       updatedAt: now,

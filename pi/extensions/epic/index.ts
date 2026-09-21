@@ -11,6 +11,7 @@ import {
   approvePrerequisites,
   approveTask,
   reviseTask,
+  approveRecovery,
 } from './epic.ts'
 import {
   EPIC_STATUS_REFRESH_INTERVAL_MS,
@@ -38,6 +39,9 @@ export async function executeEpicDashboardAction(
     case EPIC_COMMANDS.resume:
       await resumeEpic(ctx)
       lifecycle.show(ctx)
+      return
+    case EPIC_COMMANDS.approveRecovery:
+      await approveRecovery(ctx)
       return
     case EPIC_COMMANDS.exit:
       lifecycle.hide(ctx)
@@ -68,6 +72,10 @@ export default function epicExtension(pi: ExtensionAPI): void {
       await resumeEpic(ctx)
       widgetLifecycle.show(ctx)
     },
+  })
+  pi.registerCommand(EPIC_COMMANDS.approveRecovery, {
+    description: 'Approve the proposed recovery and continue the epic',
+    handler: async (_args, ctx) => approveRecovery(ctx),
   })
   pi.registerCommand(EPIC_COMMANDS.approvePrerequisites, {
     description: 'Approve and apply detected repository prerequisites',

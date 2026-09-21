@@ -1,4 +1,8 @@
-import type { EpicTask, ReviewResult } from './types.ts'
+import type { ReviewResult } from './types.ts'
+import {
+  isRepositoryRelativePath,
+  isSafeRepairPath,
+} from './review-paths.ts'
 
 const REVIEW_STATUSES = new Set([
   'met',
@@ -13,16 +17,23 @@ function record(value: unknown): Record<string, unknown> | undefined {
     : undefined
 }
 
-export function validateReviewResult(
+function repositoryPaths(
   value: unknown,
-  task: EpicTask
-): ReviewResult {
+  allowEmpty: boolean
+): value is string[] {
+  return (
+    Array.isArray(value) &&
+    (allowEmpty || value.length > 0) &&
+    value.every(isRepositoryRelativePath)
+  )
+}
+
+export function validateReviewResult(value: unknown): ReviewResult {
   const result = record(value)
   if (
     !result ||
     typeof result.passed !== 'boolean' ||
     typeof result.summary !== 'string' ||
-    typeof result.requiresPlanRevision !== 'boolean' ||
     !Array.isArray(result.findings) ||
     !Array.isArray(result.acceptanceCriteria)
   ) {
@@ -38,7 +49,9 @@ export function validateReviewResult(
       !REVIEW_STATUSES.has(criterion.status) ||
       typeof criterion.evidence !== 'string'
     ) {
-      throw new Error('Reviewer returned invalid acceptance-criterion feedback.')
+      throw new Error(
+        'Reviewer returned invalid acceptance-criterion feedback.'
+      )
     }
   }
 
@@ -46,25 +59,26 @@ export function validateReviewResult(
     const finding = record(value)
     if (
       !finding ||
+      !repositoryPaths(finding.affectedPaths, false) ||
       !Array.isArray(finding.repairPaths) ||
       finding.repairPaths.length === 0 ||
-      finding.repairPaths.some(
-        (repairPath) =>
-          typeof repairPath !== 'string' ||
-          !task.scope.modify.includes(repairPath)
-      )
+      !finding.repairPaths.every(isSafeRepairPath) ||
+      (finding.file !== undefined &&
+        (!isRepositoryRelativePath(finding.file) ||
+          !finding.affectedPaths.includes(finding.file)))
     ) {
-      throw new Error('Reviewer returned invalid or out-of-scope repair feedback.')
+      throw new Error(
+        'Reviewer returned invalid or unsafe repair feedback.'
+      )
     }
   }
 
   if (
     result.passed === false &&
-    result.findings.length === 0 &&
-    result.requiresPlanRevision === false
+    result.findings.length === 0
   ) {
     throw new Error(
-      'Reviewer failed semantic review without an actionable repair or plan revision.'
+      'Reviewer failed semantic review without an actionable repair.'
     )
   }
 
