@@ -9,11 +9,19 @@ import { parseEpicDomainState } from '../pi/extensions/epic/domain-validation.ts
 import { AgentOutputCollector, parseTaskDecomposition } from '../pi/extensions/epic/agents.ts'
 import { formatEscalationMessage } from '../pi/extensions/epic/epic.ts'
 import { validateTaskExecutionResult } from '../pi/extensions/epic/machines/epic-machine.ts'
-import { parsePersistedEpicEnvelope } from '../pi/extensions/epic/persistence.ts'
+import {
+  parsePersistedEpicEnvelope,
+  persistImmutableJsonArtifact,
+} from '../pi/extensions/epic/persistence.ts'
 import { parseRepairAttempts } from '../pi/extensions/epic/machines/actor-system-projection.ts'
 import { activeAgentRuns, finishAgentRun, startAgentRun } from '../pi/extensions/epic/agent-activity.ts'
 import { resolveAgentProfile, resolveAgentProfiles } from '../pi/extensions/epic/agent-profiles.ts'
-import { currentTaskArtifactPath } from '../pi/extensions/epic/artifact-paths.ts'
+import {
+  checkResultArtifactPath,
+  currentTaskArtifactPath,
+  implementationDiffArtifactPath,
+  reviewResultArtifactPath,
+} from '../pi/extensions/epic/artifact-paths.ts'
 import { isImplementerSandboxSupported, quoteProcessInvocation } from '../pi/extensions/epic/implementer-sandbox.ts'
 import { formatDuration } from '../pi/extensions/epic/dashboard/formatting.ts'
 import { extractReviewInstructions, hashPlan, validatePlanCompleteness } from '../pi/extensions/epic/plan-review.ts'
@@ -179,6 +187,46 @@ test('agent activity rejects invalid clocks and duplicate run ids', () => {
 
 test('task artifact paths use one-based zero-padded task indexes', () => {
   assert.match(currentTaskArtifactPath({ ...domain('/repo'), currentTaskIndex: 4 }), /tasks\/task-005\.md$/)
+})
+
+test('generated result artifact paths include task, attempt, and unique identity', () => {
+  const state = { ...domain('/repo'), currentTaskIndex: 1 }
+  assert.equal(
+    implementationDiffArtifactPath(state, 3, 'diff-id'),
+    path.join('diffs', 'task-002-implementation-003-diff-id.json')
+  )
+  assert.equal(
+    checkResultArtifactPath(state, 'full', 'check-id'),
+    path.join('checks', 'task-002-full-check-id.json')
+  )
+  assert.equal(
+    reviewResultArtifactPath(state, 0, 'review-id'),
+    path.join('reviews', 'task-002-review-001-review-id.json')
+  )
+  assert.throws(
+    () => reviewResultArtifactPath(state, 0, '../escape'),
+    /Invalid review artifact token/
+  )
+})
+
+test('immutable artifacts fail instead of overwriting an existing result', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-artifact-'))
+  const state = domain(root)
+  try {
+    const relativePath = path.join('reviews', 'task-001-review-001-id.json')
+    const filePath = await persistImmutableJsonArtifact(state, relativePath, {
+      version: 1,
+    })
+    await assert.rejects(
+      persistImmutableJsonArtifact(state, relativePath, { version: 2 }),
+      (error: NodeJS.ErrnoException) => error.code === 'EEXIST'
+    )
+    assert.deepEqual(JSON.parse(await fs.readFile(filePath, 'utf8')), {
+      version: 1,
+    })
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
 })
 
 test('sandbox capability is platform-specific and invocation quoting is shell-safe', () => {

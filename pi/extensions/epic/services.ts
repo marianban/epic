@@ -12,7 +12,7 @@ import {
 import {
   appendEvent,
   loadEpicEvents,
-  persistJsonArtifact,
+  persistImmutableJsonArtifact,
   persistScoutReport,
   persistEpicTasks,
   writePlanRevision,
@@ -23,7 +23,12 @@ import {
   validatePlanForApproval,
   validatePlanRevision,
 } from './plan-review.ts'
-import { currentTaskArtifactPath } from './artifact-paths.ts'
+import {
+  checkResultArtifactPath,
+  currentTaskArtifactPath,
+  implementationDiffArtifactPath,
+  reviewResultArtifactPath,
+} from './artifact-paths.ts'
 import {
   implementerTask,
   plannerEpicPrompt,
@@ -703,9 +708,13 @@ export function createEpicServices(
       const diff = await getTaskDiff(next.repositoryRoot, baselineSha)
       const taskId = task.id
       const summary = summarizeDiff(diff)
-      next.lastDiffPath = await persistJsonArtifact(
+      next.lastDiffPath = await persistImmutableJsonArtifact(
         next,
-        `diffs/implementation-${String(next.implementationAttempt).padStart(3, '0')}.json`,
+        implementationDiffArtifactPath(
+          next,
+          next.implementationAttempt,
+          randomUUID()
+        ),
         { taskId, attempt: next.implementationAttempt, diff, summary }
       )
       await appendEvent(
@@ -725,9 +734,9 @@ export function createEpicServices(
         configuration
       )
       const next = { ...state }
-      next.lastCheckResultPath = await persistJsonArtifact(
+      next.lastCheckResultPath = await persistImmutableJsonArtifact(
         next,
-        `checks/${clock.nowMs()}.json`,
+        checkResultArtifactPath(next, suite, randomUUID()),
         result
       )
       await appendEvent(
@@ -779,9 +788,9 @@ export function createEpicServices(
       const next = { ...state }
       next.reviewedTaskDiffHash = hashTaskDiff(diff)
       next.taskRevalidationRequired = false
-      next.lastReviewResultPath = await persistJsonArtifact(
+      next.lastReviewResultPath = await persistImmutableJsonArtifact(
         next,
-        `reviews/review-${String(semanticAttempt + 1).padStart(3, '0')}.json`,
+        reviewResultArtifactPath(next, semanticAttempt, randomUUID()),
         result
       )
       const criteriaCompleted = result.acceptanceCriteria.filter(

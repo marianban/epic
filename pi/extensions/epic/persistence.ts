@@ -41,6 +41,17 @@ async function atomicWrite(filePath: string, content: string): Promise<void> {
   await fs.rename(temporary, filePath)
 }
 
+async function atomicCreate(filePath: string, content: string): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true })
+  const temporary = `${filePath}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    await fs.writeFile(temporary, content, 'utf8')
+    await fs.link(temporary, filePath)
+  } finally {
+    await fs.rm(temporary, { force: true })
+  }
+}
+
 export async function saveState(
   identity: EpicRunIdentity,
   envelope: PersistedEpicEnvelope
@@ -218,6 +229,19 @@ export async function persistJsonArtifact(
     relativePath
   )
   await atomicWrite(filePath, `${JSON.stringify(value, null, 2)}\n`)
+  return filePath
+}
+
+export async function persistImmutableJsonArtifact(
+  state: EpicRunIdentity,
+  relativePath: string,
+  value: unknown
+): Promise<string> {
+  const filePath = path.join(
+    runDirectory(state.repositoryRoot, state.epicId),
+    relativePath
+  )
+  await atomicCreate(filePath, `${JSON.stringify(value, null, 2)}\n`)
   return filePath
 }
 
