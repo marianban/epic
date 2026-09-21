@@ -92,7 +92,9 @@ async function fixture(): Promise<{
   const checkpointSha = await gitOutput(root, ['rev-parse', 'HEAD'])
   const checkpointTag = 'pi-epic/run-1/plan/checkpoint'
   await git(root, ['tag', checkpointTag])
-  await fs.mkdir(path.join(root, '.pi', 'epics', 'runs', 'run-1', 'tasks'), { recursive: true })
+  await fs.mkdir(path.join(root, '.pi', 'epics', 'runs', 'run-1', 'tasks'), {
+    recursive: true,
+  })
   const epicTask = task()
   const state: EpicDomainState = {
     epicId: 'run-1',
@@ -133,23 +135,24 @@ function context(): never {
   } as never
 }
 
-function dependencies(
-  calls: string[]
-): EpicServiceDependencies {
-  const runAgentActor: EpicServiceDependencies['runAgentActor'] = async (input) => {
+function dependencies(calls: string[]): EpicServiceDependencies {
+  const runAgentActor: EpicServiceDependencies['runAgentActor'] = async (
+    input
+  ) => {
     calls.push(input.role)
     const result: AgentRunResult = {
       role: input.role,
       exitCode: 0,
-      output: input.role === 'reviewer'
-        ? JSON.stringify({
-            passed: true,
-            summary: 'Recovered implementation is valid.',
-            acceptanceCriteria: [],
-            findings: [],
-            requiresPlanRevision: false,
-          })
-        : '',
+      output:
+        input.role === 'reviewer'
+          ? JSON.stringify({
+              passed: true,
+              summary: 'Recovered implementation is valid.',
+              acceptanceCriteria: [],
+              findings: [],
+              requiresPlanRevision: false,
+            })
+          : '',
       stderr: '',
       stdoutLogPath: path.join(input.agentRunDirectory, 'fake.log'),
     }
@@ -158,14 +161,77 @@ function dependencies(
   return { runAgentActor }
 }
 
+test('task decomposition invokes task-planner with the approved plan and epic context', async () => {
+  const { root, state } = await fixture()
+  const calls: { role: string; prompt: string }[] = []
+  try {
+    const runAgentActor: EpicServiceDependencies['runAgentActor'] = async (
+      input
+    ) => {
+      calls.push({ role: input.role, prompt: input.prompt })
+      const result: AgentRunResult = {
+        role: input.role,
+        exitCode: 0,
+        output: JSON.stringify({
+          tasks: [
+            {
+              id: 'T1',
+              title: 'Create package metadata',
+              objective: 'Create package metadata.',
+              scope: {
+                read: [],
+                modify: [],
+                create: ['package.json'],
+                delete: [],
+              },
+              implementation: ['Create package metadata.'],
+              acceptanceCriteria: ['Package metadata exists.'],
+              verification: ['test -f package.json'],
+              manualReviewSteps: ['Review package metadata.'],
+              risks: [],
+              requiredChecks: [],
+              deferredChecks: [],
+              reason: 'This task has no prerequisite tasks.',
+            },
+          ],
+        }),
+        stderr: '',
+        stdoutLogPath: path.join(input.agentRunDirectory, 'fake.log'),
+      }
+      return result
+    }
+    const decompositionServices = createEpicServices(
+      context(),
+      () => ({ stage: 'decomposing_tasks', wait: 'active' }),
+      { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
+      configuration(),
+      { runAgentActor }
+    )
+
+    const next = await decompositionServices.decompose(state)
+
+    assert.equal(calls[0]?.role, 'task-planner')
+    assert.match(calls[0]?.prompt ?? '', /Epic:\nRecovery test/)
+    assert.match(calls[0]?.prompt ?? '', /Approved plan:\n# Approved plan/)
+    assert.match(calls[0]?.prompt ?? '', /less capable local LLM/)
+    assert.match(calls[0]?.prompt ?? '', /Optimize for reliable execution/)
+    assert.match(calls[0]?.prompt ?? '', /Intermediate milestones are valid/)
+    assert.doesNotMatch(calls[0]?.prompt ?? '', /fewest cohesive/)
+    assert.deepEqual(
+      next.tasks?.map((item) => item.id),
+      ['T1']
+    )
+  } finally {
+    await fs.rm(root, { recursive: true, force: true })
+  }
+})
+
 async function nextTurn(): Promise<void> {
   await new Promise<void>((resolve) => queueMicrotask(resolve))
   await new Promise<void>((resolve) => setImmediate(resolve))
 }
 
-function services(
-  calls: string[]
-): ReturnType<typeof createEpicServices> {
+function services(calls: string[]): ReturnType<typeof createEpicServices> {
   return createEpicServices(
     context(),
     () => ({ stage: 'implementing', wait: 'active' }),
@@ -177,7 +243,10 @@ function services(
 
 async function addDirtyPackageFiles(root: string): Promise<void> {
   await fs.writeFile(path.join(root, 'package.json'), '{"name":"recovered"}\n')
-  await fs.writeFile(path.join(root, 'package-lock.json'), '{"lockfileVersion":3}\n')
+  await fs.writeFile(
+    path.join(root, 'package-lock.json'),
+    '{"lockfileVersion":3}\n'
+  )
 }
 
 async function journalImplementer(
@@ -185,20 +254,32 @@ async function journalImplementer(
   invocationId: string,
   exitCode?: number
 ): Promise<void> {
-  await appendEvent(state, 'implementing', '2026-08-16T00:00:00.000Z', 'agent_started', {
-    invocationId,
-    role: 'implementer',
-    action: 'implementation',
-    taskId: 'T1',
-  })
-  if (exitCode !== undefined) {
-    await appendEvent(state, 'implementing', '2026-08-16T00:00:01.000Z', 'agent_finished', {
+  await appendEvent(
+    state,
+    'implementing',
+    '2026-08-16T00:00:00.000Z',
+    'agent_started',
+    {
       invocationId,
       role: 'implementer',
       action: 'implementation',
       taskId: 'T1',
-      exitCode,
-    })
+    }
+  )
+  if (exitCode !== undefined) {
+    await appendEvent(
+      state,
+      'implementing',
+      '2026-08-16T00:00:01.000Z',
+      'agent_finished',
+      {
+        invocationId,
+        role: 'implementer',
+        action: 'implementation',
+        taskId: 'T1',
+        exitCode,
+      }
+    )
   }
 }
 
@@ -218,7 +299,10 @@ test('successful interrupted implementation is recovered without a duplicate age
     assert.ok(diffPath)
     assert.match(await fs.readFile(diffPath, 'utf8'), /package\.json/)
     const events = await loadEpicEvents(state)
-    assert.equal(events.filter((event) => event.type === 'task_diff_updated').length, 1)
+    assert.equal(
+      events.filter((event) => event.type === 'task_diff_updated').length,
+      1
+    )
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }
@@ -235,8 +319,14 @@ test('failed interrupted implementation retries while preserving scoped files', 
 
     assert.deepEqual(calls, ['implementer'])
     assert.equal(next.implementationAttempt, 1)
-    assert.equal(await fs.readFile(path.join(root, 'package.json'), 'utf8'), '{"name":"recovered"}\n')
-    assert.equal(await fs.readFile(path.join(root, 'package-lock.json'), 'utf8'), '{"lockfileVersion":3}\n')
+    assert.equal(
+      await fs.readFile(path.join(root, 'package.json'), 'utf8'),
+      '{"name":"recovered"}\n'
+    )
+    assert.equal(
+      await fs.readFile(path.join(root, 'package-lock.json'), 'utf8'),
+      '{"lockfileVersion":3}\n'
+    )
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }
@@ -246,14 +336,20 @@ test('ambiguous dirty recovery fails without changing the worktree or journal', 
   const { root, state } = await fixture()
   try {
     await addDirtyPackageFiles(root)
-    const beforePackage = await fs.readFile(path.join(root, 'package.json'), 'utf8')
+    const beforePackage = await fs.readFile(
+      path.join(root, 'package.json'),
+      'utf8'
+    )
     const beforeEvents = await loadEpicEvents(state)
 
     await assert.rejects(
       () => services([]).implement(state),
       /Incomplete task recovery: the event journal has no implementer start/
     )
-    assert.equal(await fs.readFile(path.join(root, 'package.json'), 'utf8'), beforePackage)
+    assert.equal(
+      await fs.readFile(path.join(root, 'package.json'), 'utf8'),
+      beforePackage
+    )
     assert.deepEqual(await loadEpicEvents(state), beforeEvents)
   } finally {
     await fs.rm(root, { recursive: true, force: true })
@@ -301,7 +397,10 @@ test('recovered task reaches review, checkpoints once, and gives T2 a clean base
     assert.equal(checkpointed.checkpoint?.ordinal, 1)
     const checkpoint = checkpointed.checkpoint
     assert.ok(checkpoint)
-    assert.equal(await gitOutput(root, ['rev-parse', 'HEAD']), await gitOutput(root, ['rev-parse', checkpoint.tag]))
+    assert.equal(
+      await gitOutput(root, ['rev-parse', 'HEAD']),
+      await gitOutput(root, ['rev-parse', checkpoint.tag])
+    )
 
     const nextState: EpicDomainState = {
       ...checkpointed,
@@ -311,7 +410,10 @@ test('recovered task reaches review, checkpoints once, and gives T2 a clean base
     }
     await fs.writeFile(currentTaskArtifactPath(nextState), '# Task 2\n')
     const t2 = await epicServices.implement(nextState)
-    assert.equal(t2.taskBaselineSha, await gitOutput(root, ['rev-parse', 'HEAD']))
+    assert.equal(
+      t2.taskBaselineSha,
+      await gitOutput(root, ['rev-parse', 'HEAD'])
+    )
     assert.deepEqual(calls, ['reviewer', 'implementer'])
     actor.stop()
   } finally {

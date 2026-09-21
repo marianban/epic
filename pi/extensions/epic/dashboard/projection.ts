@@ -167,7 +167,16 @@ function implementedTaskMessage(state: DashboardRunState): string {
     currentTaskArtifactPath(state),
     `task-${String(state.currentTaskIndex + 1).padStart(3, '0')}.md`
   )
-  return `Implemented ${task}. Manually verify the acceptance criteria, then leave comments marked with R: in case of an issue.`
+  return `Implemented ${task}. Verify the acceptance criteria and manual review steps below, then leave comments marked with R: in case of an issue.`
+}
+
+function currentTaskDefinition(state: DashboardRunState): EpicTask {
+  const index = nonNegativeInteger(state.currentTaskIndex, 'currentTaskIndex')
+  const task = state.tasks?.[index]
+  if (task === undefined) {
+    throw new Error(`currentTaskIndex must refer to an existing task.`)
+  }
+  return task
 }
 
 function actionRequired(
@@ -218,12 +227,16 @@ function actionRequired(
         actions: taskActions(),
       }
     case 'awaiting_task_review':
-      return {
-        id: 'task-action-required',
-        severity: 'warning',
-        title: 'Task implementation completed',
-        message: implementedTaskMessage(state),
-        actions: taskActions(),
+      {
+        const task = currentTaskDefinition(state)
+        return {
+          id: 'task-action-required',
+          severity: 'warning',
+          title: 'Task implementation completed',
+          message: implementedTaskMessage(state),
+          manualReviewSteps: task.manualReviewSteps,
+          actions: taskActions(),
+        }
       }
     case 'escalating': {
       const failureReason = state.failureReason ?? boundaryFailureReason

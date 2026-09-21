@@ -118,6 +118,7 @@ export interface DashboardActionRequest {
   readonly severity: 'info' | 'warning' | 'critical'
   readonly title: string
   readonly message?: string
+  readonly manualReviewSteps?: readonly string[]
   readonly actions: readonly DashboardAction[]
 }
 

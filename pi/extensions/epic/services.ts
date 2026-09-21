@@ -29,10 +29,11 @@ import {
   plannerEpicPrompt,
   reviewerTask,
   scoutEpicPrompt,
-  taskDecompositionTask,
+  taskPlannerTask,
   taskReviewTask,
 } from './prompts.ts'
 import { applyPrerequisites, discoverPrerequisites } from './prerequisites.ts'
+import { validateReviewResult } from './review-validation.ts'
 import { runAgentActor } from './machines/actors.ts'
 import { finishAgentRun, startAgentRun } from './agent-activity.ts'
 import { resolveAgentProfile } from './agent-profiles.ts'
@@ -481,8 +482,8 @@ export function createEpicServices(
       const plan = await readApprovedPlan(state)
       const run = await runRole(
         state,
-        'planner',
-        taskDecompositionTask(state, plan),
+        'task-planner',
+        taskPlannerTask(state, plan),
         'task decomposition',
         undefined
       )
@@ -633,20 +634,10 @@ export function createEpicServices(
       )
       if (run.exitCode !== 0)
         throw new Error(`Reviewer failed: ${agentFailure(run)}`)
-      const result = parseJsonResponse<ReviewResult>(run.output, 'reviewer')
+      const parsed = parseJsonResponse<ReviewResult>(run.output, 'reviewer')
       const task = state.tasks?.[state.currentTaskIndex]
       if (task === undefined) throw new Error('Cannot review without a current task.')
-      if (
-        typeof result.passed !== 'boolean' ||
-        !Array.isArray(result.findings) ||
-        !Array.isArray(result.acceptanceCriteria) ||
-        result.acceptanceCriteria.some(
-          (criterion) =>
-            typeof criterion.criterion !== 'string' ||
-            !['met', 'partially_met', 'not_met'].includes(criterion.status)
-        ) || result.findings.some((finding) => !Array.isArray(finding.repairPaths) || finding.repairPaths.some((repairPath) => typeof repairPath !== 'string' || !task.scope.modify.includes(repairPath)))
-      )
-        throw new Error('Reviewer returned invalid or out-of-scope repair feedback.')
+      const result = validateReviewResult(parsed, task)
       const next = { ...state }
       next.lastReviewResultPath = await persistJsonArtifact(
         next,

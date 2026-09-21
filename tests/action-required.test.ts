@@ -57,6 +57,41 @@ test('renders severity, title, message, and every action', () => {
   assert.match(output, /▸\[ Continue \]/)
 })
 
+test('renders manual review steps before checkpoint actions', () => {
+  const component = new ActionRequired(
+    request({
+      message: 'Verify the implementation.',
+      manualReviewSteps: [
+        'Open the settings screen and confirm the new control is visible.',
+        'Toggle the control and verify the updated behavior.',
+      ],
+    }),
+    identityTheme,
+    () => undefined
+  )
+
+  const output = component.render(100).join('\n')
+  assert.match(
+    output,
+    /Manual Review Steps[\s\S]*1\. Open the settings screen[\s\S]*2\. Toggle the control[\s\S]*▸\[ Continue \]/
+  )
+})
+
+test('wraps manual review steps without clipping', () => {
+  const lines = new ActionRequired(
+    request({
+      manualReviewSteps: [
+        'This manual review step is deliberately long enough to wrap across multiple lines.',
+      ],
+    }),
+    identityTheme,
+    () => undefined
+  ).render(30)
+
+  assert.match(lines.join('\n'), /Manual Review Steps/)
+  assert.ok(lines.every((line) => visibleWidth(line) <= 30))
+})
+
 test('renders the checkpoint with an accented border and elevated background', () => {
   const foregrounds: string[] = []
   const backgrounds: string[] = []

@@ -2,7 +2,7 @@
 
 This project-local extension provides one sequential, human-gated epic:
 
-`/epic` → Scout → Planner → run-scoped `plan.md` review → approval → task decomposition → prerequisite check/approval → (human task review/approval → Implementer → deterministic checks → Reviewer → post-implementation human task review) for each task → final verification.
+`/epic` → Scout → Planner → run-scoped `plan.md` review → approval → Task Planner → prerequisite check/approval → (human task review/approval → Implementer → deterministic checks → Reviewer → post-implementation human task review) for each task → final verification.
 
 ## Installation
 
@@ -20,7 +20,7 @@ The epic can be visualized while it runs with Stately Inspector. Set `inspector.
 
 The inspector shows root and child actor transitions as a live state-machine and sequence view. It is intended for local debugging; do not enable it for epics whose event or context data must remain private.
 
-The initial Scout is not necessarily the only discovery pass. A Planner may return a focused `needs_more_context` request; the engine sends only those questions to another read-only Scout and gives the merged evidence back to the Planner. This loop is bounded by `maxScoutRounds` (default: 3).
+The initial Scout is not necessarily the only discovery pass. A Planner may return a focused `needs_more_context` request; the engine sends only those questions to another read-only Scout and gives the merged evidence back to the Planner. This loop is bounded by `maxScoutRounds` (default: 3). After plan approval, the Task Planner receives the hash-verified plan plus epic/repository context and decomposes it into ordered, independently reviewable tasks.
 
 ## Commands
 
@@ -37,7 +37,7 @@ The initial Scout is not necessarily the only discovery pass. A Planner may retu
 
 Plan approval records a hash, then starts implementation. The approved plan hash remains in persisted state so implementation cannot be entered through an unapproved path.
 
-After approval, the Planner writes a persisted task manifest and one artifact per task under `.pi/epics/runs/<epic-id>/tasks/`. Before each task’s implementation, the epic pauses for human review of its artifact. Human findings are added as `R:` lines and revised by the task reviewer through `/task-review`; implementation cannot begin until `/task-approve` is run. After implementation and semantic review, the epic pauses again for human review; post-implementation `R:` findings are fixed by the Implementer through `/task-review` before the task can be approved and the epic advances.
+After approval, the Task Planner writes a persisted task manifest and one artifact per task under `.pi/epics/runs/<epic-id>/tasks/`. Before each task’s implementation, the epic pauses for human review of its artifact. Human findings are added as `R:` lines and revised by the task reviewer through `/task-review`; implementation cannot begin until `/task-approve` is run. After implementation and semantic review, the epic pauses again for human review; post-implementation `R:` findings are fixed by the Implementer through `/task-review` before the task can be approved and the epic advances.
 
 ## Persistence and checks
 
@@ -53,4 +53,4 @@ Fast, full, semantic-repair, and final-verification stages are persisted indepen
 
 ## Security boundaries
 
-The extension rejects paths outside the repository and sensitive paths such as `.env`, SSH keys, credentials, and token files. Scout, Planner, and Reviewer cannot write; the Implementer may write repository files but cannot write the run plan, epic state, or `.git`. Implementer processes are sandboxed with macOS `sandbox-exec` or Linux `bubblewrap`; writes are limited to the repository, temporary files, and Pi's global agent directory (needed for Pi settings and credential lock files), while network access is unrestricted. This means the Implementer can modify global Pi settings or authentication storage and reach any external service; review the configured commands and role models before trusting a project-local epic. Native Windows is unsupported for Implementers; run Pi from WSL. If the OS sandbox cannot initialize, the Implementer fails instead of falling back to an unrestricted process. Repository-level `git init` and dependency installation still require the dedicated human approval command, while an explicitly approved task-local install is permitted for the Implementer.
+The extension rejects paths outside the repository and sensitive paths such as `.env`, SSH keys, credentials, and token files. Scout, Planner, Task Planner, and Reviewer cannot write; the Implementer may write repository files but cannot write the run plan, epic state, or `.git`. Implementer processes are sandboxed with macOS `sandbox-exec` or Linux `bubblewrap`; writes are limited to the repository, temporary files, and Pi's global agent directory (needed for Pi settings and credential lock files), while network access is unrestricted. This means the Implementer can modify global Pi settings or authentication storage and reach any external service; review the configured commands and role models before trusting a project-local epic. Native Windows is unsupported for Implementers; run Pi from WSL. If the OS sandbox cannot initialize, the Implementer fails instead of falling back to an unrestricted process. Repository-level `git init` and dependency installation still require the dedicated human approval command, while an explicitly approved task-local install is permitted for the Implementer.

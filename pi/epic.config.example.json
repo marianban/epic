@@ -32,6 +32,11 @@
       "model": "gpt-5.6-luna",
       "thinking": "high"
     },
+    "task-planner": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "thinking": "high"
+    },
     "plan-reviewer": {
       "provider": "openai-codex",
       "model": "gpt-5.6-luna",

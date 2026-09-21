@@ -21,6 +21,14 @@ const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
     temperature: 0.1,
     thinking: 'high',
   },
+  'task-planner': {
+    role: 'task-planner',
+    systemPromptPath: '.pi/agents/task-planner.md',
+    tools: ['read', 'grep', 'find', 'ls'],
+    readOnly: true,
+    temperature: 0.1,
+    thinking: 'high',
+  },
   'plan-reviewer': {
     role: 'plan-reviewer',
     systemPromptPath: '.pi/agents/plan-reviewer.md',
@@ -58,6 +66,7 @@ const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
 export const CANONICAL_AGENT_ROLE_ORDER: readonly AgentRole[] = [
   'scout',
   'planner',
+  'task-planner',
   'implementer',
   'reviewer',
   'plan-reviewer',

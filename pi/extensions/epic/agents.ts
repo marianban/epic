@@ -534,9 +534,9 @@ export function parsePlannerResponse(
 }
 
 export function parseTaskDecomposition(output: string): EpicTask[] {
-  const parsed = parseJsonResponse<{ tasks?: EpicTask[] }>(output, 'planner')
+  const parsed = parseJsonResponse<{ tasks?: EpicTask[] }>(output, 'task-planner')
   if (!Array.isArray(parsed.tasks) || parsed.tasks.length === 0)
-    throw new Error('Planner returned no implementation tasks.')
+    throw new Error('Task Planner returned no implementation tasks.')
   for (const task of parsed.tasks) {
     if (
       !task ||
@@ -552,7 +552,7 @@ export function parseTaskDecomposition(output: string): EpicTask[] {
       typeof task.reason !== 'string' ||
       task.reason.trim().length === 0
     )
-      throw new Error('Planner returned an invalid task.')
+      throw new Error('Task Planner returned an invalid task.')
     if (
       task.acceptanceCriteria.length === 0 ||
       task.manualReviewSteps.length === 0

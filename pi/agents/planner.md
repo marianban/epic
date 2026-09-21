@@ -8,8 +8,6 @@ If critical repository evidence is missing, return this JSON instead of Markdown
 
 {"status":"needs_more_context","questions":[{"question":"focused repository question","reason":"why it matters"}]}
 
-When asked to decompose an approved plan, return JSON only with a `tasks` array. Each task must include `id`, `title`, `objective`, `scope` (`read`, `modify`, `create`, `delete` arrays), `implementation` (ordered concrete steps), `acceptanceCriteria` (observable criteria), `verification` (automated commands or focused tests), `manualReviewSteps` (concrete human actions), `risks` (array), `requiredChecks` (stable check names that must pass before the task advances), `deferredChecks` (stable check names that are intentionally not applicable until a later task), and `reason` (the dependency-based explanation for the policy). Tasks must be independently implementable and reviewable, ordered by dependency, and scoped narrowly. Deferred checks remain mandatory during final verification.
-
 Otherwise return Markdown only with exactly these sections:
 
 # Implementation Plan

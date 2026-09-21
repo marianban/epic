@@ -100,10 +100,14 @@ test('agent profiles merge defaults and partial overrides into a complete canoni
   } as ResolvedEpicConfiguration
   assert.equal(resolveAgentProfile('scout', configuration).thinking, 'low')
   assert.equal(resolveAgentProfile('scout', configuration).model, 'scout-model')
+  assert.equal(resolveAgentProfile('planner', configuration).systemPromptPath, '.pi/agents/planner.md')
+  assert.equal(resolveAgentProfile('task-planner', configuration).systemPromptPath, '.pi/agents/task-planner.md')
+  assert.equal(resolveAgentProfile('task-planner', configuration).thinking, 'high')
   const roles = resolveAgentProfiles(configuration).map((profile) => profile.role)
   const expected: AgentRole[] = [
     'scout',
     'planner',
+    'task-planner',
     'implementer',
     'reviewer',
     'plan-reviewer',
@@ -125,7 +129,8 @@ test('agent output collector captures Pi identity and rejects identity changes',
 })
 
 test('task decomposition parser requires independently reviewable task fields', () => {
-  assert.throws(() => parseTaskDecomposition(JSON.stringify([{ id: 'T1' }])), /no implementation tasks/i)
+  assert.throws(() => parseTaskDecomposition(JSON.stringify([{ id: 'T1' }])), /Task Planner returned no implementation tasks/)
+  assert.throws(() => parseTaskDecomposition('not-json'), /task-planner returned invalid JSON/)
 })
 
 test('escalation formatting retains the durable failure reason', () => {

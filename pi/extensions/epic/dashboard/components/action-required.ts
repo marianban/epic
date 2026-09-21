@@ -157,10 +157,15 @@ export class ActionRequired implements Component {
             this.theme.fg('text', state.message),
             Math.max(1, innerWidth)
           )
+    const manualReviewLines = this.renderManualReviewSteps(
+      state.manualReviewSteps,
+      innerWidth
+    )
     const actionLines = this.renderActions(state.actions, innerWidth)
     const content = [
       ...titleLines,
       ...(messageLines.length > 0 ? ['', ...messageLines] : []),
+      ...(manualReviewLines.length > 0 ? ['', ...manualReviewLines] : []),
       ...(actionLines.length > 0 ? ['', ...actionLines] : []),
     ]
     const lines = [
@@ -228,6 +233,22 @@ export class ActionRequired implements Component {
     }
     flushInline()
     return rows
+  }
+
+  private renderManualReviewSteps(
+    steps: readonly string[] | undefined,
+    innerWidth: number
+  ): string[] {
+    if (steps === undefined || steps.length === 0 || innerWidth <= 0) {
+      return []
+    }
+
+    return [
+      this.theme.bold(this.theme.fg('text', 'Manual Review Steps')),
+      ...steps.flatMap((step, index) =>
+        wrapTextWithAnsi(`${index + 1}. ${step}`, Math.max(1, innerWidth))
+      ),
+    ]
   }
 
   private renderButton(action: DashboardAction, label: string): string {

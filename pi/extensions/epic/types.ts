@@ -29,6 +29,7 @@ export type EpicComplexity = 'simple' | 'moderate' | 'complex'
 export type AgentRole =
   | 'scout'
   | 'planner'
+  | 'task-planner'
   | 'plan-reviewer'
   | 'task-reviewer'
   | 'implementer'
@@ -256,7 +257,7 @@ export interface ReviewResult {
   summary: string
   acceptanceCriteria: {
     criterion: string
-    status: 'met' | 'partially_met' | 'not_met'
+    status: 'met' | 'partially_met' | 'not_met' | 'manual_review_pending'
     evidence: string
   }[]
   findings: {

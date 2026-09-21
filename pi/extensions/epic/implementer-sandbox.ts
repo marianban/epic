@@ -1,4 +1,5 @@
 import * as path from 'node:path'
+import { realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { getAgentDir } from '@earendil-works/pi-coding-agent'
 import {
@@ -8,6 +9,29 @@ import {
 
 let initializedRoot: string | undefined
 let initializedWritablePaths = ''
+
+export function canonicalTemporaryPaths(
+  platform = process.platform,
+  processTemporaryDirectory = tmpdir()
+): string[] {
+  const candidates = new Set([processTemporaryDirectory, '/tmp', '/var/tmp'])
+  if (platform === 'darwin') {
+    candidates.add('/private/tmp')
+    candidates.add('/private/var/tmp')
+  }
+
+  const paths = new Set<string>()
+  for (const candidate of candidates) {
+    const resolved = path.resolve(candidate)
+    paths.add(resolved)
+    try {
+      paths.add(realpathSync(resolved))
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+    }
+  }
+  return [...paths]
+}
 
 export function isImplementerSandboxSupported(
   platform = process.platform
@@ -36,7 +60,12 @@ function implementerSandboxConfig(root: string, writablePaths: readonly string[]
       // describe the intended change and are validated after the run, but
       // they cannot be the sandbox's filesystem boundary because normal
       // workflows create derived files and directories such as node_modules.
-      allowWrite: [repositoryRoot, ...writablePaths.map((file) => path.resolve(repositoryRoot, file)), tmpdir(), getAgentDir()],
+      allowWrite: [
+        repositoryRoot,
+        ...writablePaths.map((file) => path.resolve(repositoryRoot, file)),
+        ...canonicalTemporaryPaths(),
+        getAgentDir(),
+      ],
       denyWrite: [
         path.join(repositoryRoot, '.git'),
         path.join(repositoryRoot, '.pi', 'epics'),

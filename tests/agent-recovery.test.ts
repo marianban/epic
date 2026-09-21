@@ -19,11 +19,11 @@ import type {
 
 function profile(): AgentProfile {
   return {
-    role: 'planner',
+    role: 'task-planner',
     provider: 'openai-codex',
     model: 'gpt-5.6-luna',
     thinking: 'high',
-    systemPromptPath: '.pi/agents/planner.md',
+    systemPromptPath: '.pi/agents/task-planner.md',
     tools: [],
     readOnly: true,
   }
@@ -78,7 +78,7 @@ test('resume recovery persists a terminal finish and freezes dashboard time', as
     const recoveredAt = '2026-08-16T14:18:51.088Z'
     await appendEvent(state, 'decomposing_tasks', startedAt, 'agent_started', {
       invocationId: 'planner-1',
-      role: 'planner',
+      role: 'task-planner',
       action: 'task decomposition',
       provider: 'openai-codex',
       model: 'gpt-5.6-luna',
@@ -140,7 +140,7 @@ test('resume recovery leaves a live invocation untouched', async () => {
     const startedAt = '2026-08-16T14:08:51.088Z'
     await appendEvent(state, 'decomposing_tasks', startedAt, 'agent_started', {
       invocationId: 'planner-1',
-      role: 'planner',
+      role: 'task-planner',
       action: 'task decomposition',
     })
     const liveRun: ActiveAgentRun = {
@@ -148,7 +148,7 @@ test('resume recovery leaves a live invocation untouched', async () => {
       epicId: state.epicId,
       invocationId: 'planner-1',
       startedAtMs: Date.parse(startedAt),
-      role: 'planner',
+      role: 'task-planner',
       action: 'task decomposition',
     }
 

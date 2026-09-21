@@ -2,7 +2,10 @@ import type {
   AgentProfile,
   EpicEvent,
 } from '../types.ts'
-import { compareAgentRoles } from '../agent-profiles.ts'
+import {
+  CANONICAL_AGENT_ROLE_ORDER,
+  compareAgentRoles,
+} from '../agent-profiles.ts'
 import type {
   ActiveAgentRun,
   PipelineAgentDashboardState,
@@ -565,7 +568,7 @@ function modelSortKey(model: ModelAccumulator): [number, string, string] {
   const firstRole = [...model.roles].sort(compareAgentRoles)[0] ?? ''
   const roleIndex = [...model.roles]
     .map((role) => {
-      const canonical = ['scout', 'planner', 'implementer', 'reviewer', 'plan-reviewer', 'task-reviewer'].indexOf(role)
+      const canonical = CANONICAL_AGENT_ROLE_ORDER.indexOf(role as AgentProfile['role'])
       return canonical === -1 ? Number.MAX_SAFE_INTEGER : canonical
     })
     .sort((left, right) => left - right)[0] ?? Number.MAX_SAFE_INTEGER
