@@ -50,6 +50,9 @@ const STAGE_STATUS: Record<EpicStage, EpicDashboardStatus> = {
   repairing_fast_checks: 'in-progress',
   running_full_checks: 'in-progress',
   repairing_full_checks: 'in-progress',
+  starting_dev_server: 'in-progress',
+  running_browser_smoke: 'in-progress',
+  repairing_browser_smoke: 'in-progress',
   reviewing: 'in-progress',
   repairing_review: 'in-progress',
   escalating: 'escalating',
@@ -524,6 +527,9 @@ const TASK_STAGES = new Set<EpicStage>([
   'repairing_fast_checks',
   'running_full_checks',
   'repairing_full_checks',
+  'starting_dev_server',
+  'running_browser_smoke',
+  'repairing_browser_smoke',
   'reviewing',
   'repairing_review',
   'escalating',
@@ -656,6 +662,9 @@ function taskStatus(
     case 'repairing_fast_checks':
     case 'running_full_checks':
     case 'repairing_full_checks':
+    case 'starting_dev_server':
+    case 'running_browser_smoke':
+    case 'repairing_browser_smoke':
     case 'reviewing':
     case 'repairing_review':
       return 'in-progress'

@@ -29,6 +29,7 @@
     "@anthropic-ai/sandbox-runtime": "^0.0.26",
     "@earendil-works/pi-tui": "^0.86.0",
     "@statelyai/inspect": "^0.7.2",
+    "playwright-core": "^1.63.0",
     "xstate": "^5.32.5"
   }
 }

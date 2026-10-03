@@ -18,6 +18,9 @@ export type EpicStage =
   | 'repairing_fast_checks'
   | 'running_full_checks'
   | 'repairing_full_checks'
+  | 'starting_dev_server'
+  | 'running_browser_smoke'
+  | 'repairing_browser_smoke'
   | 'reviewing'
   | 'repairing_review'
   | 'escalating'
@@ -73,6 +76,8 @@ export interface EpicDomainState {
   lastCheckResultPath?: string
   lastReviewResultPath?: string
   lastDiffPath?: string
+  devServer?: DevServerLaunchSpec
+  lastBrowserSmokeResultPath?: string
   /** Immutable Git commit used to calculate the current task's application delta. */
   taskBaselineSha?: string
   /** Descendant HEAD explicitly accepted by a human for the current task. */
@@ -159,7 +164,7 @@ export interface EpicTimer {
 
 export interface PersistedEpicEnvelope extends EpicRunMetadata {
   schemaVersion: 6
-  machineVersion: 10
+  machineVersion: 11
   snapshot: unknown
 }
 
@@ -193,6 +198,45 @@ export interface EpicTask {
   requiredChecks: string[]
   deferredChecks: string[]
   reason: string
+}
+
+export interface DevServerLaunchSpec {
+  command: string
+  args: string[]
+  url: string
+  readySelector: string
+}
+
+export interface ImplementerResult {
+  summary: string
+  checks: string[]
+  devServer?: DevServerLaunchSpec
+}
+
+export interface DevServerDiagnostics {
+  command: string
+  args: string[]
+  url: string
+  pid?: number
+  stdoutPreview: string
+  stderrPreview: string
+  outputTruncated: boolean
+}
+
+export interface BrowserIdentity {
+  executablePath: string
+  version: string
+}
+
+export interface BrowserSmokeResult {
+  passed: boolean
+  url: string
+  readySelector: string
+  durationMs: number
+  browser?: BrowserIdentity
+  screenshotPath?: string
+  findings: Finding[]
+  server: DevServerDiagnostics
 }
 
 export interface Prerequisite {
@@ -357,6 +401,13 @@ export interface EpicConfig {
     focusedTests?: string
     fallow?: string
     fallowBaseline?: string
+    browserSmoke?: {
+      executablePath?: string
+      startupTimeoutMs?: number
+      navigationTimeoutMs?: number
+      selectorTimeoutMs?: number
+      settleTimeoutMs?: number
+    }
   }
   agents?: Partial<Record<AgentRole, Partial<AgentProfile>>>
 }
@@ -370,6 +421,14 @@ export interface ResolvedEpicConfiguration {
   maxFullRepairs: number
   maxSemanticRepairs: number
   maxTaskPlanRepairs: number
-  checks: NonNullable<EpicConfig['checks']>
+  checks: Omit<NonNullable<EpicConfig['checks']>, 'browserSmoke'> & {
+    browserSmoke: {
+      executablePath?: string
+      startupTimeoutMs: number
+      navigationTimeoutMs: number
+      selectorTimeoutMs: number
+      settleTimeoutMs: number
+    }
+  }
   agents: Partial<Record<AgentRole, Partial<AgentProfile>>>
 }

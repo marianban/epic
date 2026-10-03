@@ -48,6 +48,12 @@ const childStages: Record<string, EpicStage> = {
   repairingFast: 'repairing_fast_checks',
   repairingFastInvoke: 'repairing_fast_checks',
   fullChecks: 'running_full_checks',
+  routeAfterFullChecks: 'running_full_checks',
+  'browserVerification.startingDevServer': 'starting_dev_server',
+  'browserVerification.runningSmoke': 'running_browser_smoke',
+  'browserVerification.recordingServerFailure': 'running_browser_smoke',
+  repairingBrowserSmoke: 'repairing_browser_smoke',
+  repairingBrowserSmokeInvoke: 'repairing_browser_smoke',
   repairingFull: 'repairing_full_checks',
   repairingFullInvoke: 'repairing_full_checks',
   reviewing: 'reviewing',
@@ -117,7 +123,7 @@ export function parseRepairAttempts(
 }
 
 function projectChild(snapshot: TaskChildSnapshot): EpicBoundaryView {
-  const key = String(snapshot.value)
+  const key = stateValueKey(snapshot.value)
   const stage = childStages[key]
   if (!stage) throw new Error(`Unknown task actor state: ${key}.`)
   if (!snapshot.context || !('repairs' in snapshot.context))
@@ -128,6 +134,18 @@ function projectChild(snapshot: TaskChildSnapshot): EpicBoundaryView {
     { state: key, repairs },
     taskFailureDiagnostics(snapshot, stage, repairs)
   )
+}
+
+function stateValueKey(value: unknown): string {
+  if (typeof value === 'string') return value
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw new Error('task actor state value is malformed.')
+  const entries = Object.entries(value)
+  if (entries.length !== 1)
+    throw new Error('task actor state value must contain one active branch.')
+  const entry = entries[0]
+  if (!entry) throw new Error('task actor state value is empty.')
+  return `${entry[0]}.${stateValueKey(entry[1])}`
 }
 
 function taskFailureDiagnostics(

@@ -1,6 +1,8 @@
-import { assign, fromPromise, setup } from 'xstate'
+import { assign, fromCallback, fromPromise, setup } from 'xstate'
 import type {
+  BrowserSmokeResult,
   CheckSuiteResult,
+  DevServerDiagnostics,
   ReviewResult,
   EpicDomainState,
   RepairAttempts,
@@ -12,6 +14,9 @@ interface TaskExecutionContext {
   failureReason?: string
   fast?: CheckSuiteResult
   full?: CheckSuiteResult
+  browserSmoke?: BrowserSmokeResult
+  server?: DevServerDiagnostics
+  serverFailure?: string
   review?: ReviewResult
   repairs: RepairAttempts
   revalidate?: boolean
@@ -25,6 +30,12 @@ export type TaskExecutionEvent =
   | { type: 'TASK.REVIEW' }
   | { type: 'TASK.REVISE' }
   | { type: 'EPIC.RESUME' }
+  | { type: 'DEV_SERVER.READY'; diagnostics: DevServerDiagnostics }
+  | {
+      type: 'DEV_SERVER.FAILED'
+      diagnostics: DevServerDiagnostics
+      reason: string
+    }
 interface CompletedTaskExecutionResult {
   kind: 'completed'
   domain: EpicDomainState
@@ -51,7 +62,11 @@ function formatActorError(error: unknown): string {
   return String(error)
 }
 
-type RepairKind = 'fast checks' | 'full checks' | 'semantic review'
+type RepairKind =
+  | 'fast checks'
+  | 'full checks'
+  | 'browser smoke'
+  | 'semantic review'
 
 function repairLimitReason(kind: RepairKind): string {
   return `${kind} repair limit exhausted.`
@@ -73,8 +88,59 @@ export function createTaskExecutionMachine(services: EpicServices) {
     if (!input.context.full) throw new Error('Full check result is missing.')
     return services.review(
       input.context.domain,
-      input.context.full,
+      {
+        full: input.context.full,
+        ...(input.context.browserSmoke
+          ? { browserSmoke: input.context.browserSmoke }
+          : {}),
+      },
       input.context.repairs.semantic
+    )
+  })
+  const server = fromCallback<
+    TaskExecutionEvent,
+    { context: TaskExecutionContext }
+  >(({ input, sendBack }) => {
+    try {
+      return services.serve(input.context.domain, {
+        ready: (diagnostics) =>
+          sendBack({ type: 'DEV_SERVER.READY', diagnostics }),
+        failed: (error, diagnostics) =>
+          sendBack({
+            type: 'DEV_SERVER.FAILED',
+            diagnostics,
+            reason: error.message,
+          }),
+      })
+    } catch (error) {
+      queueMicrotask(() =>
+        sendBack({
+          type: 'DEV_SERVER.FAILED',
+          diagnostics: {
+            command: input.context.domain.devServer?.command ?? '(missing)',
+            args: input.context.domain.devServer?.args ?? [],
+            url: input.context.domain.devServer?.url ?? '(missing)',
+            stdoutPreview: '',
+            stderrPreview: '',
+            outputTruncated: false,
+          },
+          reason: formatActorError(error),
+        })
+      )
+      return () => undefined
+    }
+  })
+  const browserSmoke = fromPromise<
+    { state: EpicDomainState; result: BrowserSmokeResult },
+    { context: TaskExecutionContext }
+  >(({ input, signal }) => {
+    if (!input.context.server)
+      throw new Error('Development server diagnostics are missing.')
+    return services.browserSmoke(
+      input.context.domain,
+      input.context.server,
+      input.context.serverFailure,
+      signal
     )
   })
   const revise = fromPromise<
@@ -87,7 +153,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
       input: {} as TaskExecutionInput,
       events: {} as TaskExecutionEvent,
     },
-    actors: { implementation, checks, review, revise },
+    actors: { implementation, checks, review, revise, server, browserSmoke },
     guards: {
       fastRepairAvailable: ({ context }) =>
         context.repairs.fast < context.domain.maxFastRepairs,
@@ -95,6 +161,10 @@ export function createTaskExecutionMachine(services: EpicServices) {
         context.repairs.full < context.domain.maxFullRepairs,
       semanticRepairAvailable: ({ context }) =>
         context.repairs.semantic < context.domain.maxSemanticRepairs,
+      browserSmokeRequired: ({ context }) =>
+        context.domain.tasks?.[
+          context.domain.currentTaskIndex
+        ]?.requiredChecks.includes('browser-smoke') === true,
     },
     actions: {
       captureFailureReason: assign({
@@ -117,6 +187,13 @@ export function createTaskExecutionMachine(services: EpicServices) {
       }),
       markSemanticRepairEscalation: assign(({ context }) => {
         const failureReason = repairLimitReason('semantic review')
+        return {
+          failureReason,
+          domain: { ...context.domain, failureReason },
+        }
+      }),
+      markBrowserRepairEscalation: assign(({ context }) => {
+        const failureReason = repairLimitReason('browser smoke')
         return {
           failureReason,
           domain: { ...context.domain, failureReason },
@@ -242,7 +319,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
           onDone: [
             {
               guard: ({ event }) => event.output.result.passed,
-              target: 'reviewing',
+              target: 'routeAfterFullChecks',
               actions: assign({
                 domain: ({ event }) => event.output.state,
                 full: ({ event }) => event.output.result,
@@ -256,6 +333,128 @@ export function createTaskExecutionMachine(services: EpicServices) {
               }),
             },
           ],
+          onError: { target: 'failed', actions: 'captureFailureReason' },
+        },
+      },
+      routeAfterFullChecks: {
+        always: [
+          { guard: 'browserSmokeRequired', target: 'browserVerification' },
+          { target: 'reviewing' },
+        ],
+      },
+      browserVerification: {
+        tags: ['active', 'browser-verification'],
+        invoke: {
+          id: 'dev-server',
+          src: 'server',
+          input: ({ context }) => ({ context }),
+        },
+        initial: 'startingDevServer',
+        on: {
+          'DEV_SERVER.READY': {
+            actions: assign({
+              server: ({ event }) => event.diagnostics,
+              serverFailure: undefined,
+            }),
+          },
+          'DEV_SERVER.FAILED': {
+            target: '.recordingServerFailure',
+            actions: assign({
+              server: ({ event }) => event.diagnostics,
+              serverFailure: ({ event }) => event.reason,
+            }),
+          },
+        },
+        states: {
+          startingDevServer: {
+            on: {
+              'DEV_SERVER.READY': {
+                target: 'runningSmoke',
+                actions: assign({
+                  server: ({ event }) => event.diagnostics,
+                  serverFailure: undefined,
+                }),
+              },
+            },
+          },
+          runningSmoke: {
+            invoke: {
+              src: 'browserSmoke',
+              input: ({ context }) => ({ context }),
+              onDone: [
+                {
+                  guard: ({ event }) => event.output.result.passed,
+                  target: '#taskExecution.reviewing',
+                  actions: assign({
+                    domain: ({ event }) => event.output.state,
+                    browserSmoke: ({ event }) => event.output.result,
+                  }),
+                },
+                {
+                  target: '#taskExecution.repairingBrowserSmoke',
+                  actions: assign({
+                    domain: ({ event }) => event.output.state,
+                    browserSmoke: ({ event }) => event.output.result,
+                  }),
+                },
+              ],
+              onError: {
+                target: '#taskExecution.failed',
+                actions: 'captureFailureReason',
+              },
+            },
+          },
+          recordingServerFailure: {
+            invoke: {
+              src: 'browserSmoke',
+              input: ({ context }) => ({ context }),
+              onDone: {
+                target: '#taskExecution.repairingBrowserSmoke',
+                actions: assign({
+                  domain: ({ event }) => event.output.state,
+                  browserSmoke: ({ event }) => event.output.result,
+                }),
+              },
+              onError: {
+                target: '#taskExecution.failed',
+                actions: 'captureFailureReason',
+              },
+            },
+          },
+        },
+      },
+      repairingBrowserSmoke: {
+        tags: ['active', 'repairing'],
+        always: [
+          {
+            guard: 'fullRepairAvailable',
+            target: 'repairingBrowserSmokeInvoke',
+            actions: assign({
+              repairs: ({ context }) => ({
+                ...context.repairs,
+                full: context.repairs.full + 1,
+              }),
+            }),
+          },
+          { target: 'escalating', actions: 'markBrowserRepairEscalation' },
+        ],
+      },
+      repairingBrowserSmokeInvoke: {
+        invoke: {
+          src: 'implementation',
+          input: ({ context }) => ({
+            context,
+            feedback: JSON.stringify(context.browserSmoke),
+          }),
+          onDone: {
+            target: 'fastChecks',
+            actions: assign({
+              domain: ({ event }) => event.output,
+              server: undefined,
+              serverFailure: undefined,
+              browserSmoke: undefined,
+            }),
+          },
           onError: { target: 'failed', actions: 'captureFailureReason' },
         },
       },

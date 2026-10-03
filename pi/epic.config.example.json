@@ -19,7 +19,13 @@
       "fallow check --format json"
     ],
     "focusedTests": "npm test -- --run",
-    "fallow": "fallow check --format json"
+    "fallow": "fallow check --format json",
+    "browserSmoke": {
+      "startupTimeoutMs": 30000,
+      "navigationTimeoutMs": 15000,
+      "selectorTimeoutMs": 10000,
+      "settleTimeoutMs": 500
+    }
   },
   "agents": {
     "scout": {

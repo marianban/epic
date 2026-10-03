@@ -405,7 +405,7 @@ export function createEpicMachine(services: EpicServices) {
               guard: ({ event }) => event.output.currentTaskIndex + 1 < (event.output.tasks?.length ?? 0),
               target: 'taskExecution',
               actions: assign({
-                state: ({ event }) => ({ ...event.output, currentTaskIndex: event.output.currentTaskIndex + 1, taskApproved: false, taskApprovedAt: undefined, taskBaselineSha: undefined }),
+                state: ({ event }) => ({ ...event.output, currentTaskIndex: event.output.currentTaskIndex + 1, taskApproved: false, taskApprovedAt: undefined, taskBaselineSha: undefined, devServer: undefined, lastBrowserSmokeResultPath: undefined }),
               }),
             },
             { target: 'finalVerification', actions: assign({ state: ({ event }) => event.output }) },

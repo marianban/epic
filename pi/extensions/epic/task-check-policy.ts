@@ -37,6 +37,12 @@ export function validateTaskCheckPolicies(
       )
     }
     for (const check of task.deferredChecks) {
+      if (check === 'browser-smoke') {
+        errors.push(
+          `Task ${task.id} defers browser-smoke, but browser smoke must run on the task that introduces browser-observable behavior.`
+        )
+        continue
+      }
       if (finallyAvailable.has(check)) continue
       errors.push(
         `Task ${task.id} defers ${check}, but no executable command provides it anywhere in the task plan. ` +

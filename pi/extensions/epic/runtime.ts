@@ -235,7 +235,7 @@ export class EpicRuntime {
   envelope(now: string): PersistedEpicEnvelope {
     return {
       schemaVersion: 6,
-      machineVersion: 10,
+      machineVersion: 11,
       epicId: this.metadataState.epicId,
       createdAt: this.metadataState.createdAt,
       updatedAt: now,

@@ -36,7 +36,7 @@ function task(
 }
 
 function configuration(
-  checks: ResolvedEpicConfiguration['checks'] = {}
+  checks: Omit<ResolvedEpicConfiguration['checks'], 'browserSmoke'> = {}
 ): ResolvedEpicConfiguration {
   return {
     inspector: { enabled: false, port: 8080, autoOpen: false },
@@ -48,7 +48,15 @@ function configuration(
     maxFullRepairs: 1,
     maxSemanticRepairs: 2,
     maxTaskPlanRepairs: 2,
-    checks,
+    checks: {
+      ...checks,
+      browserSmoke: {
+        startupTimeoutMs: 30_000,
+        navigationTimeoutMs: 15_000,
+        selectorTimeoutMs: 10_000,
+        settleTimeoutMs: 500,
+      },
+    },
     agents: {},
   }
 }
@@ -150,4 +158,13 @@ test('final-only configured checks may be deferred but not required by a task', 
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }
+})
+
+test('browser smoke must run on its owning task and cannot be deferred', () => {
+  const result = validateTaskCheckPolicies(
+    [task('task-1', ['npm run dev'], [], ['browser-smoke'])],
+    ['browser-smoke']
+  )
+  assert.equal(result.valid, false)
+  assert.match(result.errors[0] ?? '', /browser smoke must run on the task/)
 })

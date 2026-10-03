@@ -28,6 +28,50 @@ function checks(value: EpicConfig['checks']): NonNullable<EpicConfig['checks']> 
     if (result[key] !== undefined && typeof result[key] !== 'string') throw new Error(`Invalid epic configuration checks.${key}: expected a string.`)
   return value
 }
+
+function browserSmoke(
+  value: NonNullable<EpicConfig['checks']>['browserSmoke']
+): ResolvedEpicConfiguration['checks']['browserSmoke'] {
+  if (value === undefined)
+    return {
+      startupTimeoutMs: 30_000,
+      navigationTimeoutMs: 15_000,
+      selectorTimeoutMs: 10_000,
+      settleTimeoutMs: 500,
+    }
+  const result = object(value, 'checks.browserSmoke')
+  const executablePath = result.executablePath
+  if (
+    executablePath !== undefined &&
+    (typeof executablePath !== 'string' || !executablePath.trim())
+  )
+    throw new Error(
+      'Invalid epic configuration checks.browserSmoke.executablePath: expected a non-empty string.'
+    )
+  return {
+    ...(typeof executablePath === 'string' ? { executablePath } : {}),
+    startupTimeoutMs: positiveInteger(
+      result.startupTimeoutMs,
+      'checks.browserSmoke.startupTimeoutMs',
+      30_000
+    ),
+    navigationTimeoutMs: positiveInteger(
+      result.navigationTimeoutMs,
+      'checks.browserSmoke.navigationTimeoutMs',
+      15_000
+    ),
+    selectorTimeoutMs: positiveInteger(
+      result.selectorTimeoutMs,
+      'checks.browserSmoke.selectorTimeoutMs',
+      10_000
+    ),
+    settleTimeoutMs: positiveInteger(
+      result.settleTimeoutMs,
+      'checks.browserSmoke.settleTimeoutMs',
+      500
+    ),
+  }
+}
 function agents(value: EpicConfig['agents']): NonNullable<EpicConfig['agents']> {
   if (value === undefined) return {}
   const result = object(value, 'agents')
@@ -52,6 +96,6 @@ export async function resolveEpicConfiguration(root: string): Promise<ResolvedEp
   if (inspectorPort > 65535) throw new Error('Invalid epic configuration inspector.port: expected a TCP port.')
   return {
     inspector: { enabled: optionalBoolean(inspector.enabled, 'inspector.enabled', false), port: inspectorPort, autoOpen: optionalBoolean(inspector.autoOpen, 'inspector.autoOpen', true) },
-    agentTimeoutMs: positiveInteger(config.agentTimeoutMs, 'agentTimeoutMs', 300_000), commandTimeoutMs: positiveInteger(config.commandTimeoutMs, 'commandTimeoutMs', 120_000), maxOutputBytes: positiveInteger(config.maxOutputBytes, 'maxOutputBytes', 20_000), maxScoutRounds: positiveInteger(config.maxScoutRounds, 'maxScoutRounds', 3), maxFastRepairs: positiveInteger(config.maxFastRepairs, 'maxFastRepairs', 2), maxFullRepairs: positiveInteger(config.maxFullRepairs, 'maxFullRepairs', 1), maxSemanticRepairs: positiveInteger(config.maxSemanticRepairs, 'maxSemanticRepairs', 2), maxTaskPlanRepairs: positiveInteger(config.maxTaskPlanRepairs, 'maxTaskPlanRepairs', 2), checks: checks(config.checks), agents: agents(config.agents),
+    agentTimeoutMs: positiveInteger(config.agentTimeoutMs, 'agentTimeoutMs', 300_000), commandTimeoutMs: positiveInteger(config.commandTimeoutMs, 'commandTimeoutMs', 120_000), maxOutputBytes: positiveInteger(config.maxOutputBytes, 'maxOutputBytes', 20_000), maxScoutRounds: positiveInteger(config.maxScoutRounds, 'maxScoutRounds', 3), maxFastRepairs: positiveInteger(config.maxFastRepairs, 'maxFastRepairs', 2), maxFullRepairs: positiveInteger(config.maxFullRepairs, 'maxFullRepairs', 1), maxSemanticRepairs: positiveInteger(config.maxSemanticRepairs, 'maxSemanticRepairs', 2), maxTaskPlanRepairs: positiveInteger(config.maxTaskPlanRepairs, 'maxTaskPlanRepairs', 2), checks: { ...checks(config.checks), browserSmoke: browserSmoke(config.checks?.browserSmoke) }, agents: agents(config.agents),
   }
 }

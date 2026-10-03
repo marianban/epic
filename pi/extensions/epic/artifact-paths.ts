@@ -56,3 +56,13 @@ export function reviewResultArtifactPath(
     `task-${taskOrdinal(state)}-review-${String(semanticAttempt + 1).padStart(3, '0')}-${artifactToken(artifactId, 'review')}.json`
   )
 }
+
+export function browserSmokeResultArtifactPath(
+  state: EpicDomainState,
+  artifactId: string
+): string {
+  return path.join(
+    'checks',
+    `task-${taskOrdinal(state)}-browser-smoke-${artifactToken(artifactId, 'browser smoke')}.json`
+  )
+}

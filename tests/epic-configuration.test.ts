@@ -18,7 +18,14 @@ test('configuration resolves documented defaults once at the composition boundar
       maxFullRepairs: 1,
       maxSemanticRepairs: 2,
       maxTaskPlanRepairs: 2,
-      checks: {},
+      checks: {
+        browserSmoke: {
+          startupTimeoutMs: 30_000,
+          navigationTimeoutMs: 15_000,
+          selectorTimeoutMs: 10_000,
+          settleTimeoutMs: 500,
+        },
+      },
       agents: {},
     })
   } finally {
@@ -39,6 +46,14 @@ test('configuration rejects malformed JSON and non-positive operational values',
     await assert.rejects(resolveEpicConfiguration(root), /checks.fast/)
     await fs.writeFile(configPath, JSON.stringify({ maxTaskPlanRepairs: 0 }))
     await assert.rejects(resolveEpicConfiguration(root), /maxTaskPlanRepairs/)
+    await fs.writeFile(
+      configPath,
+      JSON.stringify({ checks: { browserSmoke: { startupTimeoutMs: 0 } } })
+    )
+    await assert.rejects(
+      resolveEpicConfiguration(root),
+      /checks.browserSmoke.startupTimeoutMs/
+    )
   } finally {
     await fs.rm(root, { recursive: true, force: true })
   }

@@ -25,10 +25,16 @@ import {
 } from './plan-review.ts'
 import {
   checkResultArtifactPath,
+  browserSmokeResultArtifactPath,
   currentTaskArtifactPath,
   implementationDiffArtifactPath,
   reviewResultArtifactPath,
 } from './artifact-paths.ts'
+import { runBrowserSmoke } from './browser-smoke.ts'
+import {
+  startDevServer,
+} from './dev-server.ts'
+import { validateImplementerResult } from './implementer-result.ts'
 import {
   implementerTask,
   plannerEpicPrompt,
@@ -58,6 +64,8 @@ import { resolveAvailableCheckNames, runCheckSuite } from './checks.ts'
 import { validateTaskCheckPolicies } from './task-check-policy.ts'
 import type {
   CheckSuiteResult,
+  BrowserSmokeResult,
+  DevServerDiagnostics,
   PlannerContextRequest,
   ReviewResult,
   ScoutReport,
@@ -92,13 +100,26 @@ export interface EpicServices {
   prerequisites(state: EpicDomainState): Promise<EpicDomainState>
   preparePrerequisites(state: EpicDomainState): Promise<EpicDomainState>
   implement(state: EpicDomainState, feedback?: string): Promise<EpicDomainState>
+  serve(
+    state: EpicDomainState,
+    callbacks: {
+      ready(diagnostics: DevServerDiagnostics): void
+      failed(error: Error, diagnostics: DevServerDiagnostics): void
+    }
+  ): () => void
+  browserSmoke(
+    state: EpicDomainState,
+    server: DevServerDiagnostics,
+    serverFailure?: string,
+    signal?: AbortSignal
+  ): Promise<{ state: EpicDomainState; result: BrowserSmokeResult }>
   checks(
     state: EpicDomainState,
     suite: 'fast' | 'full' | 'final'
   ): Promise<{ state: EpicDomainState; result: CheckSuiteResult }>
   review(
     state: EpicDomainState,
-    checks: CheckSuiteResult,
+    checks: { full: CheckSuiteResult; browserSmoke?: BrowserSmokeResult },
     semanticAttempt: number
   ): Promise<{ state: EpicDomainState; result: ReviewResult }>
   reviseTask(state: EpicDomainState): Promise<EpicDomainState>
@@ -682,6 +703,7 @@ export function createEpicServices(
       if (!baselineSha) throw new Error('Task baseline was not recorded.')
       const shouldRunImplementer =
         !baseline.skipImplementer || feedback.length > 0
+      let devServer = state.devServer
       if (shouldRunImplementer) {
         const artifact = await fs.readFile(
           currentTaskArtifactPath(state),
@@ -696,6 +718,12 @@ export function createEpicServices(
         )
         if (run.exitCode !== 0)
           throw new Error(`Implementer failed: ${agentFailure(run)}`)
+        const result = validateImplementerResult(
+          parseJsonResponse<unknown>(run.output, 'implementer'),
+          task.requiredChecks.includes('browser-smoke'),
+          task.verification
+        )
+        devServer = result.devServer
       }
       await validateTaskDelta(state.repositoryRoot, baselineSha, state.approvedTaskHeadSha)
       const implementationAttempt = baseline.recovered
@@ -704,6 +732,7 @@ export function createEpicServices(
       const next = {
         ...state,
         implementationAttempt,
+        devServer,
       }
       const diff = await getTaskDiff(next.repositoryRoot, baselineSha)
       const taskId = task.id
@@ -725,6 +754,73 @@ export function createEpicServices(
         { taskId, ...summary }
       )
       return next
+    },
+    serve(state, callbacks) {
+      const spec = state.devServer
+      if (!spec)
+        throw new Error(
+          'Cannot start a development server without an implementer launch specification.'
+        )
+      return startDevServer(state.repositoryRoot, spec, callbacks, {
+        startupTimeoutMs: configuration.checks.browserSmoke.startupTimeoutMs,
+        maxOutputBytes: configuration.maxOutputBytes,
+      })
+    },
+    async browserSmoke(state, server, serverFailure, signal) {
+      const spec = state.devServer
+      if (!spec)
+        throw new Error(
+          'Cannot run browser smoke without an implementer launch specification.'
+        )
+      let result: BrowserSmokeResult
+      try {
+        if (serverFailure) throw new Error(serverFailure)
+        result = await runBrowserSmoke({
+          state,
+          spec,
+          server,
+          configuration: configuration.checks.browserSmoke,
+          signal,
+        })
+      } catch (error) {
+        if (signal?.aborted) throw error
+        result = {
+          passed: false,
+          url: spec.url,
+          readySelector: spec.readySelector,
+          durationMs: 0,
+          findings: [
+            {
+              source: 'browser-smoke',
+              severity: 'error',
+              message: error instanceof Error ? error.message : String(error),
+              introduced: true,
+            },
+          ],
+          server,
+        }
+      }
+      const next = { ...state }
+      next.lastBrowserSmokeResultPath = await persistImmutableJsonArtifact(
+        next,
+        browserSmokeResultArtifactPath(next, randomUUID()),
+        result
+      )
+      await appendEvent(
+        next,
+        getBoundary().stage,
+        clock.now(),
+        'browser_smoke_completed',
+        {
+          taskId: state.tasks?.[state.currentTaskIndex]?.id,
+          passed: result.passed,
+          findings: result.findings.length,
+          browser: result.browser?.version,
+          executablePath: result.browser?.executablePath,
+        }
+      )
+      notify(`browser smoke ${result.passed ? 'passed' : 'failed'}.`)
+      return { state: next, result }
     },
     async checks(state, suite) {
       const result = await runCheckSuite(

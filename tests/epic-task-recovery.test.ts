@@ -66,7 +66,17 @@ function configuration(): ResolvedEpicConfiguration {
     maxFullRepairs: 1,
     maxSemanticRepairs: 1,
     maxTaskPlanRepairs: 2,
-    checks: { fast: ['true'], full: ['true'], final: ['true'] },
+    checks: {
+      fast: ['true'],
+      full: ['true'],
+      final: ['true'],
+      browserSmoke: {
+        startupTimeoutMs: 30_000,
+        navigationTimeoutMs: 15_000,
+        selectorTimeoutMs: 10_000,
+        settleTimeoutMs: 500,
+      },
+    },
     agents: {},
   }
 }
@@ -150,7 +160,10 @@ function dependencies(calls: string[]): EpicServiceDependencies {
               acceptanceCriteria: [],
               findings: [],
             })
-          : '',
+          : JSON.stringify({
+              summary: 'Implemented the task.',
+              checks: [],
+            }),
       stderr: '',
       stdoutLogPath: path.join(input.agentRunDirectory, 'fake.log'),
     }

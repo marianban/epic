@@ -173,7 +173,12 @@ export async function resolveAvailableCheckNames(
       )
     )
   ).flat()
-  return [...new Set(definitions.map((definition) => definition.name))].sort()
+  return [
+    ...new Set([
+      ...definitions.map((definition) => definition.name),
+      'browser-smoke',
+    ]),
+  ].sort()
 }
 
 async function resolveFinalCheckDefinitions(
@@ -397,6 +402,7 @@ export async function runCheckSuite(
         (definition) => definition.name
       )
     )
+    availableNames.add('browser-smoke')
     const missingRequired = policy.requiredChecks.filter(
       (name) => !availableNames.has(name)
     )

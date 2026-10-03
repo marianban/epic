@@ -91,6 +91,28 @@ function services(): EpicServices {
     prerequisites: passthrough,
     preparePrerequisites: passthrough,
     implement: passthrough,
+    serve: (_state, callbacks) => {
+      callbacks.ready({
+        command: 'true',
+        args: [],
+        url: 'http://127.0.0.1/',
+        stdoutPreview: '',
+        stderrPreview: '',
+        outputTruncated: false,
+      })
+      return () => undefined
+    },
+    browserSmoke: async (state, server) => ({
+      state,
+      result: {
+        passed: true,
+        url: server.url,
+        readySelector: 'body',
+        durationMs: 1,
+        findings: [],
+        server,
+      },
+    }),
     checks: async (state, suite) => ({
       state,
       result: {
@@ -171,8 +193,14 @@ test('parent operational failures wait for explicit recovery approval and retry 
         if (attempts === 1) throw new Error('provider temporarily unavailable')
         return state
       },
-      recordRecovery: async (state) => ({ ...state, failureReason: 'provider temporarily unavailable' }),
-      approveRecovery: async (state) => ({ ...state, failureReason: undefined }),
+      recordRecovery: async (state) => ({
+        ...state,
+        failureReason: 'provider temporarily unavailable',
+      }),
+      approveRecovery: async (state) => ({
+        ...state,
+        failureReason: undefined,
+      }),
     }),
     { input: { state: domain() } }
   )
@@ -180,8 +208,13 @@ test('parent operational failures wait for explicit recovery approval and retry 
   actor.send({ type: 'EPIC.START' })
   await nextTurn()
   await nextTurn()
-  assert.deepEqual(actor.getSnapshot().value, { recovering: 'awaitingApproval' })
-  assert.equal(projectActorSystemSnapshot(actor.getSnapshot()).pendingHumanAction, 'approve_recovery')
+  assert.deepEqual(actor.getSnapshot().value, {
+    recovering: 'awaitingApproval',
+  })
+  assert.equal(
+    projectActorSystemSnapshot(actor.getSnapshot()).pendingHumanAction,
+    'approve_recovery'
+  )
   actor.send({ type: 'RECOVERY.APPROVE' })
   await nextTurn()
   await nextTurn()
@@ -243,6 +276,21 @@ test('projection characterizes every configured parent and task state', () => {
     })
     assert.equal(view.stage, stage)
   }
+  const browserView = projectActorSystemSnapshot({
+    value: 'taskExecution',
+    children: {
+      'task-execution': {
+        snapshot: {
+          value: { browserVerification: 'startingDevServer' },
+          context: {
+            repairs: { fast: 0, full: 0, semantic: 0 },
+            domain: domain(),
+          },
+        },
+      },
+    },
+  })
+  assert.equal(browserView.stage, 'starting_dev_server')
 })
 
 test('child escalation projects its failure diagnostics', () => {
@@ -501,6 +549,223 @@ test('semantic repair reruns implementation, fast checks, full checks, then revi
   actor.stop()
 })
 
+test('browser smoke gates semantic review and cleans up the supervised server', async () => {
+  const calls: string[] = []
+  let cleanups = 0
+  const epicServices = services()
+  epicServices.implement = async (state) => {
+    calls.push('implement')
+    return {
+      ...state,
+      devServer: {
+        command: 'npm',
+        args: ['run', 'dev'],
+        url: 'http://127.0.0.1:4173/',
+        readySelector: 'main',
+      },
+    }
+  }
+  epicServices.checks = async (state, suite) => {
+    calls.push(suite)
+    return {
+      state,
+      result: {
+        suite,
+        passed: true,
+        checks: [],
+        introducedFindings: [],
+        preExistingFindings: [],
+        deferredChecks: [],
+      },
+    }
+  }
+  epicServices.serve = (_state, callbacks) => {
+    calls.push('serve')
+    queueMicrotask(() =>
+      callbacks.ready({
+        command: 'npm',
+        args: ['run', 'dev'],
+        url: 'http://127.0.0.1:4173/',
+        stdoutPreview: 'ready',
+        stderrPreview: '',
+        outputTruncated: false,
+      })
+    )
+    return () => {
+      cleanups += 1
+    }
+  }
+  epicServices.browserSmoke = async (state, server) => {
+    calls.push('browser-smoke')
+    return {
+      state,
+      result: {
+        passed: true,
+        url: server.url,
+        readySelector: 'main',
+        durationMs: 1,
+        findings: [],
+        server,
+      },
+    }
+  }
+  epicServices.review = async (state) => {
+    calls.push('review')
+    return {
+      state,
+      result: {
+        passed: true,
+        summary: 'passed',
+        acceptanceCriteria: [],
+        findings: [],
+      },
+    }
+  }
+  const browserTask = {
+    ...task('browser-task'),
+    requiredChecks: ['browser-smoke'],
+  }
+  const actor = createActor(createTaskExecutionMachine(epicServices), {
+    input: { domain: { ...domain(), tasks: [browserTask] } },
+  })
+  actor.start()
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let turn = 0; turn < 12; turn += 1) await nextTurn()
+  assert.equal(actor.getSnapshot().value, 'awaitingReview')
+  assert.deepEqual(calls, [
+    'implement',
+    'fast',
+    'full',
+    'serve',
+    'browser-smoke',
+    'review',
+  ])
+  assert.equal(cleanups, 1)
+  actor.stop()
+})
+
+test('failed browser smoke consumes the full repair budget and reruns checks', async () => {
+  const calls: string[] = []
+  let smokeAttempt = 0
+  let cleanups = 0
+  const epicServices = services()
+  epicServices.implement = async (state) => {
+    calls.push('implement')
+    return {
+      ...state,
+      devServer: {
+        command: 'npm',
+        args: ['run', 'dev'],
+        url: 'http://127.0.0.1:4173/',
+        readySelector: 'main',
+      },
+    }
+  }
+  epicServices.checks = async (state, suite) => {
+    calls.push(suite)
+    return {
+      state,
+      result: {
+        suite,
+        passed: true,
+        checks: [],
+        introducedFindings: [],
+        preExistingFindings: [],
+        deferredChecks: [],
+      },
+    }
+  }
+  epicServices.serve = (_state, callbacks) => {
+    calls.push('serve')
+    queueMicrotask(() =>
+      callbacks.ready({
+        command: 'npm',
+        args: ['run', 'dev'],
+        url: 'http://127.0.0.1:4173/',
+        stdoutPreview: '',
+        stderrPreview: '',
+        outputTruncated: false,
+      })
+    )
+    return () => {
+      cleanups += 1
+    }
+  }
+  epicServices.browserSmoke = async (state, server) => {
+    smokeAttempt += 1
+    calls.push('browser-smoke')
+    return {
+      state,
+      result: {
+        passed: smokeAttempt > 1,
+        url: server.url,
+        readySelector: 'main',
+        durationMs: 1,
+        findings:
+          smokeAttempt > 1
+            ? []
+            : [
+                {
+                  source: 'browser-smoke',
+                  severity: 'error',
+                  message: 'page error',
+                },
+              ],
+        server,
+      },
+    }
+  }
+  const browserTask = {
+    ...task('browser-task'),
+    requiredChecks: ['browser-smoke'],
+  }
+  const actor = createActor(createTaskExecutionMachine(epicServices), {
+    input: { domain: { ...domain(), tasks: [browserTask] } },
+  })
+  actor.start()
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let turn = 0; turn < 24; turn += 1) await nextTurn()
+  assert.equal(actor.getSnapshot().value, 'awaitingReview')
+  assert.equal(calls.filter((call) => call === 'implement').length, 2)
+  assert.equal(calls.filter((call) => call === 'browser-smoke').length, 2)
+  assert.equal(cleanups, 2)
+  assert.equal(actor.getSnapshot().context.repairs.full, 1)
+  actor.stop()
+})
+
+test('stopping task execution cleans up a server still waiting for readiness', async () => {
+  let cleanups = 0
+  const epicServices = services()
+  epicServices.implement = async (state) => ({
+    ...state,
+    devServer: {
+      command: 'npm',
+      args: ['run', 'dev'],
+      url: 'http://127.0.0.1:4173/',
+      readySelector: 'main',
+    },
+  })
+  epicServices.serve = () => () => {
+    cleanups += 1
+  }
+  const actor = createActor(createTaskExecutionMachine(epicServices), {
+    input: {
+      domain: {
+        ...domain(),
+        tasks: [{ ...task('browser-task'), requiredChecks: ['browser-smoke'] }],
+      },
+    },
+  })
+  actor.start()
+  actor.send({ type: 'TASK.APPROVE' })
+  for (let turn = 0; turn < 8; turn += 1) await nextTurn()
+  assert.deepEqual(actor.getSnapshot().value, {
+    browserVerification: 'startingDevServer',
+  })
+  actor.stop()
+  assert.equal(cleanups, 1)
+})
+
 test('semantic repairs may target an unplanned path without scope approval', async () => {
   const calls: string[] = []
   let reviewAttempt = 0
@@ -746,14 +1011,14 @@ test('injected timer rejects unsettled dispatches and is cleaned up', async () =
   actor.stop()
 })
 
-test('schema-6 envelope is the sole persisted state and version 9 is rejected', async () => {
+test('schema-6 envelope is the sole persisted state and older machine versions are rejected', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-refactor-'))
   const machine = createEpicMachine(services())
   const actor = createActor(machine, { input: { state: domain(root) } })
   actor.start()
   const envelope = {
     schemaVersion: 6 as const,
-    machineVersion: 10 as const,
+    machineVersion: 11 as const,
     epicId: 'run-1',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -776,7 +1041,7 @@ test('schema-6 envelope is the sole persisted state and version 9 is rejected', 
   ])
   const loaded = await loadActiveEpic(root)
   assert.equal(loaded.schemaVersion, 6)
-  assert.equal(loaded.machineVersion, 10)
+  assert.equal(loaded.machineVersion, 11)
   assert.equal(loaded.epicId, envelope.epicId)
   stored.schemaVersion = 5
   stored.machineVersion = 9
@@ -786,7 +1051,7 @@ test('schema-6 envelope is the sole persisted state and version 9 is rejected', 
   )
   await assert.rejects(
     loadActiveEpic(root),
-    /found schema\/machine version 5\/9.*Required schema\/machine version 6\/10/
+    /found schema\/machine version 5\/9.*Required schema\/machine version 6\/11/
   )
   await fs.writeFile(
     path.join(root, '.pi/epics/runs/run-1/state.json'),
@@ -806,7 +1071,7 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   actor.start()
   const envelope = {
     schemaVersion: 6 as const,
-    machineVersion: 10 as const,
+    machineVersion: 11 as const,
     epicId: current.epicId,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -841,9 +1106,9 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   await fs.rm(root, { recursive: true, force: true })
 })
 
-test('machine version constants accept only schema 6/machine 10', () => {
+test('machine version constants accept only schema 6/machine 11', () => {
   assert.equal(EPIC_SCHEMA_VERSION, 6)
-  assert.equal(EPIC_MACHINE_VERSION, 10)
+  assert.equal(EPIC_MACHINE_VERSION, 11)
 })
 
 test('malformed child completion output and reason-less escalation fail explicitly', () => {
