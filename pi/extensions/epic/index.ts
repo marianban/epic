@@ -12,6 +12,7 @@ import {
   approveTask,
   reviseTask,
   approveRecovery,
+  taskDecisionCommand,
 } from './epic.ts'
 import {
   EPIC_STATUS_REFRESH_INTERVAL_MS,
@@ -91,6 +92,15 @@ export default function epicExtension(pi: ExtensionAPI): void {
     description: 'Continue the current task review or approve it',
     handler: async (_args, ctx) => approveTask(ctx),
   })
+  for (const [command, kind] of [
+    [EPIC_COMMANDS.confirmTask, 'confirm'],
+    [EPIC_COMMANDS.acceptUnresolvedTask, 'accept_unresolved'],
+    [EPIC_COMMANDS.repairTask, 'grant'],
+    [EPIC_COMMANDS.deferTask, 'defer'],
+    [EPIC_COMMANDS.reviseCriteria, 'revise_criteria'],
+  ] as const) {
+    pi.registerCommand(command, { description: kind === 'grant' ? 'Repair the latest task report (one attempt, five additional minutes; no arguments)' : `Record report-bound task decision: ${kind} (JSON arguments)`, handler: async (args, ctx) => taskDecisionCommand(ctx, kind, args) })
+  }
   pi.registerCommand(EPIC_COMMANDS.reviewTask, {
     description: 'Fix R: findings from the current task review',
     handler: async (_args, ctx) => reviseTask(ctx),

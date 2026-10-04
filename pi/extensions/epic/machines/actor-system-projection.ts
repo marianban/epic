@@ -41,8 +41,17 @@ const prerequisiteStages: Record<string, EpicStage> = {
   preparing: 'preparing_prerequisites',
 }
 const childStages: Record<string, EpicStage> = {
+  planningAcceptance: 'planning_acceptance',
+  acceptancePlanningFailed: 'acceptance_planning_failed',
+  acceptanceReplanningFailed: 'acceptance_planning_failed',
+  replanningAcceptance: 'planning_acceptance',
+  verifying: 'verifying_acceptance',
+  finalizing: 'finalizing_report',
+  interrupted: 'finalizing_report',
+  deciding: 'finalizing_report',
   awaitingApproval: 'awaiting_task_approval',
   revisingTask: 'revising_task',
+  revisingCompletedTask: 'revising_task',
   implementing: 'implementing',
   fastChecks: 'running_fast_checks',
   repairingFast: 'repairing_fast_checks',
@@ -70,6 +79,7 @@ const humanActions: Partial<Record<EpicStage, PendingHumanAction>> = {
   awaiting_prerequisite_approval: 'approve_prerequisites',
   awaiting_task_approval: 'approve_task',
   awaiting_task_review: 'review_task',
+  acceptance_planning_failed: 'retry_acceptance_planning',
   escalating: 'resolve_escalation',
   recovering: 'approve_recovery',
 }
@@ -131,7 +141,7 @@ function projectChild(snapshot: TaskChildSnapshot): EpicBoundaryView {
   const repairs = parseRepairAttempts(snapshot.context.repairs)
   return boundary(
     stage,
-    { state: key, repairs },
+    { state: key, repairs, ...(typeof snapshot.context.failureReason === 'string' ? { failureReason: snapshot.context.failureReason } : {}) },
     taskFailureDiagnostics(snapshot, stage, repairs)
   )
 }

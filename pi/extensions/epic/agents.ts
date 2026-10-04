@@ -30,6 +30,7 @@ export interface AgentRunOptions {
   agentRunDirectory: string
   signal?: AbortSignal
   onProgress?: (message: string) => void
+  bridge?: { url: string; token: string }
   timeoutMs: number
 }
 
@@ -341,8 +342,9 @@ export async function runAgent(
     '-e',
     guard,
     '--tools',
-    profile.tools.join(','),
+    [...profile.tools, ...(options.bridge ? ['browser_verify'] : [])].join(','),
   ]
+  if (options.bridge) args.push('-e', path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'verifier-tools.ts'))
   if (profile.provider) args.push('--provider', profile.provider)
   if (profile.model) args.push('--model', profile.model)
   if (profile.thinking) args.push('--thinking', profile.thinking)
@@ -361,6 +363,7 @@ export async function runAgent(
   let childCommand = invocation.command
   let childArgs = invocation.args
   const childEnv: NodeJS.ProcessEnv = { ...process.env, PI_EPIC_ROLE: role }
+  if (options.bridge) { childEnv.PI_EPIC_BROWSER_URL = options.bridge.url; childEnv.PI_EPIC_BROWSER_TOKEN = options.bridge.token }
   if (role === 'implementer') {
     try {
       const sandboxedInvocation = await wrapImplementerInvocation(

@@ -62,9 +62,10 @@ function configuration(): ResolvedEpicConfiguration {
     commandTimeoutMs: 10_000,
     maxOutputBytes: 20_000,
     maxScoutRounds: 3,
-    maxFastRepairs: 1,
-    maxFullRepairs: 1,
-    maxSemanticRepairs: 1,
+    maxTaskRepairs: 1,
+    maxAcceptancePlanRepairs: 2,
+    maxTaskInfrastructureRetries: 1,
+    taskVerificationTimeoutMs: 30_000,
     maxTaskPlanRepairs: 2,
     checks: {
       fast: ['true'],
@@ -120,9 +121,10 @@ async function fixture(): Promise<{
     currentTaskIndex: 0,
     taskApproved: true,
     implementationAttempt: 0,
-    maxFastRepairs: 1,
-    maxFullRepairs: 1,
-    maxSemanticRepairs: 1,
+    maxTaskRepairs: 1,
+    maxAcceptancePlanRepairs: 2,
+    maxTaskInfrastructureRetries: 1,
+    taskVerificationTimeoutMs: 30_000,
     checkpoint: {
       kind: 'plan',
       ordinal: 0,
@@ -153,7 +155,9 @@ function dependencies(calls: string[]): EpicServiceDependencies {
       role: input.role,
       exitCode: 0,
       output:
-        input.role === 'reviewer'
+        input.role === 'verifier'
+          ? JSON.stringify({ version: 1, criterionVersion: 1, criteria: [], obligations: [] })
+          : input.role === 'reviewer'
           ? JSON.stringify({
               passed: true,
               summary: 'Recovered implementation is valid.',
@@ -169,7 +173,7 @@ function dependencies(calls: string[]): EpicServiceDependencies {
     }
     return result
   }
-  return { runAgentActor }
+  return { runAgentActor, timer: { setTimeout, clearTimeout } }
 }
 
 test('task decomposition invokes task-planner with the approved plan and epic context', async () => {
@@ -214,7 +218,7 @@ test('task decomposition invokes task-planner with the approved plan and epic co
       () => ({ stage: 'decomposing_tasks', wait: 'active' }),
       { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
       configuration(),
-      { runAgentActor }
+      { runAgentActor, timer: { setTimeout, clearTimeout } }
     )
 
     const next = await decompositionServices.decompose(state)
@@ -285,7 +289,7 @@ test('task decomposition repairs an invalid check policy before persisting tasks
       () => ({ stage: 'decomposing_tasks', wait: 'active' }),
       { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
       configuration(),
-      { runAgentActor }
+      { runAgentActor, timer: { setTimeout, clearTimeout } }
     )
 
     const next = await decompositionServices.decompose(state)
@@ -330,7 +334,7 @@ test('task decomposition repairs malformed JSON and escalates after its repair b
       () => ({ stage: 'decomposing_tasks', wait: 'active' }),
       { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
       configuration(),
-      { runAgentActor }
+      { runAgentActor, timer: { setTimeout, clearTimeout } }
     )
 
     await assert.rejects(
@@ -384,7 +388,7 @@ test('task decomposition can repair malformed JSON with a valid manifest', async
       () => ({ stage: 'decomposing_tasks', wait: 'active' }),
       { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
       configuration(),
-      { runAgentActor }
+      { runAgentActor, timer: { setTimeout, clearTimeout } }
     )
 
     const next = await decompositionServices.decompose(state)
@@ -417,7 +421,7 @@ test('task decomposition does not retry an agent execution failure', async () =>
       () => ({ stage: 'decomposing_tasks', wait: 'active' }),
       { now: () => '2026-08-16T00:00:00.000Z', nowMs: () => 0 },
       configuration(),
-      { runAgentActor }
+      { runAgentActor, timer: { setTimeout, clearTimeout } }
     )
 
     await assert.rejects(
@@ -587,14 +591,14 @@ test('recovered task reaches review, checkpoints once, and gives T2 a clean base
     }
     assert.equal(actor.getSnapshot().value, 'awaitingReview')
     actor.send({ type: 'TASK.APPROVE' })
-    await nextTurn()
+    for (let turn = 0; turn < 10 && actor.getSnapshot().status !== 'done'; turn++) { await nextTurn(); await new Promise<void>(resolve => setTimeout(resolve, 20)) }
     assert.equal(actor.getSnapshot().status, 'done')
     const output = actor.getSnapshot().output as {
       kind: string
       domain: EpicDomainState
     }
     assert.equal(output.kind, 'completed')
-    assert.deepEqual(calls, ['reviewer'])
+    assert.deepEqual(calls, ['verifier', 'reviewer'])
 
     const checkpointed = await epicServices.checkpointTask(output.domain)
     assert.equal(checkpointed.checkpoint?.kind, 'task')
@@ -618,7 +622,7 @@ test('recovered task reaches review, checkpoints once, and gives T2 a clean base
       t2.taskBaselineSha,
       await gitOutput(root, ['rev-parse', 'HEAD'])
     )
-    assert.deepEqual(calls, ['reviewer', 'implementer'])
+    assert.deepEqual(calls, ['verifier', 'reviewer', 'implementer'])
     actor.stop()
   } finally {
     await fs.rm(root, { recursive: true, force: true })

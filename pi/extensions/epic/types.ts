@@ -20,6 +20,10 @@ export type EpicStage =
   | 'repairing_full_checks'
   | 'starting_dev_server'
   | 'running_browser_smoke'
+  | 'planning_acceptance'
+  | 'acceptance_planning_failed'
+  | 'verifying_acceptance'
+  | 'finalizing_report'
   | 'repairing_browser_smoke'
   | 'reviewing'
   | 'repairing_review'
@@ -37,6 +41,7 @@ export type AgentRole =
   | 'plan-reviewer'
   | 'task-reviewer'
   | 'implementer'
+  | 'verifier'
   | 'reviewer'
 export type PendingHumanAction =
   | 'approve_plan'
@@ -45,6 +50,7 @@ export type PendingHumanAction =
   | 'approve_task'
   | 'resolve_escalation'
   | 'approve_recovery'
+  | 'retry_acceptance_planning'
 export type CheckSuiteName = 'fast' | 'full' | 'final'
 export type Severity = 'error' | 'warning' | 'info'
 
@@ -70,9 +76,12 @@ export interface EpicDomainState {
   prerequisites?: Prerequisite[]
   prerequisitesApprovedAt?: string
   implementationAttempt: number
-  maxFastRepairs: number
-  maxFullRepairs: number
-  maxSemanticRepairs: number
+  maxTaskRepairs: number
+  maxAcceptancePlanRepairs: number
+  maxTaskInfrastructureRetries: number
+  taskVerificationTimeoutMs: number
+  lastVerificationReportPath?: string
+  verificationReadiness?: import('./verification-types.ts').HumanReviewReport['readiness']
   lastCheckResultPath?: string
   lastReviewResultPath?: string
   lastDiffPath?: string
@@ -163,8 +172,8 @@ export interface EpicTimer {
 }
 
 export interface PersistedEpicEnvelope extends EpicRunMetadata {
-  schemaVersion: 6
-  machineVersion: 11
+  schemaVersion: 8
+  machineVersion: 13
   snapshot: unknown
 }
 
@@ -172,6 +181,7 @@ export type EpicWait = 'active' | 'awaiting-human' | 'terminal'
 export interface TaskDisplayState {
   state: string
   repairs?: { fast: number; full: number; semantic: number }
+  failureReason?: string
 }
 export interface EpicBoundaryView {
   stage: EpicStage
@@ -390,9 +400,10 @@ export interface EpicConfig {
   commandTimeoutMs?: number
   agentTimeoutMs?: number
   maxOutputBytes?: number
-  maxFastRepairs?: number
-  maxFullRepairs?: number
-  maxSemanticRepairs?: number
+  maxTaskRepairs?: number
+  maxAcceptancePlanRepairs?: number
+  maxTaskInfrastructureRetries?: number
+  taskVerificationTimeoutMs?: number
   maxTaskPlanRepairs?: number
   checks?: {
     fast?: string[]
@@ -417,9 +428,10 @@ export interface ResolvedEpicConfiguration {
   commandTimeoutMs: number
   maxOutputBytes: number
   maxScoutRounds: number
-  maxFastRepairs: number
-  maxFullRepairs: number
-  maxSemanticRepairs: number
+  maxTaskRepairs: number
+  maxAcceptancePlanRepairs: number
+  maxTaskInfrastructureRetries: number
+  taskVerificationTimeoutMs: number
   maxTaskPlanRepairs: number
   checks: Omit<NonNullable<EpicConfig['checks']>, 'browserSmoke'> & {
     browserSmoke: {

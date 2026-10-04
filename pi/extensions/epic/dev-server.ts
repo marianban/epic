@@ -87,7 +87,7 @@ export function startDevServer(
   spec: DevServerLaunchSpec,
   callbacks: DevServerCallbacks,
   options: DevServerOptions
-): () => void {
+): (() => void) & { closed: Promise<void> } {
   const spawnProcess = options.spawn ?? spawn
   const request = options.fetch ?? globalThis.fetch
   const child = spawnProcess(spec.command, spec.args, {
@@ -111,6 +111,9 @@ export function startDevServer(
   let settled = false
   let disposed = false
   let failureReported = false
+  let resolveClosed: () => void = () => { throw new Error('Server cleanup promise is not initialized.') }
+  const closed = new Promise<void>(resolve => { resolveClosed = resolve })
+  child.once('close', resolveClosed)
 
   const collect = (target: 'stdoutPreview' | 'stderrPreview') => (chunk: Buffer) => {
     const next = diagnostics[target] + chunk.toString()
@@ -169,11 +172,13 @@ export function startDevServer(
     }
   })()
 
-  return () => {
+  const stop = () => {
     if (disposed) return
     disposed = true
     clearTimeout(timer)
     controller.abort()
     terminate(child)
+    if (child.exitCode !== null || child.signalCode !== null) resolveClosed()
   }
+  return Object.assign(stop, { closed })
 }

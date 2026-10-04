@@ -44,9 +44,10 @@ function configuration(
     commandTimeoutMs: 10_000,
     maxOutputBytes: 20_000,
     maxScoutRounds: 3,
-    maxFastRepairs: 2,
-    maxFullRepairs: 1,
-    maxSemanticRepairs: 2,
+    maxTaskRepairs: 2,
+    maxAcceptancePlanRepairs: 2,
+    maxTaskInfrastructureRetries: 1,
+    taskVerificationTimeoutMs: 2,
     maxTaskPlanRepairs: 2,
     checks: {
       ...checks,

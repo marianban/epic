@@ -142,9 +142,10 @@ test('reviewer prompt reserves manual checks and treats task files as guidance',
     currentTaskIndex: 0,
     taskApproved: true,
     implementationAttempt: 1,
-    maxFastRepairs: 1,
-    maxFullRepairs: 1,
-    maxSemanticRepairs: 1,
+    maxTaskRepairs: 1,
+    maxAcceptancePlanRepairs: 2,
+    maxTaskInfrastructureRetries: 1,
+    taskVerificationTimeoutMs: 1,
     tasks: [task],
   } satisfies EpicDomainState
 

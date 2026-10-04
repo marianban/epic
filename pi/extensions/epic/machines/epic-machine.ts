@@ -35,6 +35,8 @@ export type EpicMachineEvent =
   | { type: 'TASK.APPROVE' }
   | { type: 'TASK.REVIEW' }
   | { type: 'TASK.REVISE' }
+  | { type: 'TASK.DECIDE'; request: import('../verification-types.ts').TaskDecisionRequest }
+  | { type: 'TASK.CANCEL' }
 
 export function validateTaskExecutionResult(
   output: unknown
@@ -392,6 +394,8 @@ export function createEpicMachine(services: EpicServices) {
           'TASK.APPROVE': { actions: 'forwardTask' },
           'TASK.REVIEW': { actions: 'forwardTask' },
           'TASK.REVISE': { actions: 'forwardTask' },
+          'TASK.DECIDE': { actions: 'forwardTask' },
+          'TASK.CANCEL': { actions: 'forwardTask' },
           'EPIC.RESUME': { actions: 'forwardTask' },
         },
       },
@@ -405,7 +409,7 @@ export function createEpicMachine(services: EpicServices) {
               guard: ({ event }) => event.output.currentTaskIndex + 1 < (event.output.tasks?.length ?? 0),
               target: 'taskExecution',
               actions: assign({
-                state: ({ event }) => ({ ...event.output, currentTaskIndex: event.output.currentTaskIndex + 1, taskApproved: false, taskApprovedAt: undefined, taskBaselineSha: undefined, devServer: undefined, lastBrowserSmokeResultPath: undefined }),
+                state: ({ event }) => ({ ...event.output, currentTaskIndex: event.output.currentTaskIndex + 1, taskApproved: false, taskApprovedAt: undefined, lastVerificationReportPath: undefined, verificationReadiness: undefined, taskBaselineSha: undefined, devServer: undefined, lastBrowserSmokeResultPath: undefined }),
               }),
             },
             { target: 'finalVerification', actions: assign({ state: ({ event }) => event.output }) },

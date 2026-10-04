@@ -1,0 +1,3 @@
+# Permit explicit acceptance with unresolved results
+
+Mandatory verification can fail or become unavailable even after bounded repairs, and users still need a complete report and a deliberate way forward. Provide a distinct acceptance decision that identifies the failed or unverified checks, records the user's reason, and is bound to the reviewed revision and report. This permits the user to proceed without weakening ordinary approval or rewriting evidence; the trade-off is that task acceptance no longer implies that every check passed, so consumers must retain the decision type and underlying results.

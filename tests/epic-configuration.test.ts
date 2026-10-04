@@ -14,9 +14,10 @@ test('configuration resolves documented defaults once at the composition boundar
       commandTimeoutMs: 120_000,
       maxOutputBytes: 20_000,
       maxScoutRounds: 3,
-      maxFastRepairs: 2,
-      maxFullRepairs: 1,
-      maxSemanticRepairs: 2,
+      maxTaskRepairs: 6,
+      maxAcceptancePlanRepairs: 2,
+      maxTaskInfrastructureRetries: 1,
+      taskVerificationTimeoutMs: 1_800_000,
       maxTaskPlanRepairs: 2,
       checks: {
         browserSmoke: {

@@ -1,3 +1,17 @@
+import {
+  VerificationStore,
+  taskVerificationPath,
+} from './verification-store.ts'
+import { prepareAcceptancePlan } from './acceptance-planning.ts'
+import { finalizeReviewReport } from './verification-report.ts'
+import { runTaskVerification } from './verification-runner.ts'
+import { decideTask, assertAcceptedReport } from './verification-decisions.ts'
+import type {
+  VerificationOperation,
+  TaskDecisionRequest,
+  VerificationCycle,
+} from './verification-types.ts'
+import type { EpicTimer } from './types.ts'
 import * as fs from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import * as path from 'node:path'
@@ -31,9 +45,7 @@ import {
   reviewResultArtifactPath,
 } from './artifact-paths.ts'
 import { runBrowserSmoke } from './browser-smoke.ts'
-import {
-  startDevServer,
-} from './dev-server.ts'
+import { startDevServer } from './dev-server.ts'
 import { validateImplementerResult } from './implementer-result.ts'
 import {
   implementerTask,
@@ -99,7 +111,21 @@ export interface EpicServices {
   decompose(state: EpicDomainState): Promise<EpicDomainState>
   prerequisites(state: EpicDomainState): Promise<EpicDomainState>
   preparePrerequisites(state: EpicDomainState): Promise<EpicDomainState>
-  implement(state: EpicDomainState, feedback?: string): Promise<EpicDomainState>
+  prepareVerification(state: EpicDomainState): Promise<EpicDomainState>
+  verifyTask(
+    state: EpicDomainState,
+    signal: AbortSignal
+  ): Promise<EpicDomainState>
+  finalizeTask(state: EpicDomainState, reason: string): Promise<EpicDomainState>
+  taskDecision(
+    state: EpicDomainState,
+    request: TaskDecisionRequest
+  ): Promise<EpicDomainState>
+  implement(
+    state: EpicDomainState,
+    feedback?: string,
+    operation?: VerificationOperation
+  ): Promise<EpicDomainState>
   serve(
     state: EpicDomainState,
     callbacks: {
@@ -115,21 +141,31 @@ export interface EpicServices {
   ): Promise<{ state: EpicDomainState; result: BrowserSmokeResult }>
   checks(
     state: EpicDomainState,
-    suite: 'fast' | 'full' | 'final'
+    suite: 'fast' | 'full' | 'final',
+    operation?: VerificationOperation
   ): Promise<{ state: EpicDomainState; result: CheckSuiteResult }>
   review(
     state: EpicDomainState,
     checks: { full: CheckSuiteResult; browserSmoke?: BrowserSmokeResult },
-    semanticAttempt: number
+    semanticAttempt: number,
+    operation?: VerificationOperation,
+    cycle?: VerificationCycle
   ): Promise<{ state: EpicDomainState; result: ReviewResult }>
   reviseTask(state: EpicDomainState): Promise<EpicDomainState>
   checkpointTask(state: EpicDomainState): Promise<EpicDomainState>
-  recordRecovery(state: EpicDomainState, recovery: RecoveryDiagnostics): Promise<EpicDomainState>
-  approveRecovery(state: EpicDomainState, recovery: RecoveryDiagnostics): Promise<EpicDomainState>
+  recordRecovery(
+    state: EpicDomainState,
+    recovery: RecoveryDiagnostics
+  ): Promise<EpicDomainState>
+  approveRecovery(
+    state: EpicDomainState,
+    recovery: RecoveryDiagnostics
+  ): Promise<EpicDomainState>
 }
 
 export interface EpicServiceDependencies {
   runAgentActor: typeof runAgentActor
+  timer: EpicTimer
 }
 
 interface TaskBaselineResolution {
@@ -206,7 +242,11 @@ async function resolveTaskBaseline(
       state.taskBaselineSha
     )
     const next = { ...state, taskBaselineSha: baselineSha }
-    await validateTaskDelta(state.repositoryRoot, baselineSha, state.approvedTaskHeadSha)
+    await validateTaskDelta(
+      state.repositoryRoot,
+      baselineSha,
+      state.approvedTaskHeadSha
+    )
     return { state: next, recovered: false, skipImplementer: false }
   }
 
@@ -270,21 +310,26 @@ export function createEpicServices(
   configuration: ResolvedEpicConfiguration,
   dependencies: EpicServiceDependencies
 ): EpicServices {
+  let verificationWork: Promise<EpicDomainState> | undefined
   const notify = (
     message: string,
     level: 'info' | 'warning' | 'error' = 'info'
   ) => ctx.ui.notify(message, level)
   const agentFailure = (run: AgentRunResult): string =>
     run.failureReason || run.stderr || run.output.slice(-2_000)
-  const runRole = async (
+  const runRoleInvocation = async (
     state: EpicDomainState,
     role: Parameters<typeof runAgentActor>[0]['role'],
     prompt: string,
     action: string,
-    taskId: string | undefined
+    taskId: string | undefined,
+    invocationId: string,
+    operation?: VerificationOperation
   ): Promise<AgentRunResult> => {
     const profile = resolveAgentProfile(role, configuration)
-    const timeoutMs = profile.timeoutMs ?? configuration.agentTimeoutMs
+    const timeoutMs = operation
+      ? operation.remainingMs()
+      : (profile.timeoutMs ?? configuration.agentTimeoutMs)
     const agentRunDirectory = path.join(
       state.repositoryRoot,
       '.pi',
@@ -293,7 +338,6 @@ export function createEpicServices(
       state.epicId,
       'agent-runs'
     )
-    const invocationId = randomUUID()
     await appendEvent(
       state,
       getBoundary().stage,
@@ -345,7 +389,8 @@ export function createEpicServices(
           prompt,
           profile,
           timeoutMs,
-          signal: ctx.signal,
+          signal: operation?.signal ?? ctx.signal,
+          bridge: operation?.bridge,
           onProgress: (message) =>
             ctx.ui.setStatus('epic', `${state.epicId}: ${message}`),
         })
@@ -434,6 +479,15 @@ export function createEpicServices(
       finishAgentRun(invocationId)
     }
   }
+  const runRole = (
+    state: EpicDomainState,
+    role: Parameters<typeof runAgentActor>[0]['role'],
+    prompt: string,
+    action: string,
+    taskId: string | undefined,
+    operation?: VerificationOperation
+  ) => runRoleInvocation(state, role, prompt, action, taskId, randomUUID(), operation)
+
   return {
     ctx,
     now: () => clock.now(),
@@ -681,7 +735,97 @@ export function createEpicServices(
         prerequisitesApprovedAt: clock.now(),
       }
     },
-    async implement(state, feedback = '') {
+    async prepareVerification(state) {
+      const store = new VerificationStore(taskVerificationPath(state), clock)
+      return prepareAcceptancePlan(state, {
+        clock,
+        repairLimit: state.maxAcceptancePlanRepairs,
+        initialize: () => store.initialize(state),
+        write: (record) => store.write(record),
+        persistPlan: (plan) => persistImmutableJsonArtifact(state, `reviews/${randomUUID()}-verification-plan.json`, plan),
+        run: (prompt, invocationId) => runRoleInvocation(state, 'verifier', prompt, 'acceptance scenario planning', state.tasks?.[state.currentTaskIndex]?.id, invocationId),
+        event: (type, timestamp, payload) => appendEvent(state, getBoundary().stage, timestamp, type, payload),
+      })
+    },
+    async verifyTask(state, signal) {
+      verificationWork = runTaskVerification(
+        state,
+        ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal,
+        {
+          clock,
+          timer: dependencies.timer,
+          executablePath: configuration.checks.browserSmoke.executablePath,
+          maxOutputBytes: configuration.maxOutputBytes,
+          checks: (current, suite, operation) =>
+            this.checks(current, suite, operation),
+          review: (current, cycle, operation) =>
+            this.review(
+              current,
+              {
+                full: cycle.full ?? {
+                  suite: 'full',
+                  passed: false,
+                  checks: [],
+                  introducedFindings: [],
+                  preExistingFindings: [],
+                  deferredChecks: [],
+                },
+                browserSmoke: cycle.smoke,
+              },
+              cycle.attempt,
+              operation,
+              cycle
+            ),
+          repair: (current, feedback, operation) =>
+            this.implement(current, feedback, operation),
+          explore: async (current, plan, operation, errors) => {
+            const run = await runRole(
+              current,
+              'verifier',
+              `Execute agent_browser obligations using browser_verify. Tools own and record evidence; do not fabricate results. Frozen plan: ${JSON.stringify(plan)}. Prior validation errors: ${JSON.stringify(errors)}. Finish with a concise summary.`,
+              'browser acceptance verification',
+              current.tasks?.[current.currentTaskIndex]?.id,
+              operation
+            )
+            if (run.exitCode !== 0)
+              throw new Error(`Verifier failed: ${agentFailure(run)}`)
+          },
+        }
+      )
+      try {
+        return await verificationWork
+      } finally {
+        verificationWork = undefined
+      }
+    },
+    async finalizeTask(state, reason) {
+      if (verificationWork) {
+        try {
+          state = await verificationWork
+        } catch (error) {
+          reason += ` Finalization: ${error instanceof Error ? error.message : String(error)}`
+        }
+      }
+      const store = new VerificationStore(taskVerificationPath(state), clock)
+      const record = await store.initialize(state)
+      const latest = record.cycles.at(-1)
+      const identity = latest?.identity ?? randomUUID()
+      if (latest && latest.identity === identity) latest.problems.push(reason)
+      else
+        record.cycles.push({
+          id: randomUUID(),
+          identity,
+          attempt: record.cycles.length + 1,
+          evidence: [],
+          problems: [reason],
+          artifacts: [],
+          state,
+        })
+      return finalizeReviewReport(state, record, identity, store)
+    },
+    taskDecision: (state, request) =>
+      decideTask(state, request, clock),
+    async implement(state, feedback = '', operation) {
       const plan = await readApprovedPlan(state)
       if (!state.tasks || state.tasks.length === 0)
         throw new Error('Cannot implement a task before tasks are decomposed.')
@@ -699,6 +843,13 @@ export function createEpicServices(
       }
       const baseline = await resolveTaskBaseline(state, task)
       state = baseline.state
+      const verificationStore = new VerificationStore(
+        taskVerificationPath(state),
+        clock
+      )
+      const verificationRecord = await verificationStore.initialize(state)
+      verificationRecord.state = state
+      await verificationStore.write(verificationRecord)
       const baselineSha = state.taskBaselineSha
       if (!baselineSha) throw new Error('Task baseline was not recorded.')
       const shouldRunImplementer =
@@ -714,7 +865,8 @@ export function createEpicServices(
           'implementer',
           implementerTask(state, plan, feedback, artifact),
           feedback ? 'bounded repair' : 'implementation',
-          task.id
+          task.id,
+          operation
         )
         if (run.exitCode !== 0)
           throw new Error(`Implementer failed: ${agentFailure(run)}`)
@@ -725,7 +877,11 @@ export function createEpicServices(
         )
         devServer = result.devServer
       }
-      await validateTaskDelta(state.repositoryRoot, baselineSha, state.approvedTaskHeadSha)
+      await validateTaskDelta(
+        state.repositoryRoot,
+        baselineSha,
+        state.approvedTaskHeadSha
+      )
       const implementationAttempt = baseline.recovered
         ? Math.max(state.implementationAttempt + (feedback ? 0 : 1), 1)
         : state.implementationAttempt + (feedback ? 0 : 1)
@@ -753,6 +909,8 @@ export function createEpicServices(
         'task_diff_updated',
         { taskId, ...summary }
       )
+      verificationRecord.state = next
+      await verificationStore.write(verificationRecord)
       return next
     },
     serve(state, callbacks) {
@@ -822,12 +980,13 @@ export function createEpicServices(
       notify(`browser smoke ${result.passed ? 'passed' : 'failed'}.`)
       return { state: next, result }
     },
-    async checks(state, suite) {
+    async checks(state, suite, operation) {
       const result = await runCheckSuite(
         suite,
         state,
         clock.now(),
-        configuration
+        configuration,
+        operation
       )
       const next = { ...state }
       next.lastCheckResultPath = await persistImmutableJsonArtifact(
@@ -849,11 +1008,14 @@ export function createEpicServices(
       notify(`${suite} checks ${result.passed ? 'passed' : 'failed'}.`)
       return { state: next, result }
     },
-    async review(state, checks, semanticAttempt) {
+    async review(state, checks, semanticAttempt, operation, cycle) {
       const plan = await readApprovedPlan(state)
       if (!state.taskBaselineSha)
         throw new Error('Cannot review without a task baseline.')
-      const diff = await getTaskDiff(state.repositoryRoot, state.taskBaselineSha)
+      const diff = await getTaskDiff(
+        state.repositoryRoot,
+        state.taskBaselineSha
+      )
       const taskChanges = await inspectTaskChanges(
         state.repositoryRoot,
         state.taskBaselineSha
@@ -867,12 +1029,13 @@ export function createEpicServices(
           state,
           plan,
           diff,
-          JSON.stringify(checks),
+          JSON.stringify({ ...checks, acceptanceVerification: cycle }),
           artifact,
           changedPaths
         ),
         'semantic review',
-        state.tasks?.[state.currentTaskIndex]?.id
+        state.tasks?.[state.currentTaskIndex]?.id,
+        operation
       )
       if (run.exitCode !== 0)
         throw new Error(`Reviewer failed: ${agentFailure(run)}`)
@@ -896,7 +1059,7 @@ export function createEpicServices(
         next,
         getBoundary().stage,
         clock.now(),
-        'task_review_completed',
+        'task_semantic_review_completed',
         {
           taskId: task.id,
           criteriaCompleted,
@@ -922,7 +1085,18 @@ export function createEpicServices(
       )
       if (run.exitCode !== 0)
         throw new Error(`Task reviewer failed: ${agentFailure(run)}`)
-      const revised = parseMarkdownResponse(run.output, 'task-reviewer')
+      const revised = run.output
+        .trim()
+        .replace(/^```(?:markdown|md)?\s*/i, '')
+        .replace(/\s*```$/, '')
+      if (!revised.startsWith('# Task '))
+        throw new Error('Task reviewer returned invalid task Markdown.')
+      const criteriaSection = (value: string) =>
+        value.match(/## Acceptance Criteria\n([\s\S]*?)(?=\n## |$)/)?.[1]
+      if (criteriaSection(revised) !== criteriaSection(markdown))
+        throw new Error(
+          'Task reviewer changed frozen acceptance criteria. Use /task-revise-criteria with explicit revision approval.'
+        )
       if (extractReviewInstructions(revised).length)
         throw new Error(
           'Task reviewer left unresolved R: findings in the task artifact.'
@@ -950,19 +1124,7 @@ export function createEpicServices(
         state.taskBaselineSha,
         state.approvedTaskHeadSha
       )
-      const diff = await getTaskDiff(state.repositoryRoot, state.taskBaselineSha)
-      const currentHash = hashTaskDiff(diff)
-      if (!state.reviewedTaskDiffHash || currentHash !== state.reviewedTaskDiffHash) {
-        const status = await inspectTaskChanges(state.repositoryRoot, state.taskBaselineSha)
-        throw new RecoverableRepositoryError(
-          'The application changed after semantic review. Approve the current changes to rerun checks and review before checkpointing.',
-          'adopt-and-revalidate',
-          state.taskBaselineSha,
-          status.headSha,
-          status.changes,
-          true
-        )
-      }
+      await assertAcceptedReport(state, clock)
       const checkpoint = await createCheckpoint(
         state.repositoryRoot,
         state,
@@ -984,15 +1146,21 @@ export function createEpicServices(
       }
     },
     async recordRecovery(state, recovery) {
-      await appendEvent(state, getBoundary().stage, clock.now(), 'epic_recovery_requested', {
-        operation: recovery.operation,
-        reason: recovery.reason,
-        action: recovery.action,
-        baselineSha: recovery.baselineSha,
-        candidateHeadSha: recovery.candidateHeadSha,
-        changedPaths: recovery.changedPaths,
-        requiresRevalidation: recovery.requiresRevalidation,
-      })
+      await appendEvent(
+        state,
+        getBoundary().stage,
+        clock.now(),
+        'epic_recovery_requested',
+        {
+          operation: recovery.operation,
+          reason: recovery.reason,
+          action: recovery.action,
+          baselineSha: recovery.baselineSha,
+          candidateHeadSha: recovery.candidateHeadSha,
+          changedPaths: recovery.changedPaths,
+          requiresRevalidation: recovery.requiresRevalidation,
+        }
+      )
       return { ...state, failureReason: recovery.reason }
     },
     async approveRecovery(state, recovery) {
@@ -1002,20 +1170,29 @@ export function createEpicServices(
         if (status.headSha !== recovery.candidateHeadSha) {
           throw new RecoverableRepositoryError(
             `HEAD changed after recovery was proposed: expected ${recovery.candidateHeadSha}, found ${status.headSha}.`,
-            'retry', recovery.baselineSha ?? state.taskBaselineSha ?? status.headSha,
-            status.headSha, status.changes, true
+            'retry',
+            recovery.baselineSha ?? state.taskBaselineSha ?? status.headSha,
+            status.headSha,
+            status.changes,
+            true
           )
         }
         next.approvedTaskHeadSha = status.headSha
       }
       next.taskRevalidationRequired = recovery.requiresRevalidation
       next.failureReason = undefined
-      await appendEvent(next, getBoundary().stage, clock.now(), 'epic_recovery_approved', {
-        operation: recovery.operation,
-        action: recovery.action,
-        candidateHeadSha: recovery.candidateHeadSha,
-        changedPaths: recovery.changedPaths,
-      })
+      await appendEvent(
+        next,
+        getBoundary().stage,
+        clock.now(),
+        'epic_recovery_approved',
+        {
+          operation: recovery.operation,
+          action: recovery.action,
+          candidateHeadSha: recovery.candidateHeadSha,
+          changedPaths: recovery.changedPaths,
+        }
+      )
       return next
     },
   }

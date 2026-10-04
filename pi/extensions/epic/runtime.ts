@@ -1,3 +1,13 @@
+import { recoverAcceptancePlanning } from './acceptance-planning-recovery.ts'
+import { parseEpicDomainState } from './domain-validation.ts'
+import {
+  VerificationStore,
+  taskVerificationPath,
+} from './verification-store.ts'
+import { finalizeReviewReport } from './verification-report.ts'
+import { EPIC_MACHINE_VERSION, EPIC_SCHEMA_VERSION } from './persistence-version.ts'
+import { saveState } from './persistence.ts'
+import { randomUUID } from 'node:crypto'
 import {
   createActor,
   type Actor,
@@ -15,7 +25,10 @@ import {
 import { runAgentActor } from './machines/actors.ts'
 import { createEpicServices } from './services.ts'
 import { projectActorSystemSnapshot } from './machines/actor-system-projection.ts'
-import { liveTaskChild, type LiveTaskChild } from './machines/actor-system-projection.ts'
+import {
+  liveTaskChild,
+  type LiveTaskChild,
+} from './machines/actor-system-projection.ts'
 import type {
   EpicBoundaryView,
   EpicClock,
@@ -35,12 +48,9 @@ const inspectors = new Map<number, EpicInspector>()
 function createEpicInspector(
   config: ResolvedEpicConfiguration['inspector']
 ): EpicInspector | undefined {
-  const enabled =
-    process.env.PI_EPIC_INSPECTOR === '1' || config.enabled
+  const enabled = process.env.PI_EPIC_INSPECTOR === '1' || config.enabled
   if (!enabled || process.env.PI_EPIC_INSPECTOR === '0') return undefined
-  const port = Number(
-    process.env.PI_EPIC_INSPECTOR_PORT ?? config.port
-  )
+  const port = Number(process.env.PI_EPIC_INSPECTOR_PORT ?? config.port)
   if (!Number.isInteger(port) || port < 1 || port > 65535)
     throw new Error('Epic inspector port must be a valid TCP port.')
   const existing = inspectors.get(port)
@@ -49,8 +59,7 @@ function createEpicInspector(
     port,
     autoOpen:
       process.env.PI_EPIC_INSPECTOR_AUTO_OPEN === '1' ||
-      (process.env.PI_EPIC_INSPECTOR_AUTO_OPEN !== '0' &&
-        config.autoOpen),
+      (process.env.PI_EPIC_INSPECTOR_AUTO_OPEN !== '0' && config.autoOpen),
   })
   const result = {
     inspect: createWebSocketInspector({
@@ -71,6 +80,73 @@ export async function createEpicRuntime(
   configuration: ResolvedEpicConfiguration,
   snapshot?: unknown
 ): Promise<EpicRuntime> {
+  let recovered = false
+  if (snapshot && typeof snapshot === 'object') {
+    const persisted = structuredClone(snapshot) as {
+      value: unknown
+      context: { state: EpicDomainState }
+      children?: Record<
+        string,
+        {
+          snapshot: {
+            value: unknown
+            context: { domain: EpicDomainState }
+            children?: unknown
+          }
+        }
+      >
+    }
+    const child = persisted.children?.['task-execution']?.snapshot
+    if (child && ['planningAcceptance', 'replanningAcceptance'].includes(String(child.value))) {
+      await recoverAcceptancePlanning(child, clock)
+      persisted.context.state = child.context.domain
+      snapshot = persisted
+      recovered = true
+    } else if (child && !['acceptancePlanningFailed', 'acceptanceReplanningFailed'].includes(String(child.value))) {
+      const store = new VerificationStore(taskVerificationPath(domain), clock)
+      let record
+      try {
+        record = await store.read()
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      }
+      if (
+        record &&
+        (!record.report ||
+          !['awaitingReview', 'done'].includes(String(child.value)) ||
+          (record.startedAt !== undefined && record.pausedAt === undefined))
+      ) {
+        child.value = 'awaitingReview'
+        child.children = {}
+        const latest = record.cycles.at(-1)
+        const state = record.state ?? latest?.state ?? child.context.domain
+        const identity = latest?.identity ?? randomUUID()
+        const reason =
+          'Task interrupted. Completed artifacts and charged invocations are retained; explicit resume verifies without repeating an interrupted repair.'
+        if (latest?.identity === identity) latest.problems.push(reason)
+        else
+          record.cycles.push({
+            id: randomUUID(),
+            identity,
+            attempt: record.cycles.length + 1,
+            evidence: [],
+            problems: [reason],
+            artifacts: [],
+            state,
+            plan: record.plan,
+          })
+        child.context.domain = await finalizeReviewReport(
+          state,
+          record,
+          identity,
+          store
+        )
+        persisted.context.state = child.context.domain
+        snapshot = persisted
+        recovered = true
+      }
+    }
+  }
   const machine = createEpicMachine(
     createEpicServices(
       ctx,
@@ -80,7 +156,7 @@ export async function createEpicRuntime(
       },
       clock,
       configuration,
-      { runAgentActor }
+      { runAgentActor, timer }
     )
   )
   const actor = snapshot
@@ -95,6 +171,8 @@ export async function createEpicRuntime(
       })
   const runtime = new EpicRuntime(actor, domain, metadata, timer)
   actor.start()
+  if (recovered)
+    await saveState(runtime.domain(), runtime.envelope(clock.now()))
   return runtime
 }
 
@@ -103,7 +181,13 @@ function activeChild(actor: EpicActor): LiveTaskChild | undefined {
 }
 function forwarded(event: EpicMachineEvent, hasTaskActor: boolean): boolean {
   return (
-    ['TASK.APPROVE', 'TASK.REVIEW', 'TASK.REVISE'].includes(event.type) ||
+    [
+      'TASK.APPROVE',
+      'TASK.REVIEW',
+      'TASK.REVISE',
+      'TASK.DECIDE',
+      'TASK.CANCEL',
+    ].includes(event.type) ||
     (event.type === 'EPIC.RESUME' && hasTaskActor)
   )
 }
@@ -128,8 +212,10 @@ export class EpicRuntime {
     return projectActorSystemSnapshot(this.actor.getSnapshot())
   }
   domain(): EpicDomainState {
-    return (this.actor.getSnapshot().context as { state: EpicDomainState })
-      .state
+    const child = activeChild(this.actor)?.getSnapshot().context?.domain
+    return child
+      ? parseEpicDomainState(child, 'live task domain')
+      : (this.actor.getSnapshot().context as { state: EpicDomainState }).state
   }
   persistedSnapshot(): ReturnType<EpicActor['getPersistedSnapshot']> {
     return this.actor.getPersistedSnapshot()
@@ -145,9 +231,12 @@ export class EpicRuntime {
 
   dispatchAndSettle(
     event: EpicMachineEvent,
-    timeoutMs: number
+    timeoutMs: number | undefined
   ): Promise<EpicBoundaryView> {
-    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+    if (
+      timeoutMs !== undefined &&
+      (!Number.isFinite(timeoutMs) || timeoutMs <= 0)
+    )
       throw new Error('Epic dispatch timeout must be a positive number.')
     this.boundary()
     const parent = this.actor
@@ -159,16 +248,19 @@ export class EpicRuntime {
     const taskForwarded = forwarded(event, child !== undefined)
     const processor = taskForwarded ? child : parent
     if (
-      ['TASK.APPROVE', 'TASK.REVIEW', 'TASK.REVISE'].includes(event.type) &&
+      [
+        'TASK.APPROVE',
+        'TASK.REVIEW',
+        'TASK.REVISE',
+        'TASK.DECIDE',
+        'TASK.CANCEL',
+      ].includes(event.type) &&
       !child
     )
       throw new Error('Task event requires an active task-execution actor.')
     if (taskForwarded && event.type !== 'EPIC.RESUME') {
       const taskActor = child
-      if (
-        !taskActor ||
-        !taskActor.getSnapshot().can(event)
-      )
+      if (!taskActor || !taskActor.getSnapshot().can(event))
         throw new Error(
           `Task event ${event.type} is not available in stage ${this.boundary().stage}.`
         )
@@ -177,17 +269,22 @@ export class EpicRuntime {
       let acknowledged = false
       let settled = false
       let sent = false
-      const timer = this.timer.setTimeout(() => {
-        if (!settled) {
-          settled = true
-          cleanup()
-          reject(
-            new Error(`Epic event ${event.type} did not settle before timeout.`)
-          )
-        }
-      }, timeoutMs)
+      const timer =
+        timeoutMs === undefined
+          ? undefined
+          : this.timer.setTimeout(() => {
+              if (!settled) {
+                settled = true
+                cleanup()
+                reject(
+                  new Error(
+                    `Epic event ${event.type} did not settle before timeout.`
+                  )
+                )
+              }
+            }, timeoutMs)
       const cleanup = () => {
-        this.timer.clearTimeout(timer)
+        if (timer !== undefined) this.timer.clearTimeout(timer)
         parentSubscription.unsubscribe()
         childSubscription?.unsubscribe()
       }
@@ -233,13 +330,16 @@ export class EpicRuntime {
   }
   // fallow-ignore-next-line unused-class-member -- consumed by epic lifecycle persistence.
   envelope(now: string): PersistedEpicEnvelope {
+    const snapshot = this.persistedSnapshot()
+    if ('context' in snapshot)
+      (snapshot.context as { state: EpicDomainState }).state = this.domain()
     return {
-      schemaVersion: 6,
-      machineVersion: 11,
+      schemaVersion: EPIC_SCHEMA_VERSION,
+      machineVersion: EPIC_MACHINE_VERSION,
       epicId: this.metadataState.epicId,
       createdAt: this.metadataState.createdAt,
       updatedAt: now,
-      snapshot: this.persistedSnapshot(),
+      snapshot,
     }
   }
   // fallow-ignore-next-line unused-class-member -- consumed by epic operation cleanup.

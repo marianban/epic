@@ -31,9 +31,10 @@ function state(root: string): EpicDomainState {
     currentTaskIndex: 0,
     taskApproved: false,
     implementationAttempt: 0,
-    maxFastRepairs: 1,
-    maxFullRepairs: 1,
-    maxSemanticRepairs: 1,
+    maxTaskRepairs: 1,
+    maxAcceptancePlanRepairs: 2,
+    maxTaskInfrastructureRetries: 1,
+    taskVerificationTimeoutMs: 1,
   }
 }
 

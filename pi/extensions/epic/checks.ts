@@ -1,3 +1,4 @@
+import type { VerificationOperation } from './verification-types.ts'
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -324,7 +325,8 @@ function runShell(
   command: string,
   cwd: string,
   timeoutMs: number,
-  maxOutputBytes: number
+  maxOutputBytes: number,
+  signal?: AbortSignal
 ): Promise<{
   exitCode: number
   stdout: string
@@ -337,6 +339,8 @@ function runShell(
     const child = spawn('/bin/sh', ['-c', command], {
       cwd,
       env: { ...process.env, CI: '1' },
+      signal,
+      detached: process.platform !== 'win32',
     })
     let stdout = ''
     let stderr = ''
@@ -365,16 +369,23 @@ function runShell(
         timedOut: timedOut || outputTruncated,
       })
     }
+    const terminate = () => {
+      if (process.platform !== 'win32' && child.pid) { try { process.kill(-child.pid, 'SIGKILL') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error } }
+      else child.kill('SIGKILL')
+    }
+    signal?.addEventListener('abort', terminate, { once: true })
     const timer = setTimeout(() => {
-      child.kill('SIGTERM')
+      terminate()
       finish(124, true)
     }, timeoutMs)
     child.on('error', () => {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', terminate)
       finish(127)
     })
     child.on('close', (code) => {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', terminate)
       finish(code ?? 1)
     })
   })
@@ -384,7 +395,8 @@ export async function runCheckSuite(
   suite: CheckSuiteName,
   state: EpicDomainState,
   timestamp: string,
-  configuration: ResolvedEpicConfiguration
+  configuration: ResolvedEpicConfiguration,
+  operation?: VerificationOperation
 ): Promise<CheckSuiteResult> {
   const policy = taskCheckPolicy(state, suite)
   const resolvedDefinitions =
@@ -459,10 +471,11 @@ export async function runCheckSuite(
       command: definition.command,
     })
     const result = await runShell(
-      definition.command,
+      operation && definition.name === 'install' ? 'npm ls --all --json' : definition.command,
       state.repositoryRoot,
-      definition.timeoutMs ?? timeoutMs,
-      maxOutputBytes
+      operation ? operation.remainingMs() : definition.timeoutMs ?? timeoutMs,
+      maxOutputBytes,
+      operation?.signal
     )
     const baseline: Finding[] = []
     if (definition.name === 'fallow' && configuration.checks.fallowBaseline) {
@@ -493,7 +506,7 @@ export async function runCheckSuite(
         )
     const check = {
       name: definition.name,
-      command: definition.command,
+      command: operation && definition.name === 'install' ? 'npm ls --all --json' : definition.command,
       passed:
         result.exitCode === 0 && (!fallow || fallow.introduced.length === 0),
       required: definition.required,

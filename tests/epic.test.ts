@@ -20,7 +20,6 @@ import {
 import { EpicRuntime } from '../pi/extensions/epic/runtime.ts'
 import type {
   EpicDomainState,
-  ReviewResult,
 } from '../pi/extensions/epic/types.ts'
 import type { EpicServices } from '../pi/extensions/epic/services.ts'
 
@@ -38,9 +37,10 @@ function domain(root = '/repo'): EpicDomainState {
     currentTaskIndex: 0,
     taskApproved: false,
     implementationAttempt: 0,
-    maxFastRepairs: 1,
-    maxFullRepairs: 1,
-    maxSemanticRepairs: 1,
+    maxTaskRepairs: 1,
+    maxAcceptancePlanRepairs: 2,
+    maxTaskInfrastructureRetries: 1,
+    taskVerificationTimeoutMs: 1,
   }
 }
 const timer = { setTimeout, clearTimeout }
@@ -90,6 +90,10 @@ function services(): EpicServices {
     decompose: passthrough,
     prerequisites: passthrough,
     preparePrerequisites: passthrough,
+    prepareVerification: passthrough,
+    verifyTask: async state => ({ ...state, verificationReadiness: 'verified' }),
+    finalizeTask: passthrough,
+    taskDecision: passthrough,
     implement: passthrough,
     serve: (_state, callbacks) => {
       callbacks.ready({
@@ -393,438 +397,44 @@ test('task actor owns repair attempts and emits a typed completed result', async
   actor.stop()
 })
 
-test('fast repair exhaustion remains in the child snapshot with its exact attempt count', async () => {
-  const exhausted = { ...domain(), maxFastRepairs: 0 }
-  const failingServices: EpicServices = {
-    ...services(),
-    checks: async (state, suite) => ({
-      state,
-      result: {
-        suite,
-        passed: suite !== 'fast',
-        checks: [],
-        introducedFindings: [],
-        preExistingFindings: [],
-        deferredChecks: [],
-      },
-    }),
-  }
-  const actor = createActor(createTaskExecutionMachine(failingServices), {
-    input: { domain: exhausted },
-  })
-  actor.start()
+test('verification errors finalize locally and leave task awaiting human review', async () => {
+  const mocked = services()
+  const calls: string[] = []
+  mocked.verifyTask = async () => { calls.push('verify'); throw new Error('browser unavailable') }
+  mocked.finalizeTask = async (state, reason) => { calls.push(reason); return { ...state, verificationReadiness: 'needs_manual_confirmation' } }
+  const actor = createActor(createTaskExecutionMachine(mocked), { input: { domain: domain() } }).start()
   actor.send({ type: 'TASK.APPROVE' })
   await nextTurn()
-  await nextTurn()
-  await nextTurn()
-  assert.equal(actor.getSnapshot().value, 'escalating')
-  assert.deepEqual(actor.getSnapshot().context.repairs, {
-    fast: 0,
-    full: 0,
-    semantic: 0,
-  })
-  assert.equal(
-    actor.getSnapshot().context.failureReason,
-    'fast checks repair limit exhausted.'
-  )
-  actor.stop()
-})
-
-test('full and semantic repair limits escalate in the child without parent counter synchronization', async () => {
-  const cases: {
-    label: string
-    domain: EpicDomainState
-    services: EpicServices
-    reason: string
-  }[] = [
-    {
-      label: 'full',
-      domain: { ...domain(), maxFullRepairs: 0 },
-      reason: 'full checks repair limit exhausted.',
-      services: {
-        ...services(),
-        checks: async (state, suite) => ({
-          state,
-          result: {
-            suite,
-            passed: suite !== 'full',
-            checks: [],
-            introducedFindings: [],
-            preExistingFindings: [],
-            deferredChecks: [],
-          },
-        }),
-      },
-    },
-    {
-      label: 'semantic',
-      domain: { ...domain(), maxSemanticRepairs: 0 },
-      reason: 'semantic review repair limit exhausted.',
-      services: {
-        ...services(),
-        review: async (state) => ({
-          state,
-          result: {
-            passed: false,
-            summary: '',
-            acceptanceCriteria: [],
-            findings: [],
-          },
-        }),
-      },
-    },
-  ]
-  for (const item of cases) {
-    const actor = createActor(createTaskExecutionMachine(item.services), {
-      input: { domain: item.domain },
-    })
-    actor.start()
-    actor.send({ type: 'TASK.APPROVE' })
-    for (let turn = 0; turn < 6; turn += 1) await nextTurn()
-    assert.equal(actor.getSnapshot().value, 'escalating', item.label)
-    assert.equal(actor.getSnapshot().context.failureReason, item.reason)
-    actor.stop()
-  }
-})
-
-test('semantic repair reruns implementation, fast checks, full checks, then review', async () => {
-  const calls: string[] = []
-  let reviewAttempt = 0
-  const tracked: EpicServices = {
-    ...services(),
-    implement: async (state) => {
-      calls.push('implement')
-      return state
-    },
-    checks: async (state, suite) => {
-      calls.push(suite)
-      return {
-        state,
-        result: {
-          suite,
-          passed: true,
-          checks: [],
-          introducedFindings: [],
-          preExistingFindings: [],
-          deferredChecks: [],
-        },
-      }
-    },
-    review: async (state) => {
-      calls.push('review')
-      reviewAttempt += 1
-      return {
-        state,
-        result: {
-          passed: reviewAttempt > 1,
-          summary: '',
-          acceptanceCriteria: [],
-          findings: [],
-        },
-      }
-    },
-  }
-  const actor = createActor(createTaskExecutionMachine(tracked), {
-    input: { domain: domain() },
-  })
-  actor.start()
-  actor.send({ type: 'TASK.APPROVE' })
-  for (let turn = 0; turn < 10; turn += 1) await nextTurn()
   assert.equal(actor.getSnapshot().value, 'awaitingReview')
-  assert.deepEqual(calls, [
-    'implement',
-    'fast',
-    'full',
-    'review',
-    'implement',
-    'fast',
-    'full',
-    'review',
-  ])
-  assert.deepEqual(actor.getSnapshot().context.repairs, {
-    fast: 0,
-    full: 0,
-    semantic: 1,
-  })
+  assert.deepEqual(calls, ['verify', 'browser unavailable'])
+  assert.equal(actor.getSnapshot().can({ type: 'TASK.APPROVE' }), false)
   actor.stop()
 })
 
-test('browser smoke gates semantic review and cleans up the supervised server', async () => {
-  const calls: string[] = []
-  let cleanups = 0
-  const epicServices = services()
-  epicServices.implement = async (state) => {
-    calls.push('implement')
-    return {
-      ...state,
-      devServer: {
-        command: 'npm',
-        args: ['run', 'dev'],
-        url: 'http://127.0.0.1:4173/',
-        readySelector: 'main',
-      },
-    }
-  }
-  epicServices.checks = async (state, suite) => {
-    calls.push(suite)
-    return {
-      state,
-      result: {
-        suite,
-        passed: true,
-        checks: [],
-        introducedFindings: [],
-        preExistingFindings: [],
-        deferredChecks: [],
-      },
-    }
-  }
-  epicServices.serve = (_state, callbacks) => {
-    calls.push('serve')
-    queueMicrotask(() =>
-      callbacks.ready({
-        command: 'npm',
-        args: ['run', 'dev'],
-        url: 'http://127.0.0.1:4173/',
-        stdoutPreview: 'ready',
-        stderrPreview: '',
-        outputTruncated: false,
-      })
-    )
-    return () => {
-      cleanups += 1
-    }
-  }
-  epicServices.browserSmoke = async (state, server) => {
-    calls.push('browser-smoke')
-    return {
-      state,
-      result: {
-        passed: true,
-        url: server.url,
-        readySelector: 'main',
-        durationMs: 1,
-        findings: [],
-        server,
-      },
-    }
-  }
-  epicServices.review = async (state) => {
-    calls.push('review')
-    return {
-      state,
-      result: {
-        passed: true,
-        summary: 'passed',
-        acceptanceCriteria: [],
-        findings: [],
-      },
-    }
-  }
-  const browserTask = {
-    ...task('browser-task'),
-    requiredChecks: ['browser-smoke'],
-  }
-  const actor = createActor(createTaskExecutionMachine(epicServices), {
-    input: { domain: { ...domain(), tasks: [browserTask] } },
-  })
-  actor.start()
-  actor.send({ type: 'TASK.APPROVE' })
-  for (let turn = 0; turn < 12; turn += 1) await nextTurn()
+test('ordinary resume verifies without invoking implementation and repair needs an explicit grant', async () => {
+  const mocked = services()
+  let implementations = 0
+  let verifications = 0
+  mocked.implement = async state => { implementations++; return state }
+  mocked.verifyTask = async state => { verifications++; return { ...state, verificationReadiness: 'issues_remaining' } }
+  const actor = createActor(createTaskExecutionMachine(mocked), { input: { domain: domain() } }).start()
+  actor.send({ type: 'TASK.APPROVE' }); await nextTurn()
+  actor.send({ type: 'TASK.REVIEW' }); await nextTurn()
+  assert.equal(implementations, 1)
+  actor.send({ type: 'EPIC.RESUME' }); await nextTurn()
+  assert.equal(implementations, 1)
+  assert.equal(verifications, 2)
+  actor.stop()
+})
+
+test('task decisions are validated before completing the actor', async () => {
+  const mocked = services()
+  mocked.taskDecision = async () => { throw new Error('stale revision') }
+  const actor = createActor(createTaskExecutionMachine(mocked), { input: { domain: domain() } }).start()
+  actor.send({ type: 'TASK.APPROVE' }); await nextTurn()
+  actor.send({ type: 'TASK.DECIDE', request: { kind: 'accept_unresolved', reportId: 'old', identity: 'old', obligations: ['AC1'], reason: 'acknowledged' } }); await nextTurn()
   assert.equal(actor.getSnapshot().value, 'awaitingReview')
-  assert.deepEqual(calls, [
-    'implement',
-    'fast',
-    'full',
-    'serve',
-    'browser-smoke',
-    'review',
-  ])
-  assert.equal(cleanups, 1)
-  actor.stop()
-})
-
-test('failed browser smoke consumes the full repair budget and reruns checks', async () => {
-  const calls: string[] = []
-  let smokeAttempt = 0
-  let cleanups = 0
-  const epicServices = services()
-  epicServices.implement = async (state) => {
-    calls.push('implement')
-    return {
-      ...state,
-      devServer: {
-        command: 'npm',
-        args: ['run', 'dev'],
-        url: 'http://127.0.0.1:4173/',
-        readySelector: 'main',
-      },
-    }
-  }
-  epicServices.checks = async (state, suite) => {
-    calls.push(suite)
-    return {
-      state,
-      result: {
-        suite,
-        passed: true,
-        checks: [],
-        introducedFindings: [],
-        preExistingFindings: [],
-        deferredChecks: [],
-      },
-    }
-  }
-  epicServices.serve = (_state, callbacks) => {
-    calls.push('serve')
-    queueMicrotask(() =>
-      callbacks.ready({
-        command: 'npm',
-        args: ['run', 'dev'],
-        url: 'http://127.0.0.1:4173/',
-        stdoutPreview: '',
-        stderrPreview: '',
-        outputTruncated: false,
-      })
-    )
-    return () => {
-      cleanups += 1
-    }
-  }
-  epicServices.browserSmoke = async (state, server) => {
-    smokeAttempt += 1
-    calls.push('browser-smoke')
-    return {
-      state,
-      result: {
-        passed: smokeAttempt > 1,
-        url: server.url,
-        readySelector: 'main',
-        durationMs: 1,
-        findings:
-          smokeAttempt > 1
-            ? []
-            : [
-                {
-                  source: 'browser-smoke',
-                  severity: 'error',
-                  message: 'page error',
-                },
-              ],
-        server,
-      },
-    }
-  }
-  const browserTask = {
-    ...task('browser-task'),
-    requiredChecks: ['browser-smoke'],
-  }
-  const actor = createActor(createTaskExecutionMachine(epicServices), {
-    input: { domain: { ...domain(), tasks: [browserTask] } },
-  })
-  actor.start()
-  actor.send({ type: 'TASK.APPROVE' })
-  for (let turn = 0; turn < 24; turn += 1) await nextTurn()
-  assert.equal(actor.getSnapshot().value, 'awaitingReview')
-  assert.equal(calls.filter((call) => call === 'implement').length, 2)
-  assert.equal(calls.filter((call) => call === 'browser-smoke').length, 2)
-  assert.equal(cleanups, 2)
-  assert.equal(actor.getSnapshot().context.repairs.full, 1)
-  actor.stop()
-})
-
-test('stopping task execution cleans up a server still waiting for readiness', async () => {
-  let cleanups = 0
-  const epicServices = services()
-  epicServices.implement = async (state) => ({
-    ...state,
-    devServer: {
-      command: 'npm',
-      args: ['run', 'dev'],
-      url: 'http://127.0.0.1:4173/',
-      readySelector: 'main',
-    },
-  })
-  epicServices.serve = () => () => {
-    cleanups += 1
-  }
-  const actor = createActor(createTaskExecutionMachine(epicServices), {
-    input: {
-      domain: {
-        ...domain(),
-        tasks: [{ ...task('browser-task'), requiredChecks: ['browser-smoke'] }],
-      },
-    },
-  })
-  actor.start()
-  actor.send({ type: 'TASK.APPROVE' })
-  for (let turn = 0; turn < 8; turn += 1) await nextTurn()
-  assert.deepEqual(actor.getSnapshot().value, {
-    browserVerification: 'startingDevServer',
-  })
-  actor.stop()
-  assert.equal(cleanups, 1)
-})
-
-test('semantic repairs may target an unplanned path without scope approval', async () => {
-  const calls: string[] = []
-  let reviewAttempt = 0
-  const scoped = domain()
-  scoped.tasks = [task('task-1')]
-  const tracked: EpicServices = {
-    ...services(),
-    implement: async (state, feedback) => {
-      calls.push(feedback ? 'implement-with-feedback' : 'implement')
-      return state
-    },
-    review: async (state) => {
-      calls.push('review')
-      reviewAttempt += 1
-      const result: ReviewResult =
-        reviewAttempt > 1
-          ? {
-              passed: true,
-              summary: 'The repair is complete.',
-              acceptanceCriteria: [],
-              findings: [],
-            }
-          : {
-              passed: false,
-              summary: 'A shared dependency must change.',
-              acceptanceCriteria: [],
-              findings: [
-                {
-                  severity: 'major',
-                  category: 'correctness',
-                  message: 'The shared dependency violates the task invariant.',
-                  failureScenario: 'The feature fails at runtime.',
-                  requiredFix: 'Update the shared dependency.',
-                  affectedPaths: ['src/shared.ts'],
-                  repairPaths: ['src/shared.ts'],
-                },
-              ],
-            }
-      return {
-        state,
-        result,
-      }
-    },
-  }
-  const actor = createActor(createTaskExecutionMachine(tracked), {
-    input: { domain: scoped },
-  })
-  actor.start()
-  actor.send({ type: 'TASK.APPROVE' })
-  for (let turn = 0; turn < 8; turn += 1) await nextTurn()
-
-  assert.equal(actor.getSnapshot().value, 'awaitingReview')
-  assert.deepEqual(calls, [
-    'implement',
-    'review',
-    'implement-with-feedback',
-    'review',
-  ])
-  assert.equal(actor.getSnapshot().context.repairs.semantic, 1)
+  assert.equal(actor.getSnapshot().context.failureReason, 'stale revision')
   actor.stop()
 })
 
@@ -1011,14 +621,14 @@ test('injected timer rejects unsettled dispatches and is cleaned up', async () =
   actor.stop()
 })
 
-test('schema-6 envelope is the sole persisted state and older machine versions are rejected', async () => {
+test('schema-8 envelope is the sole persisted state and older machine versions are rejected', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-refactor-'))
   const machine = createEpicMachine(services())
   const actor = createActor(machine, { input: { state: domain(root) } })
   actor.start()
   const envelope = {
-    schemaVersion: 6 as const,
-    machineVersion: 11 as const,
+    schemaVersion: 8 as const,
+    machineVersion: 13 as const,
     epicId: 'run-1',
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -1040,8 +650,8 @@ test('schema-6 envelope is the sole persisted state and older machine versions a
     'updatedAt',
   ])
   const loaded = await loadActiveEpic(root)
-  assert.equal(loaded.schemaVersion, 6)
-  assert.equal(loaded.machineVersion, 11)
+  assert.equal(loaded.schemaVersion, 8)
+  assert.equal(loaded.machineVersion, 13)
   assert.equal(loaded.epicId, envelope.epicId)
   stored.schemaVersion = 5
   stored.machineVersion = 9
@@ -1051,7 +661,7 @@ test('schema-6 envelope is the sole persisted state and older machine versions a
   )
   await assert.rejects(
     loadActiveEpic(root),
-    /found schema\/machine version 5\/9.*Required schema\/machine version 6\/11/
+    /found schema\/machine version 5\/9.*Required schema\/machine version 8\/13/
   )
   await fs.writeFile(
     path.join(root, '.pi/epics/runs/run-1/state.json'),
@@ -1070,8 +680,8 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   })
   actor.start()
   const envelope = {
-    schemaVersion: 6 as const,
-    machineVersion: 11 as const,
+    schemaVersion: 8 as const,
+    machineVersion: 13 as const,
     epicId: current.epicId,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
@@ -1106,9 +716,9 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   await fs.rm(root, { recursive: true, force: true })
 })
 
-test('machine version constants accept only schema 6/machine 11', () => {
-  assert.equal(EPIC_SCHEMA_VERSION, 6)
-  assert.equal(EPIC_MACHINE_VERSION, 11)
+test('machine version constants accept only schema 8/machine 13', () => {
+  assert.equal(EPIC_SCHEMA_VERSION, 8)
+  assert.equal(EPIC_MACHINE_VERSION, 13)
 })
 
 test('malformed child completion output and reason-less escalation fail explicitly', () => {

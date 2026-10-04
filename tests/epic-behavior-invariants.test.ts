@@ -31,7 +31,7 @@ import { assertRepositoryPath, isSafeReadOnlyCommand, redactSecrets } from '../p
 import type { AgentRole, EpicDomainState, ResolvedEpicConfiguration } from '../pi/extensions/epic/types.ts'
 
 function domain(root: string): EpicDomainState {
-  return { epicId: 'run', epic: 'test', repositoryRoot: root, epicComplexity: 'moderate', scoutRound: 0, maxScoutRounds: 3, planPath: path.join(root, '.pi', 'epics', 'runs', 'run', 'plan.md'), planRevision: 0, planApproved: false, currentTaskIndex: 0, taskApproved: false, implementationAttempt: 0, maxFastRepairs: 2, maxFullRepairs: 1, maxSemanticRepairs: 2 }
+  return { epicId: 'run', epic: 'test', repositoryRoot: root, epicComplexity: 'moderate', scoutRound: 0, maxScoutRounds: 3, planPath: path.join(root, '.pi', 'epics', 'runs', 'run', 'plan.md'), planRevision: 0, planApproved: false, currentTaskIndex: 0, taskApproved: false, implementationAttempt: 0, maxTaskRepairs: 2, maxAcceptancePlanRepairs: 2, maxTaskInfrastructureRetries: 1, taskVerificationTimeoutMs: 2 }
 }
 
 test('review instructions retain line numbers across Windows line endings', () => {
@@ -81,7 +81,7 @@ test('domain parser rejects malformed nested tasks, indexes, and limits', () => 
   const current = domain('/repo')
   assert.equal(parseEpicDomainState(current, 'test').epicId, 'run')
   assert.throws(() => parseEpicDomainState({ ...current, currentTaskIndex: -1 }, 'test'), /currentTaskIndex/)
-  assert.throws(() => parseEpicDomainState({ ...current, maxFastRepairs: 1.5 }, 'test'), /maxFastRepairs/)
+  assert.throws(() => parseEpicDomainState({ ...current, maxTaskRepairs: 1.5 }, 'test'), /maxTaskRepairs/)
   assert.throws(() => parseEpicDomainState({ ...current, tasks: [{}] }, 'test'), /tasks\[0\]/)
 })
 
@@ -117,6 +117,7 @@ test('agent profiles merge defaults and partial overrides into a complete canoni
     'planner',
     'task-planner',
     'implementer',
+    'verifier',
     'reviewer',
     'plan-reviewer',
     'task-reviewer',
@@ -156,7 +157,7 @@ test('task completion validation rejects malformed domains and repair counters b
 
 test('persisted envelope parser rejects extra fields, identity mismatches, and incomplete domains', () => {
   const state = domain('/repo')
-  const envelope = { schemaVersion: 6 as const, machineVersion: 11 as const, epicId: 'run', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', snapshot: { value: 'idle', context: { state } } }
+  const envelope = { schemaVersion: 8 as const, machineVersion: 13 as const, epicId: 'run', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', snapshot: { value: 'idle', context: { state } } }
   assert.equal(parsePersistedEpicEnvelope(envelope).epicId, 'run')
   assert.throws(() => parsePersistedEpicEnvelope({ ...envelope, legacyDomain: state }), /unsupported fields/)
   assert.throws(() => parsePersistedEpicEnvelope({ ...envelope, epicId: 'other' }), /does not match/)

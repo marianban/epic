@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Acceptance fixture</title>
+<main><button id="increment">Increment</button><output id="count">0</output></main>
+<script>
+document.querySelector('#increment').addEventListener('click', () => {
+  const count = document.querySelector('#count');
+  count.textContent = String(Number(count.textContent) + 1);
+});
+</script></html>

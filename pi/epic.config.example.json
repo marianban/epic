@@ -8,9 +8,10 @@
   "commandTimeoutMs": 120000,
   "agentTimeoutMs": 300000,
   "maxOutputBytes": 20000,
-  "maxFastRepairs": 2,
-  "maxFullRepairs": 1,
-  "maxSemanticRepairs": 2,
+  "maxTaskRepairs": 6,
+  "maxAcceptancePlanRepairs": 2,
+  "maxTaskInfrastructureRetries": 1,
+  "taskVerificationTimeoutMs": 1800000,
   "checks": {
     "fast": ["git diff --check", "npm run typecheck", "npm run lint"],
     "full": [
@@ -57,6 +58,11 @@
       "provider": "openai-codex",
       "model": "gpt-5.6-luna",
       "thinking": "low"
+    },
+    "verifier": {
+      "provider": "openai-codex",
+      "model": "gpt-5.6-luna",
+      "thinking": "high"
     },
     "reviewer": {
       "provider": "openai-codex",

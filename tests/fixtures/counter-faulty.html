@@ -1,0 +1,8 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Faulty acceptance fixture</title>
+<main><button id="increment">Increment</button><output id="count">0</output></main>
+<script>
+document.querySelector('#increment').addEventListener('click', () => {
+  throw new Error('Counter interaction defect');
+});
+</script></html>

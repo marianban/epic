@@ -1,3 +1,4 @@
+import { acceptancePlanningFailureMessage } from './acceptance-planning-recovery.ts'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
@@ -16,6 +17,8 @@ import { domainFromActorSnapshot } from './domain-validation.ts'
 import { resolveEpicConfiguration } from './configuration.ts'
 import { activeAgentRuns } from './agent-activity.ts'
 import { recoverInterruptedAgentRuns } from './agent-recovery.ts'
+import { latestTaskRepairRequest } from './task-repair-request.ts'
+import { VerificationStore, taskVerificationPath } from './verification-store.ts'
 import type { EpicMachineEvent } from './machines/epic-machine.ts'
 import type {
   EpicBoundaryView,
@@ -67,7 +70,7 @@ async function dispatch(
     try {
       const boundary = await runtime.dispatchAndSettle(
         event,
-        configuration.agentTimeoutMs
+        runtime.boundary().task ? undefined : configuration.agentTimeoutMs
       )
       const nextDomain = runtime.domain()
       const nextEnvelope = runtime.envelope(systemClock.now())
@@ -84,6 +87,9 @@ export function formatEscalationMessage(
 ): string | undefined {
   const failureReason =
     view.domain.failureReason ?? view.boundary.failureDiagnostics?.reason
+  if (view.boundary.stage === 'acceptance_planning_failed') {
+    return [acceptancePlanningFailureMessage(view.boundary.task?.state ?? ''), failureReason, 'Use /epic-resume to retry acceptance planning, or /epic-exit.'].filter(Boolean).join('. ')
+  }
   if (view.boundary.stage !== 'escalating' || !failureReason)
     return next
   return [failureReason, next].filter(Boolean).join(' ')
@@ -96,7 +102,7 @@ function notifyNextAction(
 ): void {
   ctx.ui.notify(
     [completed, formatEscalationMessage(view, next)].filter(Boolean).join(' '),
-    view.boundary.stage === 'escalating' || view.boundary.stage === 'recovering'
+    view.boundary.stage === 'escalating' || view.boundary.stage === 'recovering' || view.boundary.stage === 'acceptance_planning_failed'
       ? 'warning'
       : 'info'
   )
@@ -218,6 +224,28 @@ export async function reviseTask(ctx: ExtensionContext): Promise<void> {
     `Task review completed for epic ${view.metadata.epicId}.`
   )
 }
+export async function taskDecisionCommand(ctx: ExtensionContext, kind: 'confirm' | 'accept_unresolved' | 'grant' | 'defer' | 'revise_criteria', args: string): Promise<void> {
+  if (kind === 'grant') {
+    if (args.trim()) throw new Error('/task-repair takes no arguments. Run /task-repair to repair the latest task report.')
+    const envelope = await loadActiveEpic(ctx.cwd)
+    const domain = domainFromActorSnapshot(envelope.snapshot)
+    const record = await new VerificationStore(taskVerificationPath(domain), systemClock).read()
+    const request = latestTaskRepairRequest(record.report, { repairs: 1, timeMs: 300_000 })
+    const view = await dispatch(envelope, ctx, { type: 'TASK.DECIDE', request })
+    if (view.boundary.task?.failureReason) throw new Error(view.boundary.task.failureReason)
+    notifyNextAction(ctx, view, 'Granted one repair attempt and five additional minutes for the latest task report.')
+    return
+  }
+  let input: Record<string, unknown>
+  try { input = JSON.parse(args) as Record<string, unknown> } catch { throw new Error('Provide a JSON decision containing identity, reportId, reason, and the action-specific values shown in the report.') }
+  if (!input || typeof input !== 'object' || typeof input.identity !== 'string' || typeof input.reportId !== 'string' || typeof input.reason !== 'string') throw new Error('Decision requires identity, reportId, and reason.')
+  if ((kind === 'confirm' || kind === 'accept_unresolved') && (!Array.isArray(input.obligations) || input.obligations.some(id => typeof id !== 'string'))) throw new Error('Decision requires obligation/check IDs.')
+  if (kind === 'revise_criteria' && (!Array.isArray(input.criteria) || input.criteria.some(text => typeof text !== 'string'))) throw new Error('Revision requires criteria strings.')
+  const request = { ...input, kind } as import('./verification-types.ts').TaskDecisionRequest
+  const view = await active(ctx, { type: 'TASK.DECIDE', request })
+  if (view.boundary.task?.failureReason) throw new Error(view.boundary.task.failureReason)
+  notifyNextAction(ctx, view, `Task decision processed: ${kind}.`)
+}
 export async function epicStatus(ctx: ExtensionContext): Promise<void> {
   const envelope = await loadActiveEpic(ctx.cwd)
   const domain = domainFromActorSnapshot(envelope.snapshot)
@@ -240,6 +268,7 @@ export async function epicStatus(ctx: ExtensionContext): Promise<void> {
         `Machine state: ${JSON.stringify(runtime.value())}`,
         `Tags: ${Array.from(runtime.tags()).join(', ') || 'none'}`,
         `Pending human action: ${boundary.pendingHumanAction ?? 'none'}`,
+        ...(boundary.stage === 'acceptance_planning_failed' ? [acceptancePlanningFailureMessage(boundary.task?.state ?? ''), runtime.domain().failureReason ?? '', 'Use /epic-resume to retry acceptance planning, or /epic-exit.'] : []),
       ].join('\n')
     )
   } finally {

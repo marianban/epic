@@ -22,9 +22,10 @@ function input(signal?: AbortSignal): BrowserSmokeInput {
       currentTaskIndex: 0,
       taskApproved: true,
       implementationAttempt: 0,
-      maxFastRepairs: 1,
-      maxFullRepairs: 1,
-      maxSemanticRepairs: 1,
+      maxTaskRepairs: 1,
+      maxAcceptancePlanRepairs: 2,
+      maxTaskInfrastructureRetries: 1,
+      taskVerificationTimeoutMs: 1,
     },
     spec: {
       command: 'npm',

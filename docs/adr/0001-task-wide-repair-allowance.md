@@ -1,0 +1,3 @@
+# Use a durable task-wide repair allowance
+
+Task verification currently has separate phase allowances, and replacement execution actors initialize fresh counters. Use one task-wide repair allowance across failure categories, persisting consumption before invoking a repair and retaining usage across actor replacement and resume. This makes maximum autonomous repair work predictable and prevents category changes or recovery from granting new attempts; the trade-off is that startup failures can consume the allowance before behavioral verification runs. Infrastructure retries remain separately bounded, and user-authorized additional grants preserve the usage history.

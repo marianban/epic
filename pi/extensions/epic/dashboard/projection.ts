@@ -1,3 +1,4 @@
+import { acceptancePlanningFailureMessage } from '../acceptance-planning-recovery.ts'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { hyperlink } from '@earendil-works/pi-tui'
@@ -31,6 +32,10 @@ import {
 import { projectPipelineState } from './pipeline-projection.ts'
 
 const STAGE_STATUS: Record<EpicStage, EpicDashboardStatus> = {
+  planning_acceptance: 'in-progress',
+  acceptance_planning_failed: 'escalating',
+  verifying_acceptance: 'in-progress',
+  finalizing_report: 'in-progress',
   idle: 'in-progress',
   classifying: 'in-progress',
   scouting: 'in-progress',
@@ -186,7 +191,8 @@ function currentTaskDefinition(state: DashboardRunState): EpicTask {
 function actionRequired(
   state: DashboardRunState,
   activeOperation: boolean,
-  boundaryFailureReason?: string,
+  boundaryFailureReason: string | undefined,
+  taskState: string | undefined,
   recovery?: DashboardProjectionInput['boundary']['recoveryDiagnostics']
 ): DashboardActionRequest | undefined {
   if (activeOperation) return undefined
@@ -231,16 +237,27 @@ function actionRequired(
         message: taskMessage(state),
         actions: taskActions(),
       }
+    case 'acceptance_planning_failed':
+      return {
+        id: 'acceptance-planning-failed',
+        severity: 'critical',
+        title: acceptancePlanningFailureMessage(taskState ?? ''),
+        message: state.failureReason ?? boundaryFailureReason,
+        actions: [
+          action(EPIC_COMMANDS.resume, 'Retry acceptance planning', EPIC_COMMANDS.resume, 'primary'),
+          action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
+        ],
+      }
     case 'awaiting_task_review':
       {
         const task = currentTaskDefinition(state)
         return {
           id: 'task-action-required',
           severity: 'warning',
-          title: 'Task implementation completed',
-          message: implementedTaskMessage(state),
+          title: 'Task awaits human review',
+          message: `${state.verificationReadiness ?? 'needs_manual_confirmation'}: ${state.lastVerificationReportPath ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'verification report') : implementedTaskMessage(state)}${state.failureReason ? ` ${state.failureReason}` : ''}. Use /task-repair without arguments to repair the latest issues. Use /task-confirm, /task-accept-unresolved, /task-revise-criteria, or /task-defer with report-bound JSON from the report.`,
           manualReviewSteps: task.manualReviewSteps,
-          actions: taskActions(),
+          actions: state.verificationReadiness === 'verified' ? taskActions() : [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary'), action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')],
         }
       }
     case 'escalating': {
@@ -520,6 +537,10 @@ function completedTaskCount(
 
 const TASK_STAGES = new Set<EpicStage>([
   'awaiting_task_approval',
+  'planning_acceptance',
+  'acceptance_planning_failed',
+  'verifying_acceptance',
+  'finalizing_report',
   'awaiting_task_review',
   'revising_task',
   'implementing',
@@ -655,8 +676,12 @@ function taskStatus(
       return 'refinement'
     case 'awaiting_task_review':
       return 'completed'
+    case 'acceptance_planning_failed':
     case 'escalating':
       return 'failed'
+    case 'planning_acceptance':
+    case 'verifying_acceptance':
+    case 'finalizing_report':
     case 'implementing':
     case 'running_fast_checks':
     case 'repairing_fast_checks':
@@ -696,12 +721,12 @@ function currentTask(
     name: task.title,
     status: taskStatus(state.stage, input.events, taskId),
     agentTimeMs: taskAgentTimeMs(input.events, activeAgentRuns, taskId, nowMs),
-    attempt: taskAttempt(input.events, taskId),
-    criteria: taskCriteria(
-      input.events,
-      taskId,
-      task.acceptanceCriteria.length
-    ),
+    attempt: input.boundary.task?.state === 'planningAcceptance' || input.boundary.task?.state === 'acceptancePlanningFailed'
+      ? { current: 0 }
+      : taskAttempt(input.events, taskId),
+    criteria: state.stage === 'planning_acceptance' || state.stage === 'acceptance_planning_failed'
+      ? progress(0, task.acceptanceCriteria.length)
+      : taskCriteria(input.events, taskId, task.acceptanceCriteria.length),
     ...(taskAgentName(activeAgentRuns, taskId) === undefined
       ? {}
       : { agent: taskAgentName(activeAgentRuns, taskId) }),
@@ -776,7 +801,8 @@ export function projectDashboardState(
     actionRequired: actionRequired(
       state,
       input.activeOperation === true,
-      input.boundary.failureDiagnostics?.reason,
+      input.boundary.task?.failureReason ?? input.boundary.failureDiagnostics?.reason,
+      input.boundary.task?.state,
       input.boundary.recoveryDiagnostics
     ),
     currentTask: currentTask(input, state, tasks, nowMs),
