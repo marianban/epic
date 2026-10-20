@@ -1,3 +1,4 @@
+import { summarizeVerificationCycle } from './verification-summary.ts'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type {
@@ -376,12 +377,7 @@ export async function runTaskVerification(
       const id = await store.charge(
         record,
         'repair',
-        JSON.stringify({
-          checks: [cycle.fast, cycle.full],
-          smoke: cycle.smoke,
-          evidence: cycle.evidence,
-          review: cycle.review,
-        })
+        JSON.stringify(summarizeVerificationCycle(cycle))
       )
       const charged = record.invocations.find((i) => i.id === id)
       if (!charged) throw new Error('Charged repair invocation disappeared.')

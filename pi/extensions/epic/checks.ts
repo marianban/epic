@@ -14,6 +14,8 @@ import type {
 } from './types.ts'
 import { packageInstallCommand } from './prerequisites.ts'
 import { assertRepositoryPath, redactSecrets } from './tools.ts'
+import { normalizeFindings } from './check-findings.ts'
+import { summarizeCheck } from './verification-summary.ts'
 import { logEpic } from './logger.ts'
 
 
@@ -227,30 +229,6 @@ interface EpicTaskCheckPolicy {
   requiredChecks: string[]
   deferredChecks: string[]
   reason: string
-}
-
-function normalizeFindings(
-  source: string,
-  stdout: string,
-  stderr: string,
-  exitCode: number
-): Finding[] {
-  const combined = `${stdout}\n${stderr}`.trim()
-  if (!combined && exitCode === 0) return []
-  const findings: Finding[] = []
-  for (const rawLine of combined.split(/\r?\n/).filter(Boolean)) {
-    const match = rawLine.match(/^(.*?)(?::(\d+)(?::(\d+))?)?\s*[-:]\s*(.+)$/)
-    findings.push({
-      source,
-      severity: exitCode === 0 ? 'warning' : 'error',
-      file: match?.[1]?.trim() || undefined,
-      line: match?.[2] ? Number(match[2]) : undefined,
-      column: match?.[3] ? Number(match[3]) : undefined,
-      message: match?.[4]?.trim() || rawLine.trim(),
-      raw: rawLine.trim(),
-    })
-  }
-  return findings
 }
 
 function findingKey(finding: Finding): string {
@@ -523,7 +501,7 @@ export async function runCheckSuite(
       timestamp,
       check.passed ? 'info' : 'error',
       'Check finished',
-      { suite, ...check }
+      { suite, ...summarizeCheck(check) }
     )
   }
   const allFindings = checks.flatMap((check) => check.findings)

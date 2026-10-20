@@ -286,6 +286,7 @@ export function scenarioPlanningPrompt(
     { action: 'fixture', expression: 'window.testFixture.reset()' },
   ]
   return `Derive independently checkable obligations from frozen approved criteria BEFORE implementation. Read relevant code and dependency contracts, but derive expectations from criteria. Do not change their meaning or invent passing evidence. Do not start a server/browser.
+Verify the resulting state rather than repeating setup actions. For dependency installation criteria, check that node_modules and the applicable lockfile are present (for npm: test -d node_modules && test -f package-lock.json). Do not plan npm install, npm ci, or other dependency installation commands; installation belongs to implementation.
 Return exactly ONE valid JSON object, without Markdown fences, prose, or trailing characters. Required fields: version=${scenarioVersion}, criterionVersion=${criterionVersion}, criteria=${JSON.stringify(criteria)}, obligations. Each obligation requires a unique non-empty id, an approved criterionId, expected, and method. Optional fields: command, steps, reason. Represent EVERY criterion; separate combined obligations.
 Complete example (illustrative only; use the actual frozen criteria and versions above): ${JSON.stringify(example)}
 Method examples (illustrative obligations): ${JSON.stringify(methods)}

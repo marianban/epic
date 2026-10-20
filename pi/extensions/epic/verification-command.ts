@@ -19,14 +19,8 @@ export async function verifyCommand(
   maxOutputBytes: number
 ): Promise<AcceptanceEvidence> {
   const command = obligation.command
-  if (
-    !command ||
-    !isSafeReadOnlyCommand(command) ||
-    /\b(?:dev|serve|listen|chromium|playwright)\b/i.test(command)
-  )
-    throw new Error(
-      'Acceptance command must be a bounded check; server/browser ownership belongs to the runtime.'
-    )
+  if (!command || !isSafeReadOnlyCommand(command))
+    throw new Error('Acceptance command must be a non-empty read-only check.')
   operation.signal.throwIfAborted()
   const execution = await new Promise<{ code: number; output: string }>(
     (resolve, reject) => {

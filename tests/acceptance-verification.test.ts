@@ -768,6 +768,8 @@ test('dependency verification checks installed packages without reinstalling can
   const install = result.checks.find((c) => c.name === 'install')
   assert.equal(install?.command, 'npm ls --all --json')
   assert.equal(install?.passed, true)
+  assert.deepEqual(install?.findings, [])
+  assert.deepEqual(result.introducedFindings, [])
   await assert.rejects(
     fs.access(path.join(f.root, 'package-lock.json')),
     /ENOENT/

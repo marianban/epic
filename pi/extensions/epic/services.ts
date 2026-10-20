@@ -1,4 +1,9 @@
 import {
+  summarizeCheckSuite,
+  summarizeSmoke,
+  summarizeVerificationCycle,
+} from './verification-summary.ts'
+import {
   VerificationStore,
   taskVerificationPath,
 } from './verification-store.ts'
@@ -1029,7 +1034,16 @@ export function createEpicServices(
           state,
           plan,
           diff,
-          JSON.stringify({ ...checks, acceptanceVerification: cycle }),
+          JSON.stringify({
+            checkArtifact: state.lastCheckResultPath,
+            smokeArtifact: state.lastBrowserSmokeResultPath,
+            ...(cycle
+              ? { acceptanceVerification: summarizeVerificationCycle(cycle) }
+              : {
+                  full: summarizeCheckSuite(checks.full),
+                  browserSmoke: checks.browserSmoke && summarizeSmoke(checks.browserSmoke),
+                }),
+          }),
           artifact,
           changedPaths
         ),
