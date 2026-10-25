@@ -1,3 +1,4 @@
+import { validateManualReviews } from './manual-review.ts'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -5,6 +6,7 @@ import type { EpicDomainState, EpicClock } from './types.ts'
 import type {
   TaskVerificationRecord,
   AllowanceGrant,
+  HumanRepairRequest,
 } from './verification-types.ts'
 
 export function taskVerificationPath(state: EpicDomainState): string {
@@ -40,6 +42,7 @@ export class VerificationStore {
       !Array.isArray(value.decisions)
     )
       throw new Error('Invalid task verification ledger.')
+    validateManualReviews(value)
     for (const n of [
       value.repairsLimit,
       value.infrastructureLimit,
@@ -110,6 +113,8 @@ export class VerificationStore {
       grants: [],
       cycles: [],
       decisions: [],
+      manualReviews: [],
+      humanRepairRequests: [],
       plans: [],
     }
     await this.write(record)
@@ -135,7 +140,8 @@ export class VerificationStore {
   async charge(
     record: TaskVerificationRecord,
     kind: 'repair' | 'infrastructure',
-    reason: string
+    reason: string,
+    humanRequest?: HumanRepairRequest
   ): Promise<string> {
     const limit =
       kind === 'repair' ? record.repairsLimit : record.infrastructureLimit
@@ -151,6 +157,7 @@ export class VerificationStore {
       at: this.clock.nowMs(),
       completed: false,
     })
+    if (humanRequest) humanRequest.invocationId = id
     await this.write(record)
     return id
   }

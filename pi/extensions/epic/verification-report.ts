@@ -1,3 +1,4 @@
+import { createManualReview } from './manual-review.ts'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -207,14 +208,14 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
     '',
     '## Human decisions',
     '',
-    'Ordinary approval requires passing checks from the current report, all criteria met, and no actionable findings. Otherwise use /task-accept to accept the report and continue after manual review or acceptance of known limitations. Every unresolved result must be acknowledged with a reason; acceptance preserves the reported findings. Use /task-repair to grant one additional repair attempt and five additional minutes. To review later, use /epic-exit to hide the dashboard; the task remains awaiting review.',
+    'Ordinary approval requires passing checks from the current report, all criteria met, no actionable findings, and every manual checklist item passed. Use the dashboard to record manual results and accept limitations, including failed or unchecked manual items. Otherwise use /task-accept to accept the report and continue after manual review or acceptance of known limitations. Every unresolved result must be acknowledged with a reason; acceptance preserves the reported findings. Use /task-repair to grant one additional repair attempt and five additional minutes. To review later, use /epic-exit to hide the dashboard; the task remains awaiting review.',
     ...(report.readiness !== 'verified'
       ? [
           '',
           'Accept this report and continue:',
           '',
           '```text',
-          `/task-accept ${JSON.stringify({ identity: report.identity, reportId: report.id, obligations: report.unresolved, reason: 'Describe your manual review or why the remaining issues are acceptable.' })}`,
+          `/task-accept ${JSON.stringify({ identity: report.identity, reportId: report.id, obligations: report.unresolved, reason: 'Describe why the remaining issues are acceptable. Include unresolved manual checklist IDs in obligations when using this command.' })}`,
           '```',
         ]
       : []),
@@ -236,6 +237,7 @@ export async function finalizeReviewReport(
     store.remaining(record)
   )
   record.report = report
+  record.manualReviews.push(createManualReview(state, report, store.clock.nowMs()))
   await store.write(record)
   const relative = path.join(
     'reviews',

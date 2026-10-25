@@ -1,3 +1,4 @@
+import { checklistLines, nextReviewStatus } from './manual-checklist.ts'
 import type { Theme } from '@earendil-works/pi-coding-agent'
 import {
   parseKey,
@@ -65,7 +66,12 @@ export class ActionRequired implements Component {
 
   private state: DashboardActionRequest | undefined
   private readonly theme: Theme
-  private readonly executeAction: (action: DashboardAction) => void
+  private readonly executeAction: (
+    action: DashboardAction
+  ) => void | Promise<void>
+  private pending = false
+  private selectedItem = 0
+  private checklistFocused = true
   private focusedActionId: string | undefined
   private cachedWidth: number | undefined
   private cachedLines: string[] | undefined
@@ -73,7 +79,7 @@ export class ActionRequired implements Component {
   constructor(
     state: DashboardActionRequest | undefined,
     theme: Theme,
-    executeAction: (action: DashboardAction) => void
+    executeAction: (action: DashboardAction) => void | Promise<void>
   ) {
     this.state = state
     this.theme = theme
@@ -96,6 +102,10 @@ export class ActionRequired implements Component {
     if (this.focusedActionId === undefined || !ids.has(this.focusedActionId)) {
       this.focusedActionId = state?.actions[0]?.id
     }
+    if (this.state?.manualReview?.reportId !== state?.manualReview?.reportId) {
+      this.selectedItem = 0
+      this.checklistFocused = true
+    }
     this.state = state
     this.invalidate()
   }
@@ -107,9 +117,60 @@ export class ActionRequired implements Component {
 
   /** Returns true when the input was an action-panel key. */
   handleInput(data: string): boolean {
-    if (this.state === undefined) return false
+    if (this.state === undefined || this.pending) return false
 
-    switch (parseKey(data)) {
+    const review = this.state.manualReview
+    const key = parseKey(data)
+    if (review?.items.length) {
+      if (key === 'tab' || key === 'shift+tab') {
+        if (this.checklistFocused) {
+          this.checklistFocused = false
+          this.focusedActionId =
+            key === 'tab'
+              ? this.state.actions[0]?.id
+              : this.state.actions.at(-1)?.id
+          this.invalidate()
+          return true
+        }
+        const actions = this.state.actions
+        const index = actions.findIndex((a) => a.id === this.focusedActionId)
+        if (
+          (key === 'tab' && index === actions.length - 1) ||
+          (key === 'shift+tab' && index === 0)
+        ) {
+          this.checklistFocused = true
+          this.invalidate()
+          return true
+        }
+      }
+      if (this.checklistFocused) {
+        if (key === 'up' || key === 'down') {
+          this.selectedItem =
+            (this.selectedItem +
+              (key === 'up' ? -1 : 1) +
+              review.items.length) %
+            review.items.length
+          this.invalidate()
+          return true
+        }
+        if (key === 'space' || key === 'enter') {
+          const item = review.items[this.selectedItem]
+          if (item)
+            this.runAction({
+              id: 'manual-review-update',
+              label: 'Update review item',
+              manualReview: review,
+              itemId: item.id,
+              ...(key === 'space'
+                ? { status: nextReviewStatus(item.status) }
+                : {}),
+            })
+          return true
+        }
+        return false
+      }
+    }
+    switch (key) {
       case 'shift+tab':
         this.moveFocus(-1)
         return true
@@ -124,17 +185,33 @@ export class ActionRequired implements Component {
         const action = this.state.actions.find(
           (candidate) => candidate.id === this.focusedActionId
         )
-        if (action !== undefined) {
-          this.state = undefined
-          this.setFocused(false)
+        if (action !== undefined && !action.disabled) {
+          if (!action.manualReview) {
+            this.state = undefined
+            this.setFocused(false)
+          }
           this.invalidate()
-          this.executeAction(action)
+          this.runAction(action)
         }
         return true
       }
       default:
         return false
     }
+  }
+
+  private runAction(action: DashboardAction): void {
+    if (!action.manualReview) {
+      void this.executeAction(action)
+      return
+    }
+    this.pending = true
+    void Promise.resolve()
+      .then(() => this.executeAction(action))
+      .finally(() => {
+        this.pending = false
+        this.invalidate()
+      })
   }
 
   render(width: number): string[] {
@@ -157,14 +234,20 @@ export class ActionRequired implements Component {
             this.theme.fg('text', state.message),
             Math.max(1, innerWidth)
           )
-    const manualReviewLines = this.renderManualReviewSteps(
-      state.manualReviewSteps,
-      innerWidth
-    )
+    const manualReviewLines = state.manualReview
+      ? checklistLines(
+          state.manualReview,
+          this.checklistFocused ? this.selectedItem : undefined
+        ).flatMap((line) => wrapTextWithAnsi(line, Math.max(1, innerWidth)))
+      : this.renderManualReviewSteps(state.manualReviewSteps, innerWidth)
     const actionLines = this.renderActions(state.actions, innerWidth)
-    const reportLines = state.verificationReportLink === undefined
-      ? []
-      : wrapTextWithAnsi(state.verificationReportLink, Math.max(1, innerWidth))
+    const reportLines =
+      state.verificationReportLink === undefined
+        ? []
+        : wrapTextWithAnsi(
+            state.verificationReportLink,
+            Math.max(1, innerWidth)
+          )
     const content = [
       ...titleLines,
       ...(messageLines.length > 0 ? ['', ...messageLines] : []),
@@ -256,9 +339,14 @@ export class ActionRequired implements Component {
   }
 
   private renderButton(action: DashboardAction, label: string): string {
-    const focused = action.id === this.focusedActionId
+    const focused =
+      action.id === this.focusedActionId &&
+      !(this.state?.manualReview?.items.length && this.checklistFocused)
     const button = `${focused ? '▸' : ' '}[ ${label} ]`
-    const colored = this.theme.fg(actionColor(action), button)
+    const colored = this.theme.fg(
+      action.disabled ? 'dim' : actionColor(action),
+      button
+    )
     return focused ? this.theme.inverse(colored) : colored
   }
 }

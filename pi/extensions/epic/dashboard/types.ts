@@ -1,3 +1,4 @@
+import type { ManualReview, ManualReviewStatus, TaskVerificationRecord } from '../verification-types.ts'
 import type {
   AgentProfile,
   EpicBoundaryView,
@@ -107,6 +108,10 @@ export interface CurrentTaskDashboardState {
 }
 
 export interface DashboardAction {
+  readonly disabled?: boolean
+  readonly manualReview?: ManualReview
+  readonly itemId?: string
+  readonly status?: ManualReviewStatus
   readonly id: string
   readonly label: string
   readonly command?: string
@@ -118,6 +123,7 @@ export interface DashboardActionRequest {
   readonly severity: 'info' | 'warning' | 'critical'
   readonly title: string
   readonly message?: string
+  readonly manualReview?: ManualReview
   readonly manualReviewSteps?: readonly string[]
   readonly verificationReportLink?: string
   readonly actions: readonly DashboardAction[]
@@ -137,6 +143,7 @@ export interface EpicDashboardState {
 }
 
 export interface DashboardProjectionInput {
+  readonly verificationRecord?: TaskVerificationRecord
   readonly domain: EpicDomainState
   readonly metadata: EpicRunMetadata
   readonly boundary: EpicBoundaryView

@@ -5,7 +5,7 @@ import { latestTaskRepairRequest } from '../pi/extensions/epic/task-repair-reque
 test('repair shortcut binds the grant to the latest unresolved report and explicit allowance', () => {
   assert.deepEqual(latestTaskRepairRequest(
     { identity: 'latest-attempt', id: 'latest-report', readiness: 'issues_remaining' },
-    { repairs: 1, timeMs: 300_000 }
+    { repairs: 1, timeMs: 300_000 }, false
   ), {
     kind: 'grant',
     identity: 'latest-attempt',
@@ -18,8 +18,8 @@ test('repair shortcut binds the grant to the latest unresolved report and explic
 
 test('repair shortcut rejects missing and already verified reports', () => {
   const allowance = { repairs: 1, timeMs: 300_000 }
-  assert.throws(() => latestTaskRepairRequest(undefined, allowance), /No human-review report/)
+  assert.throws(() => latestTaskRepairRequest(undefined, allowance, false), /No human-review report/)
   assert.throws(() => latestTaskRepairRequest(
-    { identity: 'attempt', id: 'report', readiness: 'verified' }, allowance
+    { identity: 'attempt', id: 'report', readiness: 'verified' }, allowance, false
   ), /already verified/)
 })

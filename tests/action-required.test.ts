@@ -1,3 +1,5 @@
+import type { ManualReview } from '../pi/extensions/epic/verification-types.ts'
+import { editManualReviewItem } from '../pi/extensions/epic/dashboard/manual-review-editor.ts'
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import { visibleWidth } from '@earendil-works/pi-tui'
@@ -181,8 +183,9 @@ test('navigates with wrapping in both directions', () => {
 
 test('executes the focused action once on Enter', () => {
   const selected: DashboardAction[] = []
-  const component = new ActionRequired(request(), identityTheme, (action) =>
+  const component = new ActionRequired(request(), identityTheme, (action) => {
     selected.push(action)
+  }
   )
 
   component.handleInput('\r')
@@ -212,7 +215,7 @@ test('handles an empty action collection safely', () => {
   const component = new ActionRequired(
     request({ title: 'Manual intervention required', actions: [] }),
     identityTheme,
-    () => executions++
+    () => { executions++ }
   )
 
   const output = component.render(60).join('\n')
@@ -242,4 +245,82 @@ test('wraps action controls and messages without clipping', () => {
   assert.match(output, /Second action/)
   assert.match(output, /Third action/)
   assert.ok(lines.every((line) => visibleWidth(line) <= 30))
+})
+
+const manualReview: ManualReview = {
+  taskId: 'T1', identity: 'attempt', reportId: 'report', createdAt: 1,
+  items: [
+    { id: 'T1:MR1', text: 'Inspect rendering', status: 'not_checked', observation: '', updatedAt: 1 },
+    { id: 'T1:MR2', text: 'Compare paddle movement', status: 'passed', observation: 'Arrows work', updatedAt: 2 },
+  ],
+}
+const nextInput = () => new Promise<void>(resolve => setImmediate(resolve))
+
+test('checklist cycles in order, navigates items, and only renders persisted changes', async () => {
+  const selected: DashboardAction[] = []
+  const saved = structuredClone(manualReview)
+  const component = new ActionRequired(request({ manualReview: saved }), identityTheme, async action => { selected.push(action) })
+  assert.match(component.render(110).join('\n'), /1 passed · 0 failed · 1 not checked/)
+  component.handleInput(' ')
+  await nextInput()
+  assert.equal(selected.at(-1)?.status, 'passed')
+  assert.match(component.render(110).join('\n'), /▸\[ \] 1\. Inspect rendering/)
+  saved.items[0].status = 'passed'
+  component.setState(request({ manualReview: structuredClone(saved) }))
+  component.handleInput(' ')
+  await nextInput()
+  assert.equal(selected.at(-1)?.status, 'failed')
+  saved.items[0].status = 'failed'
+  saved.items[0].observation = 'Missing field'
+  component.setState(request({ manualReview: structuredClone(saved) }))
+  component.handleInput(' ')
+  await nextInput()
+  assert.equal(selected.at(-1)?.status, 'not_checked')
+  component.handleInput('\x1b[B')
+  component.handleInput('\r')
+  await nextInput()
+  assert.equal(selected.at(-1)?.itemId, 'T1:MR2')
+  assert.equal(selected.at(-1)?.status, undefined)
+  assert.ok(component.render(30).every(line => visibleWidth(line) <= 30))
+})
+
+test('checklist Tab enters actions, disabled actions cannot execute, and modal input passes through', async () => {
+  let finish!: () => void
+  let calls = 0
+  const component = new ActionRequired(request({ manualReview, actions: [{ id: 'approve', label: 'Approve task', disabled: true }, { id: 'repair', label: 'Request fixes', manualReview }] }), identityTheme, async () => { calls++; await new Promise<void>(resolve => { finish = resolve }) })
+  component.handleInput('\t')
+  component.handleInput('\r')
+  assert.equal(calls, 0)
+  component.handleInput('\t')
+  component.handleInput('\r')
+  await nextInput()
+  assert.equal(calls, 1)
+  assert.equal(component.handleInput('\r'), false)
+  assert.equal(component.handleInput('\t'), false)
+  assert.equal(component.handleInput(' '), false)
+  finish()
+  await nextInput()
+  component.handleInput('\t')
+  component.handleInput(' ')
+  await nextInput()
+  assert.equal(calls, 2)
+  finish()
+  await nextInput()
+})
+
+test('failure editor requires feedback, cancellation preserves the saved item, and Enter edits observations', async () => {
+  const before = structuredClone(manualReview)
+  const cancelled = await editManualReviewItem(manualReview, 'T1:MR2', 'failed', async (_title, value) => {
+    assert.equal(value, 'Arrows work'); return undefined
+  })
+  assert.equal(cancelled, undefined)
+  assert.deepEqual(manualReview, before)
+  await assert.rejects(editManualReviewItem(manualReview, 'T1:MR2', 'failed', async () => ' '), /nonblank observation/)
+  const failed = await editManualReviewItem(manualReview, 'T1:MR2', 'failed', async () => 'A/D do not work')
+  assert.equal(failed?.status, 'failed')
+  assert.equal(failed?.observation, 'A/D do not work')
+  const edited = await editManualReviewItem(manualReview, 'T1:MR2', undefined, async () => 'Confirmed twice')
+  assert.equal(edited?.status, 'passed')
+  assert.equal(edited?.observation, 'Confirmed twice')
+  assert.deepEqual(manualReview, before)
 })

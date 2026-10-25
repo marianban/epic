@@ -1,3 +1,5 @@
+import { prepareLimitationsAcceptance } from '../pi/extensions/epic/dashboard/manual-review-acceptance.ts'
+import { projectDashboardState } from '../pi/extensions/epic/dashboard/projection.ts'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
 import * as fs from 'node:fs/promises'
@@ -231,7 +233,7 @@ test('latest-report repair grant resumes an exhausted task and repairs its obser
   const before = await f.store.read()
   assert.equal(before.report?.readiness, 'issues_remaining')
   const granted = await decideTask(state, latestTaskRepairRequest(
-    before.report, { repairs: 1, timeMs: 300_000 }
+    before.report, { repairs: 1, timeMs: 300_000 }, false
   ), realClock)
   await runTaskVerification(granted, new AbortController().signal, f.dependencies)
   const after = await f.store.read()
@@ -1167,4 +1169,174 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
     agentVerified.invocations.filter((i) => i.kind === 'infrastructure').length,
     1
   )
+})
+
+async function manualFixture(t: TestContext) {
+  const f = await fixture(t, 0)
+  assert.ok(f.state.tasks)
+  f.state.tasks[0].manualReviewSteps = ['Inspect the field', 'Compare arrow and A/D paddle movement']
+  const state = await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const review = (await f.store.read()).manualReviews.at(-1)
+  assert.ok(review)
+  const update = (index: number, status: 'passed' | 'failed' | 'not_checked', observation = '') => decideTask(state, {
+    kind: 'update_manual_review', identity: review.identity, reportId: review.reportId,
+    itemId: review.items[index].id, status, observation, reason: 'Human review',
+  }, realClock)
+  return { ...f, state, review, update }
+}
+
+test('manual checklist persists edits, blocks ordinary approval, and resets only for a new report', async t => {
+  const f = await manualFixture(t)
+  assert.deepEqual(f.review.items.map(i => i.status), ['not_checked', 'not_checked'])
+  assert.ok(f.state.lastVerificationReportPath)
+  const immutableReport = await fs.readFile(f.state.lastVerificationReportPath, 'utf8')
+  await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /Ordinary approval/)
+  await f.update(0, 'passed')
+  await f.update(1, 'failed', 'A/D do not move the paddle')
+  const reopened = await new VerificationStore(f.store.file, realClock).read()
+  assert.deepEqual(reopened.manualReviews[0].items.map(i => i.status), ['passed', 'failed'])
+  assert.equal(reopened.manualReviews[0].items[1].observation, 'A/D do not move the paddle')
+  assert.equal(await fs.readFile(f.state.lastVerificationReportPath, 'utf8'), immutableReport)
+  await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /Ordinary approval/)
+  await f.update(1, 'passed')
+  const accepted = await decideTask(f.state, { kind: 'approve' }, realClock)
+  await assertAcceptedReport(accepted, realClock)
+  await f.update(1, 'not_checked')
+  await assert.rejects(assertAcceptedReport(accepted, realClock), /manual review/)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const next = await f.store.read()
+  assert.equal(next.manualReviews.length, 2)
+  assert.deepEqual(next.manualReviews[1].items.map(i => i.status), ['not_checked', 'not_checked'])
+  assert.equal(next.manualReviews[0].items[1].status, 'not_checked')
+  await assert.rejects(f.update(0, 'passed'), /current attempt\/report/)
+})
+
+test('human failure on a verified report reaches implementation before checks and consumes one explicit repair', async t => {
+  const f = await manualFixture(t)
+  await f.update(0, 'passed')
+  await f.update(1, 'failed', 'A/D do not move the paddle')
+  // Plain reverification must not submit this feedback to an implementer.
+  const calls: string[] = []
+  const dependencies = { ...f.dependencies,
+    repair: async (state: EpicDomainState, feedback: string) => {
+      assert.match(feedback, /Compare arrow and A\/D paddle movement/)
+      assert.match(feedback, /A\/D do not move the paddle/)
+      const charged = await f.store.read()
+      assert.equal(charged.invocations.filter(i => i.kind === 'repair').length, 1)
+      assert.ok(charged.humanRepairRequests[0].invocationId)
+      calls.push('human repair')
+      return state
+    },
+    checks: async (...args: Parameters<VerificationDependencies['checks']>) => {
+      calls.push(args[1]); return f.dependencies.checks(...args)
+    },
+  }
+  const record = await f.store.read()
+  const granted = await decideTask(f.state, latestTaskRepairRequest(record.report, { repairs: 1, timeMs: 300_000 }, true), realClock)
+  const nextState = await runTaskVerification(granted, new AbortController().signal, dependencies)
+  assert.deepEqual(calls, ['human repair', 'fast', 'full'])
+  const after = await f.store.read()
+  assert.equal(after.humanRepairRequests[0].completed, true)
+  assert.equal(after.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.equal(after.report?.readiness, 'verified')
+  assert.deepEqual(after.manualReviews.at(-1)?.items.map(i => i.status), ['not_checked', 'not_checked'])
+  assert.equal(after.manualReviews[0].items[1].status, 'failed')
+  await assert.rejects(decideTask(nextState, { kind: 'approve' }, realClock), /Ordinary approval/)
+})
+
+test('resume never submits ungranted manual failures, and unchecked items alone cannot grant a repair', async t => {
+  const f = await manualFixture(t)
+  const record = await f.store.read()
+  const grant = { kind: 'grant' as const, identity: f.review.identity, reportId: f.review.reportId, repairs: 1, timeMs: 300_000, reason: 'Repair' }
+  await assert.rejects(decideTask(f.state, grant, realClock), /already verified/)
+  await f.update(1, 'failed', 'A/D do not work')
+  let repairs = 0
+  await runTaskVerification(f.state, new AbortController().signal, { ...f.dependencies, repair: async state => { repairs++; return state } })
+  assert.equal(repairs, 0)
+  assert.equal((await f.store.read()).grants.length, record.grants.length)
+})
+
+test('manual limitations require every unchecked and failed item, plus automated unresolved IDs', async t => {
+  const f = await manualFixture(t)
+  await f.update(1, 'failed', 'A/D do not work')
+  const request = { kind: 'accept_unresolved' as const, identity: f.review.identity, reportId: f.review.reportId, obligations: [f.review.items[1].id], reason: 'Known limitation' }
+  await assert.rejects(decideTask(f.state, request, realClock), /Acknowledge every/)
+  await assert.rejects(decideTask(f.state, { ...request, obligations: f.review.items.map(i => i.id), reason: ' ' }, realClock), /explicit reason/)
+  const record = await f.store.read()
+  assert.ok(record.report)
+  record.report.unresolved.push('check:missing')
+  await f.store.write(record)
+  await assert.rejects(decideTask(f.state, { ...request, obligations: f.review.items.map(i => i.id) }, realClock), /Acknowledge every/)
+  const accepted = await decideTask(f.state, { ...request, obligations: [...f.review.items.map(i => i.id), 'check:missing'] }, realClock)
+  await assertAcceptedReport(accepted, realClock)
+  assert.equal((await f.store.read()).manualReviews[0].items[1].status, 'failed')
+})
+
+test('invalid manual updates and failed writes retain the previous saved status', async t => {
+  const f = await manualFixture(t)
+  await assert.rejects(f.update(1, 'failed'), /observation/)
+  const before = await fs.readFile(f.store.file, 'utf8')
+  const original = VerificationStore.prototype.write
+  const mock = t.mock.method(VerificationStore.prototype, 'write', async function(this: VerificationStore, ...args: Parameters<VerificationStore['write']>) {
+    if (this.file === f.store.file) throw new Error('disk full')
+    return original.apply(this, args)
+  })
+  await assert.rejects(f.update(0, 'passed'), /disk full/)
+  mock.mock.restore()
+  assert.equal(await fs.readFile(f.store.file, 'utf8'), before)
+})
+
+test('interrupted human repair remains charged; plain resume cannot repeat it, and a fresh grant can', async t => {
+  const f = await manualFixture(t)
+  await f.update(1, 'failed', 'A/D do not work')
+  await decideTask(f.state, latestTaskRepairRequest((await f.store.read()).report, { repairs: 1, timeMs: 300_000 }, true), realClock)
+  let calls = 0
+  const dependencies = { ...f.dependencies, repair: async () => { calls++; throw new Error('Interrupted human repair') } }
+  const interrupted = await runTaskVerification(f.state, new AbortController().signal, dependencies)
+  let record = await f.store.read()
+  assert.equal(calls, 1)
+  assert.ok(record.humanRepairRequests[0].invocationId)
+  assert.equal(record.humanRepairRequests[0].completed, false)
+  await runTaskVerification(interrupted, new AbortController().signal, dependencies)
+  assert.equal(calls, 1)
+  record = await f.store.read()
+  const current = record.manualReviews.at(-1)
+  assert.ok(current)
+  await decideTask(interrupted, { kind: 'update_manual_review', identity: current.identity, reportId: current.reportId, itemId: current.items[1].id, status: 'failed', observation: 'Still broken', reason: 'Retest' }, realClock)
+  await decideTask(interrupted, latestTaskRepairRequest(record.report, { repairs: 1, timeMs: 300_000 }, true), realClock)
+  await runTaskVerification(interrupted, new AbortController().signal, { ...dependencies, repair: async state => { calls++; return state } })
+  assert.equal(calls, 2)
+  record = await f.store.read()
+  assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 2)
+  assert.equal(record.humanRepairRequests[1].completed, true)
+})
+
+test('dashboard gates actions from saved manual results and acceptance dialogs acknowledge each limitation', async t => {
+  const f = await manualFixture(t)
+  const actions = async () => {
+    const record = await f.store.read()
+    return projectDashboardState({ domain: f.state, metadata: { epicId: f.state.epicId, createdAt: realClock.now(), updatedAt: realClock.now() }, boundary: { stage: 'awaiting_task_review', wait: 'awaiting-human' }, events: [], agentProfiles: [], verificationRecord: record }).actionRequired?.actions
+  }
+  const unchecked = await actions()
+  assert.equal(unchecked?.find(a => a.id === 'task-approve')?.disabled, true)
+  assert.equal(unchecked?.find(a => a.id === 'task-repair')?.disabled, true)
+  assert.equal(unchecked?.find(a => a.id === 'task-accept')?.disabled, false)
+  await f.update(1, 'failed', 'A/D do not work')
+  assert.equal((await actions())?.find(a => a.id === 'task-repair')?.disabled, false)
+  const record = await f.store.read()
+  let reasonRequests = 0
+  assert.equal(await prepareLimitationsAcceptance(record, async () => false, async () => { reasonRequests++; return 'reason' }), undefined)
+  assert.equal(reasonRequests, 0)
+  const acknowledged: string[] = []
+  const accept = await prepareLimitationsAcceptance(record, async (title, description) => { acknowledged.push(title); assert.ok(description); return true }, async () => 'Known limitations')
+  assert.deepEqual(acknowledged, ['Accept limitation: T1:MR1', 'Accept limitation: T1:MR2'])
+  assert.deepEqual(accept?.obligations, ['T1:MR1', 'T1:MR2'])
+  assert.equal(await prepareLimitationsAcceptance(record, async () => true, async () => undefined), undefined)
+  await assert.rejects(prepareLimitationsAcceptance(record, async () => true, async () => ' '), /nonblank reason/)
+  await f.update(0, 'passed')
+  await f.update(1, 'passed')
+  const passed = await actions()
+  assert.equal(passed?.find(a => a.id === 'task-approve')?.disabled, false)
+  assert.equal(passed?.find(a => a.id === 'task-repair')?.disabled, true)
+  assert.equal(passed?.find(a => a.id === 'task-accept')?.disabled, true)
 })

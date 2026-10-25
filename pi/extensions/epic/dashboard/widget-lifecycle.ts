@@ -43,7 +43,7 @@ export class EpicStatusWidget implements Component {
   private readonly theme: Theme
   private readonly load: DashboardLoader
   private readonly notify: (message: string) => void
-  private readonly executeAction: (action: DashboardAction) => void
+  private readonly executeAction: (action: DashboardAction) => void | Promise<void>
   private readonly unregisterTerminalInput: () => void
   private stats: EpicStats | undefined
   private actionRequired: ActionRequired | undefined
@@ -61,7 +61,7 @@ export class EpicStatusWidget implements Component {
     theme: Theme,
     load: DashboardLoader,
     notify: (message: string) => void,
-    executeAction: (action: DashboardAction) => void,
+    executeAction: (action: DashboardAction) => void | Promise<void>,
     registerTerminalInput: RegisterTerminalInput,
     refreshIntervalMs: number
   ) {
@@ -70,13 +70,16 @@ export class EpicStatusWidget implements Component {
     this.theme = theme
     this.load = load
     this.notify = notify
-    this.executeAction = executeAction
+    this.executeAction = async (action) => {
+      try { await executeAction(action) }
+      finally { await this.refresh() }
+    }
     this.unregisterTerminalInput = registerTerminalInput((data) => {
       if (this.actionRequired?.focused === true) {
         if (isKeyRelease(data)) return { consume: true }
-        return this.actionRequired.handleInput(data)
-          ? { consume: true }
-          : undefined
+        const handled = this.actionRequired.handleInput(data)
+        if (handled) this.tui.requestRender()
+        return handled ? { consume: true } : undefined
       }
       if (isKeyRelease(data)) return undefined
       const key = parseKey(data)
@@ -286,7 +289,7 @@ export function registerEpicStatusWidget(
           loadActiveDashboardState,
           (message) => ctx.ui.notify(message, 'error'),
           (action) => {
-            void executeAction(action, ctx).catch((error: unknown) => {
+            return executeAction(action, ctx).catch((error: unknown) => {
               ctx.ui.notify(
                 `Epic action ${action.id} failed: ${
                   error instanceof Error ? error.message : String(error)

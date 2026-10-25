@@ -2,10 +2,11 @@ import type { HumanReviewReport, TaskDecisionRequest } from './verification-type
 
 export function latestTaskRepairRequest(
   report: Pick<HumanReviewReport, 'identity' | 'id' | 'readiness'> | undefined,
-  allowance: { repairs: number; timeMs: number }
+  allowance: { repairs: number; timeMs: number },
+  manualFailures: boolean
 ): Extract<TaskDecisionRequest, { kind: 'grant' }> {
   if (!report) throw new Error('No human-review report is available. Verify the current task first.')
-  if (report.readiness === 'verified')
+  if (report.readiness === 'verified' && !manualFailures)
     throw new Error('The current task is already verified; no repair is needed.')
   return {
     kind: 'grant',

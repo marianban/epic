@@ -703,7 +703,7 @@ test('old 7/12 runs fail with an incompatibility diagnosis and no migration', as
         ...f.metadata,
         snapshot: {},
       }),
-    /found schema\/machine version 7\/12.*Required schema\/machine version 8\/13; no compatibility migration was applied/
+    /found schema\/machine version 7\/12.*Required schema\/machine version 9\/14; no compatibility migration was applied/
   )
 })
 
@@ -727,4 +727,10 @@ test('planning repair configuration defaults to two and accepts zero, rejecting 
       /maxAcceptancePlanRepairs/
     )
   }
+})
+
+test('previous checklist-free schema 8/machine 13 is explicitly incompatible', async t => {
+  const f = await fixture(t, [])
+  const old = { schemaVersion: 8, machineVersion: 13, ...f.metadata, snapshot: {} }
+  assert.throws(() => parsePersistedEpicEnvelope(old), /found schema\/machine version 8\/13.*Required schema\/machine version 9\/14; no compatibility migration was applied/)
 })

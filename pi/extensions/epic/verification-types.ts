@@ -90,7 +90,32 @@ export interface HumanDecision {
   reason: string
   at: number
 }
+export type ManualReviewStatus = 'not_checked' | 'passed' | 'failed'
+export interface ManualReviewItem {
+  id: string
+  text: string
+  status: ManualReviewStatus
+  observation: string
+  updatedAt: number
+}
+export interface ManualReview {
+  taskId: string
+  identity: string
+  reportId: string
+  items: ManualReviewItem[]
+  createdAt: number
+}
+export interface HumanRepairRequest {
+  identity: string
+  reportId: string
+  feedback: string
+  at: number
+  invocationId?: string
+  completed: boolean
+}
 export interface TaskVerificationRecord {
+  manualReviews: ManualReview[]
+  humanRepairRequests: HumanRepairRequest[]
   taskId: string
   criteria: ApprovedCriterion[]
   criterionVersion: number
@@ -146,6 +171,15 @@ export interface VerificationOperation {
 }
 export type TaskDecisionRequest =
   | { kind: 'approve' }
+  | {
+      kind: 'update_manual_review'
+      identity: string
+      reportId: string
+      itemId: string
+      status: ManualReviewStatus
+      observation: string
+      reason: string
+    }
   | {
       kind: 'accept_unresolved'
       identity: string

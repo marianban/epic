@@ -14,7 +14,9 @@ export function validateImplementerResult(
     !Array.isArray(item.checks) ||
     item.checks.some((check) => typeof check !== 'string' || !check.trim())
   )
-    throw new Error('Implementer response checks must contain non-empty strings.')
+    throw new Error(
+      'Implementer response checks must contain non-empty strings.'
+    )
   const devServer = validateDevServerLaunchSpec(
     item.devServer,
     browserSmokeRequired

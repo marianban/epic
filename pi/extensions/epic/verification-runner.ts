@@ -122,6 +122,18 @@ export async function runTaskVerification(
         'Acceptance verification blocked: no independently validated scenario plan.'
       )
     const plan = record.plan
+    const pending = record.humanRepairRequests.find(r => !r.completed && !r.invocationId)
+    if (pending) {
+      if (!repairAfterInterruptionGranted) throw new Error('Interrupted repair requires an explicit additional grant.')
+      const invocationId = await store.charge(record, 'repair', pending.feedback, pending)
+      state = await dependencies.repair(state, pending.feedback, operation)
+      record.state = state
+      const invocation = record.invocations.find(i => i.id === invocationId)
+      if (!invocation) throw new Error('Charged human repair invocation disappeared.')
+      invocation.completed = true
+      pending.completed = true
+      await store.write(record)
+    }
     while (store.remaining(record) > 0 && !signal.aborted) {
       identity = randomUUID()
       const cycle: VerificationCycle = {

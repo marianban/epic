@@ -1,3 +1,4 @@
+import { currentManualReview, unresolvedReviewIds, humanRepairFeedback } from '../manual-review.ts'
 import { acceptancePlanningFailureMessage } from '../acceptance-planning-recovery.ts'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -197,7 +198,8 @@ function actionRequired(
   activeOperation: boolean,
   boundaryFailureReason: string | undefined,
   taskState: string | undefined,
-  recovery?: DashboardProjectionInput['boundary']['recoveryDiagnostics']
+  recovery: DashboardProjectionInput['boundary']['recoveryDiagnostics'],
+  verificationRecord: DashboardProjectionInput['verificationRecord']
 ): DashboardActionRequest | undefined {
   if (activeOperation) return undefined
 
@@ -255,16 +257,26 @@ function actionRequired(
     case 'awaiting_task_review':
       {
         const task = currentTaskDefinition(state)
+        const manualReview = verificationRecord ? currentManualReview(verificationRecord) : undefined
+        const reviewActions: DashboardAction[] | undefined = manualReview && verificationRecord?.report ? [
+          { id: EPIC_COMMANDS.approveTask, label: 'Approve task', kind: 'primary', disabled: verificationRecord.report.readiness !== 'verified' || unresolvedReviewIds(verificationRecord).length > 0 },
+          { id: EPIC_COMMANDS.repairTask, label: 'Request fixes', manualReview, disabled: !humanRepairFeedback(verificationRecord) && verificationRecord.report.readiness !== 'issues_remaining' },
+          { id: EPIC_COMMANDS.acceptTask, label: 'Accept limitations', manualReview, disabled: unresolvedReviewIds(verificationRecord).length === 0 && verificationRecord.report.readiness === 'verified' },
+          ...(state.verificationReadiness !== 'verified' ? [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary')] : []),
+          { id: 'manual-review-history', label: 'Review history', manualReview },
+          action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
+        ] : undefined
         return {
           id: 'task-action-required',
           severity: 'warning',
           title: 'Task awaits human review',
           message: taskReviewMessage(state),
+          manualReview,
           manualReviewSteps: task.manualReviewSteps,
           verificationReportLink: state.lastVerificationReportPath
             ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'Verification report')
             : undefined,
-          actions: state.verificationReadiness === 'verified' ? taskActions() : [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary'), action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')],
+          actions: reviewActions ?? (state.verificationReadiness === 'verified' ? taskActions() : [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary'), action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')]),
         }
       }
     case 'escalating': {
@@ -810,7 +822,8 @@ export function projectDashboardState(
       input.activeOperation === true,
       input.boundary.task?.failureReason ?? input.boundary.failureDiagnostics?.reason,
       input.boundary.task?.state,
-      input.boundary.recoveryDiagnostics
+      input.boundary.recoveryDiagnostics,
+      input.verificationRecord
     ),
     currentTask: currentTask(input, state, tasks, nowMs),
   }

@@ -1,3 +1,4 @@
+import { VerificationStore, taskVerificationPath } from '../verification-store.ts'
 import { loadEpicEvents, loadOptionalActiveEpic } from '../persistence.ts'
 import { activeAgentRuns } from '../agent-activity.ts'
 import { recoverInterruptedAgentRuns } from '../agent-recovery.ts'
@@ -33,7 +34,11 @@ export async function loadActiveDashboardState(
     await recoverInterruptedAgentRuns(domain, now, nowMs, liveRuns)
   }
 
+  const verificationRecord = boundary.stage === 'awaiting_task_review' && domain.lastVerificationReportPath
+    ? await new VerificationStore(taskVerificationPath(domain), { now: () => now, nowMs: () => nowMs }).read()
+    : undefined
   return DashboardState.fromRun({
+    verificationRecord,
     domain,
     metadata: envelope,
     boundary,

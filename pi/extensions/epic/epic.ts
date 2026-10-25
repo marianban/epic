@@ -17,6 +17,7 @@ import { domainFromActorSnapshot } from './domain-validation.ts'
 import { resolveEpicConfiguration } from './configuration.ts'
 import { activeAgentRuns } from './agent-activity.ts'
 import { recoverInterruptedAgentRuns } from './agent-recovery.ts'
+import { humanRepairFeedback } from './manual-review.ts'
 import { latestTaskRepairRequest } from './task-repair-request.ts'
 import { VerificationStore, taskVerificationPath } from './verification-store.ts'
 import type { EpicMachineEvent } from './machines/epic-machine.ts'
@@ -230,7 +231,7 @@ export async function taskDecisionCommand(ctx: ExtensionContext, kind: 'accept_u
     const envelope = await loadActiveEpic(ctx.cwd)
     const domain = domainFromActorSnapshot(envelope.snapshot)
     const record = await new VerificationStore(taskVerificationPath(domain), systemClock).read()
-    const request = latestTaskRepairRequest(record.report, { repairs: 1, timeMs: 300_000 })
+    const request = latestTaskRepairRequest(record.report, { repairs: 1, timeMs: 300_000 }, !!humanRepairFeedback(record))
     const view = await dispatch(envelope, ctx, { type: 'TASK.DECIDE', request })
     if (view.boundary.task?.failureReason) throw new Error(view.boundary.task.failureReason)
     notifyNextAction(ctx, view, 'Granted one repair attempt and five additional minutes for the latest task report.')
@@ -293,4 +294,9 @@ async function ensureNoActiveEpic(root: string): Promise<void> {
     if (error instanceof Error && !/ENOENT|no such file/i.test(error.message))
       throw error
   }
+}
+
+export async function submitTaskDecision(ctx: ExtensionContext, request: import('./verification-types.ts').TaskDecisionRequest): Promise<void> {
+  const view = await active(ctx, { type: 'TASK.DECIDE', request })
+  if (view.boundary.task?.failureReason) throw new Error(view.boundary.task.failureReason)
 }
