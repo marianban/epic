@@ -57,10 +57,11 @@ test('renders severity, title, message, and every action', () => {
   assert.match(output, /▸\[ Continue \]/)
 })
 
-test('renders manual review steps before checkpoint actions', () => {
+test('renders manual review steps before the report link and checkpoint actions', () => {
   const component = new ActionRequired(
     request({
       message: 'Verify the implementation.',
+      verificationReportLink: 'Verification report',
       manualReviewSteps: [
         'Open the settings screen and confirm the new control is visible.',
         'Toggle the control and verify the updated behavior.',
@@ -73,7 +74,7 @@ test('renders manual review steps before checkpoint actions', () => {
   const output = component.render(100).join('\n')
   assert.match(
     output,
-    /Manual Review Steps[\s\S]*1\. Open the settings screen[\s\S]*2\. Toggle the control[\s\S]*▸\[ Continue \]/
+    /Manual Review Steps[\s\S]*1\. Open the settings screen[\s\S]*2\. Toggle the control[\s\S]*Verification report[\s\S]*▸\[ Continue \]/
   )
 })
 

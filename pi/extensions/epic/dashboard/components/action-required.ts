@@ -162,10 +162,14 @@ export class ActionRequired implements Component {
       innerWidth
     )
     const actionLines = this.renderActions(state.actions, innerWidth)
+    const reportLines = state.verificationReportLink === undefined
+      ? []
+      : wrapTextWithAnsi(state.verificationReportLink, Math.max(1, innerWidth))
     const content = [
       ...titleLines,
       ...(messageLines.length > 0 ? ['', ...messageLines] : []),
       ...(manualReviewLines.length > 0 ? ['', ...manualReviewLines] : []),
+      ...(reportLines.length > 0 ? ['', ...reportLines] : []),
       ...(actionLines.length > 0 ? ['', ...actionLines] : []),
     ]
     const lines = [

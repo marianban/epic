@@ -139,42 +139,71 @@ test('plan checkpoint links only plan.md', () => {
   assert.ok(message?.includes('\u001b]8;;\u001b\\ has been created.'))
 })
 
-test('implementation checkpoint includes the current task manual review steps', () => {
-  const waiting = projectDashboardState({
-    domain: {
-      ...domain(),
-      tasks: [
-        {
-          id: 'task-007',
-          title: 'Implement checkpoint guidance',
-          objective: 'Show review guidance in the checkpoint.',
-          files: { context: [], expectedChanges: [] },
-          implementation: ['Update the dashboard checkpoint.'],
-          acceptanceCriteria: ['The checkpoint shows review guidance.'],
-          verification: ['Run the focused tests.'],
-          manualReviewSteps: [
-            'Open the checkpoint and verify the guidance is visible.',
-            'Confirm the Continue action remains available.',
-          ],
-          risks: [],
-          requiredChecks: [],
-          deferredChecks: [],
-          reason: 'The steps are specific to the UI behavior.',
-        },
-      ],
-    },
-    metadata,
-    boundary: boundary('awaiting_task_review'),
-    events: [],
-    agentProfiles: [],
-    now: '2026-01-01T02:00:00.000Z',
-  })
+for (const readiness of ['verified', 'issues_remaining', 'needs_manual_confirmation', undefined] as const) {
+  test(`implementation checkpoint shows relevant guidance for ${readiness ?? 'missing report'}`, () => {
+    const waiting = projectDashboardState({
+      domain: {
+        ...domain(),
+        verificationReadiness: readiness,
+        lastVerificationReportPath: readiness === undefined
+          ? undefined
+          : '/repo/.pi/epics/runs/run/reviews/acceptance.json',
+        tasks: [
+          {
+            id: 'task-007',
+            title: 'Implement checkpoint guidance',
+            objective: 'Show review guidance in the checkpoint.',
+            files: { context: [], expectedChanges: [] },
+            implementation: ['Update the dashboard checkpoint.'],
+            acceptanceCriteria: ['The checkpoint shows review guidance.'],
+            verification: ['Run the focused tests.'],
+            manualReviewSteps: [
+              'Open the checkpoint and verify the guidance is visible.',
+              'Confirm the Continue action remains available.',
+            ],
+            risks: [],
+            requiredChecks: [],
+            deferredChecks: [],
+            reason: 'The steps are specific to the UI behavior.',
+          },
+        ],
+      },
+      metadata,
+      boundary: boundary('awaiting_task_review'),
+      events: [],
+      agentProfiles: [],
+      now: '2026-01-01T02:00:00.000Z',
+    })
 
-  assert.deepEqual(waiting.actionRequired?.manualReviewSteps, [
-    'Open the checkpoint and verify the guidance is visible.',
-    'Confirm the Continue action remains available.',
-  ])
-  assert.ok(waiting.actionRequired?.message?.includes('/task-accept '))
-  assert.ok(!waiting.actionRequired?.message?.includes('/task-confirm'))
-  assert.ok(!waiting.actionRequired?.message?.includes('/task-accept-unresolved'))
-})
+    assert.deepEqual(waiting.actionRequired?.manualReviewSteps, [
+      'Open the checkpoint and verify the guidance is visible.',
+      'Confirm the Continue action remains available.',
+    ])
+    const checkpoint = waiting.actionRequired
+    assert.ok(checkpoint)
+    if (readiness === 'verified') {
+      assert.equal(checkpoint.message, undefined)
+      assert.equal(checkpoint.actions[0]?.command, '/task-approve')
+      assert.equal(checkpoint.actions[0]?.label, 'Continue')
+    } else {
+      assert.equal(checkpoint.actions[0]?.label, 'Reverify')
+      assert.ok(!checkpoint.actions.some((action) => action.label === 'Continue'))
+      if (readiness === undefined) {
+        assert.match(checkpoint.message ?? '', /Use Reverify/)
+        assert.doesNotMatch(checkpoint.message ?? '', /\/task-(accept|repair)/)
+      } else {
+        assert.match(checkpoint.message ?? '', /\/task-repair/)
+        assert.match(checkpoint.message ?? '', /\/task-accept/)
+        assert.match(checkpoint.message ?? '', readiness === 'issues_remaining'
+          ? /Verification found unresolved issues/
+          : /Verification needs manual confirmation/)
+      }
+    }
+    if (readiness === undefined) {
+      assert.equal(checkpoint.verificationReportLink, undefined)
+    } else {
+      assert.ok(checkpoint.verificationReportLink?.includes('file:///repo/.pi/epics/runs/run/reviews/acceptance.md'))
+      assert.ok(checkpoint.verificationReportLink?.includes('Verification report'))
+    }
+  })
+}

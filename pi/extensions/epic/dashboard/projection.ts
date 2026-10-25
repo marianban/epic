@@ -171,12 +171,16 @@ function taskMessage(state: DashboardRunState): string {
   return `${task} is ready. Comments marked with R: will be refined.`
 }
 
-function implementedTaskMessage(state: DashboardRunState): string {
-  const task = linkedFile(
-    currentTaskArtifactPath(state),
-    `task-${String(state.currentTaskIndex + 1).padStart(3, '0')}.md`
-  )
-  return `Implemented ${task}. Verify the acceptance criteria and manual review steps below, then leave comments marked with R: in case of an issue.`
+function taskReviewMessage(state: DashboardRunState): string | undefined {
+  if (state.verificationReadiness === 'verified') return undefined
+
+  const status = state.verificationReadiness === 'issues_remaining'
+    ? 'Verification found unresolved issues.'
+    : 'Verification needs manual confirmation.'
+  const instructions = state.lastVerificationReportPath
+    ? 'Use /task-repair without arguments to grant one additional repair attempt and five minutes. To accept the current results, use /task-accept with the JSON from the report, acknowledging every unresolved result with a reason.'
+    : 'Use Reverify to generate a verification report.'
+  return [status, state.failureReason, instructions].filter(Boolean).join(' ')
 }
 
 function currentTaskDefinition(state: DashboardRunState): EpicTask {
@@ -255,8 +259,11 @@ function actionRequired(
           id: 'task-action-required',
           severity: 'warning',
           title: 'Task awaits human review',
-          message: `${state.verificationReadiness ?? 'needs_manual_confirmation'}: ${state.lastVerificationReportPath ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'verification report') : implementedTaskMessage(state)}${state.failureReason ? ` ${state.failureReason}` : ''}. Use /task-repair without arguments to repair the latest issues. Use /task-accept with report-bound JSON from the report to accept it and continue, acknowledging unresolved results. Exit hides the dashboard; the task remains awaiting review.`,
+          message: taskReviewMessage(state),
           manualReviewSteps: task.manualReviewSteps,
+          verificationReportLink: state.lastVerificationReportPath
+            ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'Verification report')
+            : undefined,
           actions: state.verificationReadiness === 'verified' ? taskActions() : [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary'), action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')],
         }
       }
