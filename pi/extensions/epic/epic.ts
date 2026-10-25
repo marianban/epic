@@ -224,7 +224,7 @@ export async function reviseTask(ctx: ExtensionContext): Promise<void> {
     `Task review completed for epic ${view.metadata.epicId}.`
   )
 }
-export async function taskDecisionCommand(ctx: ExtensionContext, kind: 'confirm' | 'accept_unresolved' | 'grant' | 'defer' | 'revise_criteria', args: string): Promise<void> {
+export async function taskDecisionCommand(ctx: ExtensionContext, kind: 'accept_unresolved' | 'grant', args: string): Promise<void> {
   if (kind === 'grant') {
     if (args.trim()) throw new Error('/task-repair takes no arguments. Run /task-repair to repair the latest task report.')
     const envelope = await loadActiveEpic(ctx.cwd)
@@ -239,8 +239,7 @@ export async function taskDecisionCommand(ctx: ExtensionContext, kind: 'confirm'
   let input: Record<string, unknown>
   try { input = JSON.parse(args) as Record<string, unknown> } catch { throw new Error('Provide a JSON decision containing identity, reportId, reason, and the action-specific values shown in the report.') }
   if (!input || typeof input !== 'object' || typeof input.identity !== 'string' || typeof input.reportId !== 'string' || typeof input.reason !== 'string') throw new Error('Decision requires identity, reportId, and reason.')
-  if ((kind === 'confirm' || kind === 'accept_unresolved') && (!Array.isArray(input.obligations) || input.obligations.some(id => typeof id !== 'string'))) throw new Error('Decision requires obligation/check IDs.')
-  if (kind === 'revise_criteria' && (!Array.isArray(input.criteria) || input.criteria.some(text => typeof text !== 'string'))) throw new Error('Revision requires criteria strings.')
+  if (kind === 'accept_unresolved' && (!Array.isArray(input.obligations) || input.obligations.some(id => typeof id !== 'string'))) throw new Error('Decision requires obligation/check IDs.')
   const request = { ...input, kind } as import('./verification-types.ts').TaskDecisionRequest
   const view = await active(ctx, { type: 'TASK.DECIDE', request })
   if (view.boundary.task?.failureReason) throw new Error(view.boundary.task.failureReason)

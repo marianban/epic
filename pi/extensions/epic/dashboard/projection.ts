@@ -255,7 +255,7 @@ function actionRequired(
           id: 'task-action-required',
           severity: 'warning',
           title: 'Task awaits human review',
-          message: `${state.verificationReadiness ?? 'needs_manual_confirmation'}: ${state.lastVerificationReportPath ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'verification report') : implementedTaskMessage(state)}${state.failureReason ? ` ${state.failureReason}` : ''}. Use /task-repair without arguments to repair the latest issues. Use /task-confirm, /task-accept-unresolved, /task-revise-criteria, or /task-defer with report-bound JSON from the report.`,
+          message: `${state.verificationReadiness ?? 'needs_manual_confirmation'}: ${state.lastVerificationReportPath ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'verification report') : implementedTaskMessage(state)}${state.failureReason ? ` ${state.failureReason}` : ''}. Use /task-repair without arguments to repair the latest issues. Use /task-accept with report-bound JSON from the report to accept it and continue, acknowledging unresolved results. Exit hides the dashboard; the task remains awaiting review.`,
           manualReviewSteps: task.manualReviewSteps,
           actions: state.verificationReadiness === 'verified' ? taskActions() : [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary'), action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')],
         }

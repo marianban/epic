@@ -37,7 +37,7 @@ import { createEpicMachine } from '../pi/extensions/epic/machines/epic-machine.t
 import { createEpicRuntime } from '../pi/extensions/epic/runtime.ts'
 import type { EpicServices } from '../pi/extensions/epic/services.ts'
 import { loadActiveEpic } from '../pi/extensions/epic/persistence.ts'
-import { constructReviewReport } from '../pi/extensions/epic/verification-report.ts'
+import { constructReviewReport, reviewReportMarkdown } from '../pi/extensions/epic/verification-report.ts'
 import { latestTaskRepairRequest } from '../pi/extensions/epic/task-repair-request.ts'
 
 const exec = promisify(execFile)
@@ -408,7 +408,7 @@ test('evidence validation preserves independent results and rejects missing, con
   assert.equal(duplicated.evidence.length, 0)
 })
 
-test('human confirmation and unresolved acceptance retain attempt-bound evidence', async (t) => {
+test('one acceptance decision completes manual review or accepts defects without rewriting evidence', async (t) => {
   const f = await fixture(t)
   f.record.plan = {
     ...f.plan,
@@ -430,19 +430,29 @@ test('human confirmation and unresolved acceptance retain attempt-bound evidence
   )
   const report = (await f.store.read()).report
   assert.ok(report)
-  const confirmed = await decideTask(
+  assert.equal(report.readiness, 'needs_manual_confirmation')
+  const markdown = reviewReportMarkdown(report)
+  const acceptCommand = markdown.split('\n').find((line) => line.startsWith('/task-accept '))
+  assert.ok(acceptCommand)
+  const payload = JSON.parse(acceptCommand.slice('/task-accept '.length))
+  assert.equal(payload.identity, report.identity)
+  assert.equal(payload.reportId, report.id)
+  assert.deepEqual(payload.obligations, report.unresolved)
+  assert.ok(!markdown.includes('/task-confirm'))
+  assert.ok(!markdown.includes('/task-accept-unresolved'))
+  const manuallyAccepted = await decideTask(
     state,
     {
-      kind: 'confirm',
-      identity: report.identity,
-      reportId: report.id,
-      obligations: ['visual'],
+      ...payload,
+      kind: 'accept_unresolved',
       reason: 'I checked the appearance.',
     },
     realClock
   )
-  assert.equal(confirmed.verificationReadiness, 'verified')
-  await decideTask(confirmed, { kind: 'approve' }, realClock)
+  assert.equal(manuallyAccepted.taskApproved, true)
+  assert.equal(manuallyAccepted.verificationReadiness, 'needs_manual_confirmation')
+  assert.deepEqual(await assertAcceptedReport(manuallyAccepted, realClock), report)
+  assert.deepEqual((await f.store.read()).report, report)
   await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
   f.record.plan = f.plan
   f.record.repairsLimit = 0
@@ -479,6 +489,7 @@ test('human confirmation and unresolved acceptance retain attempt-bound evidence
     },
     realClock
   )
+  assert.equal(accepted.taskApproved, true)
   await assertAcceptedReport(accepted, realClock)
   assert.equal((await f.store.read()).report?.criteria[0]?.status, 'not_met')
 })

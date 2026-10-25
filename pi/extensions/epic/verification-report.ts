@@ -207,7 +207,17 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
     '',
     '## Human decisions',
     '',
-    'Ordinary approval requires passing checks from the current report, all criteria met, and no actionable findings. Otherwise confirm human-only obligations, explicitly accept identified unresolved results with a reason, grant bounded repair/time, revise, or defer.',
+    'Ordinary approval requires passing checks from the current report, all criteria met, and no actionable findings. Otherwise use /task-accept to accept the report and continue after manual review or acceptance of known limitations. Every unresolved result must be acknowledged with a reason; acceptance preserves the reported findings. Use /task-repair to grant one additional repair attempt and five additional minutes. To review later, use /epic-exit to hide the dashboard; the task remains awaiting review.',
+    ...(report.readiness !== 'verified'
+      ? [
+          '',
+          'Accept this report and continue:',
+          '',
+          '```text',
+          `/task-accept ${JSON.stringify({ identity: report.identity, reportId: report.id, obligations: report.unresolved, reason: 'Describe your manual review or why the remaining issues are acceptable.' })}`,
+          '```',
+        ]
+      : []),
     '',
   ].join('\n')
 }

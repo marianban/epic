@@ -87,7 +87,7 @@ export async function prepareAcceptancePlan(
         JSON.stringify(record.criteria.map((criterion) => criterion.text))
     )
       throw new Error(
-        'Approved task criteria changed. Explicitly approve a criterion revision before implementation.'
+        'Approved task criteria changed. Acceptance planning requires the frozen approved criteria.'
       )
     if (record.plan) {
       validateVerificationPlan(

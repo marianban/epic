@@ -1,5 +1,7 @@
 # Deterministic Pi epic
 
+See the [overall workflow diagram](workflow.md) for a visual overview and concise descriptions of each step.
+
 This project-local extension provides one sequential, human-gated epic:
 
 `/epic` → Scout → Planner → run-scoped `plan.md` review → approval → Task Planner → prerequisite check/approval → (human task review/approval → independent scenario planning → Implementer → required checks → mandatory smoke for browser tasks → acceptance verification → Reviewer → post-implementation human task review) for each task → final verification.
@@ -57,7 +59,7 @@ After plan approval, the epic checks for a Git repository and declared Node depe
 
 Acceptance scenarios are planned independently before implementation. The verifier must return one valid JSON object with the frozen criteria and explicit browser-step fields such as `{"action":"inspect","expression":"document.querySelector('#game-container') !== null"}`. `maxAcceptancePlanRepairs` defaults to 2 (one initial call plus two corrections), accepts zero, and is persisted per epic. Only invalid JSON or scenario-contract failures receive automatic corrections with field-specific validation issues. Invocation, timeout, storage, and persisted-criteria failures pause immediately. These calls never consume verification infrastructure retries, code repairs, or the verification deadline.
 
-Failed or interrupted planning pauses at `acceptance_planning_failed`, with diagnostics and a **Retry acceptance planning** action using `/epic-resume`. Task approval and report-bound decisions are unavailable there; no acceptance report is produced. Resume retains the approved task and frozen criteria, starts a fresh bounded batch, and proceeds to implementation only after a valid plan is persisted. Replanning after criterion revision proceeds to verification instead. Reopening a planning failure preserves it; reopening interrupted planning pauses without running agents. A valid plan already persisted before interruption is reused on explicit resume. Attempt events retain batch/attempt IDs, validation issues, agent invocation IDs, and available log references.
+Failed or interrupted planning pauses at `acceptance_planning_failed`, with diagnostics and a **Retry acceptance planning** action using `/epic-resume`. Task approval and report-bound decisions are unavailable there; no acceptance report is produced. Resume retains the approved task and frozen criteria, starts a fresh bounded batch, and proceeds to implementation only after a valid plan is persisted. Reopening a planning failure preserves it; reopening interrupted planning pauses without running agents. A valid plan already persisted before interruption is reused on explicit resume. Attempt events retain batch/attempt IDs, validation issues, agent invocation IDs, and available log references.
 
 Task verification persists a task-owned allowance ledger, versioned criterion/scenario plans, cycle evidence, and immutable JSON/Markdown human reports. `maxTaskRepairs` defaults to 6, `maxTaskInfrastructureRetries` to 1, and `taskVerificationTimeoutMs` to 1800000. Counts may be zero. Obsolete phase-specific repair settings are rejected.
 
@@ -65,13 +67,12 @@ Repairs and infrastructure retries are charged before invocation. The shared dea
 
 Ordinary `/task-approve` requires all criteria met, passing mandatory checks, and no actionable findings. Other decisions use JSON arguments copied from the current report:
 
-- `/task-confirm {"identity":"...","reportId":"...","obligations":["human-obligation-id"],"reason":"I checked it"}` records human-only evidence.
-- `/task-accept-unresolved {"identity":"...","reportId":"...","obligations":["each unresolved ID"],"reason":"Known limitations accepted"}` explicitly accepts every identified unresolved result without rewriting failures.
+- `/task-accept {"identity":"...","reportId":"...","obligations":["each unresolved ID"],"reason":"I checked it manually, or accept the remaining limitations"}` accepts the current report and continues to checkpoint creation. It replaces `/task-confirm` and `/task-accept-unresolved`: manual review and acceptance of known limitations use the same action. Every unresolved result must be acknowledged; acceptance preserves the report and its findings instead of marking unverified or failed checks as passed. The report includes a command with the current identity, report ID, and unresolved IDs. Existing decision records retain their meaning; the replaced commands are no longer registered.
 - `/task-repair` takes no arguments. It uses the current task's latest report, grants one additional repair attempt and five additional minutes, and resumes verification and repair of unresolved issues. It rejects arguments and an already verified task. Usage history is retained.
-- `/task-revise-criteria {"identity":"...","reportId":"...","criteria":["Revised approved requirement"],"reason":"Requirement changed"}` approves a new criterion version, regenerates scenarios, and invalidates evidence without resetting allowances.
-- `/task-defer {"identity":"...","reportId":"...","reason":"Review later"}` records deferral at the checkpoint.
 
-Verification is advisory. Each cycle has a unique attempt identifier; evidence and human decisions are bound to that attempt and its report, not a hash of candidate contents. Source, dependency, configuration, and generated-file changes do not discard results or block decisions or checkpoints. Rerunning verification creates a new attempt and report requiring a fresh acceptance decision. Criterion revisions still require new scenarios and verification.
+To review later, use `/epic-exit` to hide the dashboard. The task remains awaiting review without recording a decision.
+
+Verification is advisory. Each cycle has a unique attempt identifier; evidence and human decisions are bound to that attempt and its report, not a hash of candidate contents. Source, dependency, configuration, and generated-file changes do not discard results or block decisions or checkpoints. Rerunning verification creates a new attempt and report requiring a fresh acceptance decision. Acceptance criteria remain frozen for the task.
 
 Scripted browser scenarios and verifier `browser_verify` tools share one runtime-owned server/browser scope per cycle, with isolated contexts per scenario. Interactions retain console errors, exceptions, failed same-origin requests, screenshots, and traces. The loopback bridge is authenticated and closed with the scope. Static/local commands and genuine human-only obligations also receive explicit evidence entries.
 

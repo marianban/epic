@@ -174,4 +174,7 @@ test('implementation checkpoint includes the current task manual review steps', 
     'Open the checkpoint and verify the guidance is visible.',
     'Confirm the Continue action remains available.',
   ])
+  assert.ok(waiting.actionRequired?.message?.includes('/task-accept '))
+  assert.ok(!waiting.actionRequired?.message?.includes('/task-confirm'))
+  assert.ok(!waiting.actionRequired?.message?.includes('/task-accept-unresolved'))
 })

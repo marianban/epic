@@ -7,13 +7,14 @@ import {
   VerificationStore,
   taskVerificationPath,
 } from './verification-store.ts'
-import { finalizeReviewReport } from './verification-report.ts'
 
 export async function decideTask(
   state: EpicDomainState,
   request: TaskDecisionRequest,
   clock: EpicClock
 ): Promise<EpicDomainState> {
+  if (!['approve', 'accept_unresolved', 'grant', 'revise_criteria'].includes(request.kind))
+    throw new Error(`Unsupported task decision: ${request.kind}`)
   const store = new VerificationStore(taskVerificationPath(state), clock)
   const record = await store.read()
   const report = record.report
@@ -75,25 +76,12 @@ export async function decideTask(
       lastVerificationReportPath: undefined,
     }
   }
-  if (
-    request.kind === 'confirm' &&
-    (!request.obligations.length ||
-      request.obligations.some(
-        (id) =>
-          !record.plan?.obligations.some(
-            (o) => o.id === id && o.method === 'human_only'
-          )
-      ))
-  )
-    throw new Error(
-      'Only current human-only obligations may receive human confirmation.'
-    )
   record.decisions.push({
     kind: request.kind,
     identity,
     reportId: report.id,
     obligations:
-      request.kind === 'accept_unresolved' || request.kind === 'confirm'
+      request.kind === 'accept_unresolved'
         ? request.obligations
         : [],
     reason:
@@ -103,11 +91,9 @@ export async function decideTask(
     at: clock.nowMs(),
   })
   await store.write(record)
-  if (request.kind === 'confirm')
-    return finalizeReviewReport(state, record, identity, store)
   return {
     ...state,
-    taskApproved: request.kind !== 'defer',
+    taskApproved: true,
     taskApprovedAt: clock.now(),
   }
 }

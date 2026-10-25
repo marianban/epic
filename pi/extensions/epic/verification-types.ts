@@ -146,7 +146,7 @@ export interface VerificationOperation {
 export type TaskDecisionRequest =
   | { kind: 'approve' }
   | {
-      kind: 'accept_unresolved' | 'confirm'
+      kind: 'accept_unresolved'
       identity: string
       reportId: string
       obligations: string[]
@@ -160,7 +160,6 @@ export type TaskDecisionRequest =
       timeMs: number
       reason: string
     }
-  | { kind: 'defer'; identity: string; reportId: string; reason: string }
   | {
       kind: 'revise_criteria'
       identity: string

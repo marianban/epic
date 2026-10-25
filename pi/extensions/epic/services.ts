@@ -1109,7 +1109,7 @@ export function createEpicServices(
         value.match(/## Acceptance Criteria\n([\s\S]*?)(?=\n## |$)/)?.[1]
       if (criteriaSection(revised) !== criteriaSection(markdown))
         throw new Error(
-          'Task reviewer changed frozen acceptance criteria. Use /task-revise-criteria with explicit revision approval.'
+          'Task reviewer changed frozen acceptance criteria. Task revisions must preserve the approved acceptance criteria.'
         )
       if (extractReviewInstructions(revised).length)
         throw new Error(

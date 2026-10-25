@@ -93,13 +93,10 @@ export default function epicExtension(pi: ExtensionAPI): void {
     handler: async (_args, ctx) => approveTask(ctx),
   })
   for (const [command, kind] of [
-    [EPIC_COMMANDS.confirmTask, 'confirm'],
-    [EPIC_COMMANDS.acceptUnresolvedTask, 'accept_unresolved'],
+    [EPIC_COMMANDS.acceptTask, 'accept_unresolved'],
     [EPIC_COMMANDS.repairTask, 'grant'],
-    [EPIC_COMMANDS.deferTask, 'defer'],
-    [EPIC_COMMANDS.reviseCriteria, 'revise_criteria'],
   ] as const) {
-    pi.registerCommand(command, { description: kind === 'grant' ? 'Repair the latest task report (one attempt, five additional minutes; no arguments)' : `Record report-bound task decision: ${kind} (JSON arguments)`, handler: async (args, ctx) => taskDecisionCommand(ctx, kind, args) })
+    pi.registerCommand(command, { description: kind === 'grant' ? 'Repair the latest task report (one attempt, five additional minutes; no arguments)' : kind === 'accept_unresolved' ? 'Accept the current task report and continue, acknowledging every unresolved result (JSON arguments)' : `Record report-bound task decision: ${kind} (JSON arguments)`, handler: async (args, ctx) => taskDecisionCommand(ctx, kind, args) })
   }
   pi.registerCommand(EPIC_COMMANDS.reviewTask, {
     description: 'Fix R: findings from the current task review',

@@ -39,4 +39,4 @@ The shared time available for automatic verification and repair after initial im
 The overall assessment derived from a task's current verification results: verified, needing manual confirmation, or having issues remaining. It describes the evidence available to the user and does not itself approve the task.
 
 **Human-review checkpoint**:
-The point at which the user receives the task's verification report and chooses whether to approve, accept unresolved results, revise, defer, or grant further bounded work.
+The point at which the user receives the task's verification report and chooses whether to approve, accept unresolved results, or grant further bounded work. The task waits here until the user chooses to continue.
