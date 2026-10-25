@@ -264,7 +264,7 @@ export class BrowserExecution {
           )
           observations.push(await page.locator(step.selector).textContent())
           asserted = true
-        } else if (step.action === 'inspect' || step.action === 'fixture') {
+        } else if (step.action === 'inspect' || step.action === 'observe' || step.action === 'fixture') {
           const value = await page.evaluate(step.expression)
           observations.push(value)
           if (step.action === 'inspect') {

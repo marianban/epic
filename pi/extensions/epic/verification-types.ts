@@ -19,13 +19,14 @@ export type BrowserStep =
   | { action: 'click' | 'press'; selector: string; value: string }
   | { action: 'text' | 'visible'; selector: string; value: string }
   | { action: 'pointer'; x: number; y: number }
-  | { action: 'inspect' | 'fixture'; expression: string }
+  | { action: 'inspect' | 'observe' | 'fixture'; expression: string }
 export interface VerificationObligation {
   id: string
   criterionId: string
   expected: string
   method: VerificationMethod
   command?: string
+  /** Optional starting suggestions for agent_browser; executable steps for automated. */
   steps?: BrowserStep[]
   reason?: string
 }

@@ -10,6 +10,7 @@ import {
 import { prepareAcceptancePlan } from './acceptance-planning.ts'
 import { finalizeReviewReport } from './verification-report.ts'
 import { runTaskVerification } from './verification-runner.ts'
+import { browserVerificationPrompt } from './browser-verification-prompt.ts'
 import { decideTask, assertAcceptedReport } from './verification-decisions.ts'
 import type {
   VerificationOperation,
@@ -787,7 +788,7 @@ export function createEpicServices(
             const run = await runRole(
               current,
               'verifier',
-              `Execute agent_browser obligations using browser_verify. Tools own and record evidence; do not fabricate results. Frozen plan: ${JSON.stringify(plan)}. Prior validation errors: ${JSON.stringify(errors)}. Finish with a concise summary.`,
+              browserVerificationPrompt(plan, errors),
               'browser acceptance verification',
               current.tasks?.[current.currentTaskIndex]?.id,
               operation

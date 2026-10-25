@@ -12,7 +12,7 @@ export default function verifierTools(pi: ExtensionAPI): void {
     name: 'browser_verify',
     label: 'Verify browser behavior',
     description:
-      'Run bounded interactions in an isolated runtime-owned browser context. Returns criterion-linked observations and evidence. Do not start a development server or browser yourself.',
+      'Run bounded interactions in an isolated runtime-owned browser context. Returns criterion-linked observations and evidence. Each call starts from a fresh page. Steps may be adjusted to verify the same expected behavior. Use observe with an expression to read diagnostic values without asserting success; inspect must return true to assert success. After a probe error, inspect actual values and retry a corrected equivalent check. Tools record every attempt; the latest result per obligation is used. Do not start a development server or browser yourself.',
     parameters: {
       type: 'object',
       properties: {

@@ -138,6 +138,7 @@ export function validateVerificationPlan(
         validateBrowserStep(step, `${prefix}.steps[${stepIndex}]`)
       )
       if (
+        obligation.method !== 'agent_browser' &&
         !obligation.steps.some((step: BrowserStep) =>
           ['text', 'visible', 'inspect'].includes(step.action)
         )
@@ -159,13 +160,6 @@ export function validateVerificationPlan(
         'missing_execution',
         'a command or browser scenario for an automated obligation',
         obligation
-      )
-    if (obligation.method === 'agent_browser' && !obligation.steps)
-      reject(
-        `${prefix}.steps`,
-        'missing_steps',
-        'browser steps for an agent_browser obligation',
-        obligation.steps
       )
     if (obligation.method === 'static' && !obligation.command)
       reject(
@@ -208,13 +202,13 @@ export function validateBrowserStep(
           'a finite coordinate',
           value[axis]
         )
-  } else if (action === 'inspect' || action === 'fixture') {
+  } else if (action === 'inspect' || action === 'observe' || action === 'fixture') {
     nonEmptyString(value.expression, `${path}.expression`)
   } else
     reject(
       `${path}.action`,
       'unknown_action',
-      'a supported action (click, press, text, visible, pointer, inspect, fixture)',
+      'a supported action (click, press, text, visible, pointer, inspect, observe, fixture)',
       action
     )
 }
@@ -256,7 +250,6 @@ export function scenarioPlanningPrompt(
       criterionId: 'example:AC1',
       expected: 'The counter increments.',
       method: 'agent_browser',
-      steps: example.obligations[0].steps,
     },
     {
       id: 'example:AC1:O3',
@@ -284,15 +277,16 @@ export function scenarioPlanningPrompt(
       expression: "document.querySelector('#game-container') !== null",
     },
     { action: 'fixture', expression: 'window.testFixture.reset()' },
+    { action: 'observe', expression: 'getComputedStyle(document.body).margin' },
   ]
   return `Derive independently checkable obligations from frozen approved criteria BEFORE implementation. Read relevant code and dependency contracts, but derive expectations from criteria. Do not change their meaning or invent passing evidence. Do not start a server/browser.
 Verify the resulting state rather than repeating setup actions. For dependency installation criteria, check that node_modules and the applicable lockfile are present (for npm: test -d node_modules && test -f package-lock.json). Do not plan npm install, npm ci, or other dependency installation commands; installation belongs to implementation.
 Return exactly ONE valid JSON object, without Markdown fences, prose, or trailing characters. Required fields: version=${scenarioVersion}, criterionVersion=${criterionVersion}, criteria=${JSON.stringify(criteria)}, obligations. Each obligation requires a unique non-empty id, an approved criterionId, expected, and method. Optional fields: command, steps, reason. Represent EVERY criterion; separate combined obligations.
 Complete example (illustrative only; use the actual frozen criteria and versions above): ${JSON.stringify(example)}
 Method examples (illustrative obligations): ${JSON.stringify(methods)}
-Automated obligations require command or steps. agent_browser requires steps; use it where fixed selectors are unknown. Static evidence requires a command independently executed by the verifier. Human-only requires a genuine subjective/access reason.
+Automated obligations require command or steps. Prefer agent_browser for behavior that requires browser exploration or interpretation. For agent_browser, expected defines the required observable behavior; omit steps unless a useful starting suggestion is known. Any supplied steps are suggestions the verifier may adjust, not frozen assertions. Do not encode incidental representation details such as computed CSS serialization as requirements. Static evidence requires a command independently executed by the verifier. Human-only requires a genuine subjective/access reason.
 Browser step examples (use these exact field names): ${JSON.stringify(steps)}
-Every browser scenario requires an observation/assertion: text asserts exact text; visible asserts visibility; inspect must return true. Fixtures may establish state, never bypass the interaction under test. {"inspect":"..."} is INVALID; use {"action":"inspect","expression":"..."}.`
+Automated browser scenarios require an assertion: text asserts exact text; visible asserts visibility; inspect must return true. observe returns diagnostic values without asserting success. The agent_browser verifier chooses assertions at execution time and may inspect observations and correct probes while preserving expected behavior. Fixtures may establish state, never bypass the interaction under test. {"inspect":"..."} is INVALID; use {"action":"inspect","expression":"..."}.`
 }
 
 export const verificationMethods: readonly VerificationMethod[] = [

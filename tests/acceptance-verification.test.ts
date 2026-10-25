@@ -543,6 +543,25 @@ test('plans cannot omit criteria, redefine them, or remove browser assertions', 
   )
 })
 
+test('agent browser plans freeze expectations without requiring executable assertions', () => {
+  const criteria = [{ id: 'AC1', text: 'Counter increments' }]
+  for (const steps of [undefined, [{ action: 'click', selector: 'button', value: '' }]]) {
+    const plan = {
+      version: 1,
+      criterionVersion: 1,
+      criteria,
+      obligations: [{
+        id: 'counter',
+        criterionId: 'AC1',
+        expected: 'Counter increments once after clicking',
+        method: 'agent_browser',
+        ...(steps ? { steps } : {}),
+      }],
+    }
+    assert.deepEqual(validateVerificationPlan(plan, criteria, 1), plan)
+  }
+})
+
 test('configuration allows zero repairs/retries and rejects obsolete settings', async (t) => {
   const f = await fixture(t)
   const file = path.join(f.root, '.pi/epic.config.json')
@@ -915,6 +934,63 @@ async function availablePort(): Promise<number> {
   )
   return address.port
 }
+
+test('real browser: verifier corrects a CSS probe without spending an implementation repair', async (t) => {
+  const f = await fixture(t, 0)
+  const port = await availablePort()
+  const fixtures = path.resolve('tests/fixtures')
+  await fs.writeFile(path.join(f.root, 'counter.html'), '<main style="margin: 0">Layout</main>')
+  const state = {
+    ...f.state,
+    devServer: {
+      command: process.execPath,
+      args: [path.join(fixtures, 'acceptance-server.mjs'), String(port)],
+      url: `http://127.0.0.1:${port}/`,
+      readySelector: 'main',
+    },
+  }
+  const obligation = {
+    id: 'layout',
+    criterionId: 'T1:AC1',
+    expected: 'The main element has no margin',
+    method: 'agent_browser' as const,
+  }
+  f.record.plan = { ...f.plan, obligations: [obligation] }
+  await f.store.write(f.record)
+  const attempts: AcceptanceEvidence[] = []
+  f.dependencies.explore = async (_current, plan, operation) => {
+    assert.deepEqual(plan.obligations, [obligation])
+    assert.ok(operation.bridge)
+    for (const step of [
+      { action: 'inspect', expression: "getComputedStyle(document.querySelector('main')).margin === '0'" },
+      { action: 'observe', expression: "getComputedStyle(document.querySelector('main')).margin" },
+      { action: 'inspect', expression: "['marginTop', 'marginRight', 'marginBottom', 'marginLeft'].every(side => getComputedStyle(document.querySelector('main'))[side] === '0px')" },
+    ]) {
+      const response: Response = await fetch(operation.bridge.url, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${operation.bridge.token}` },
+        body: JSON.stringify({ obligationId: obligation.id, steps: [step] }),
+      })
+      assert.equal(response.status, 200)
+      attempts.push(await response.json() as AcceptanceEvidence)
+    }
+  }
+  await runTaskVerification(state, new AbortController().signal, f.dependencies)
+  assert.deepEqual(attempts.map((e) => e.outcome), ['fail', 'unverified', 'pass'])
+  assert.match(attempts[1]?.actual ?? '', /0px/)
+  for (const attempt of attempts) {
+    const artifactPath = attempt.artifacts[0]
+    assert.ok(artifactPath)
+    const artifact = JSON.parse(await fs.readFile(artifactPath, 'utf8'))
+    assert.equal(artifact.outcome, attempt.outcome)
+  }
+  const record = await f.store.read()
+  assert.equal(record.report?.readiness, 'verified')
+  assert.equal(record.cycles.length, 1)
+  assert.equal(record.report?.usage.repairs, 0)
+  assert.deepEqual(record.cycles[0]?.evidence, [attempts[2]])
+  assert.deepEqual(f.calls, ['fast', 'full', 'review'])
+})
 
 test('real browser: smoke misses interaction defect, acceptance repairs it, and bridge contexts remain isolated', async (t) => {
   const f = await fixture(t)

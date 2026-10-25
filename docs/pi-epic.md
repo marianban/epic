@@ -76,6 +76,8 @@ Verification is advisory. Each cycle has a unique attempt identifier; evidence a
 
 Scripted browser scenarios and verifier `browser_verify` tools share one runtime-owned server/browser scope per cycle, with isolated contexts per scenario. Interactions retain console errors, exceptions, failed same-origin requests, screenshots, and traces. The loopback bridge is authenticated and closed with the scope. Static/local commands and genuine human-only obligations also receive explicit evidence entries.
 
+For `agent_browser` obligations, the plan fixes the expected behavior and leaves the verifier free to choose interactions and assertions. Planned steps are optional suggestions. The verifier can inspect diagnostic values with `observe`, correct a faulty selector or assertion, and retry an equivalent check within the same invocation without spending an implementation repair. Diagnostic observations alone cannot pass an obligation. Every probe retains its artifact; the latest result per obligation supplies acceptance evidence. Automated scenarios still execute their prescribed steps and require assertions.
+
 The repository-owned `tests/fixtures/` counter exercises the release gate: startup smoke passes on faulty behavior, clicking exposes an exception, a charged test repair fixes it, and all checks rerun. `npm test` requires an installed Chrome/Chromium and local server access; the real-browser gate is never skipped. No external game project is required.
 
 ## Security boundaries
