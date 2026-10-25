@@ -3,8 +3,7 @@ import type { ImplementerResult } from './types.ts'
 
 export function validateImplementerResult(
   value: unknown,
-  browserSmokeRequired: boolean,
-  approvedVerificationCommands: readonly string[] = []
+  browserSmokeRequired: boolean
 ): ImplementerResult {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Error('Implementer response must be a JSON object.')
@@ -20,15 +19,6 @@ export function validateImplementerResult(
     item.devServer,
     browserSmokeRequired
   )
-  if (
-    devServer &&
-    !approvedVerificationCommands.includes(
-      [devServer.command, ...devServer.args].join(' ')
-    )
-  )
-    throw new Error(
-      'Implementer devServer command must exactly match a human-approved task verification command.'
-    )
   return {
     summary: item.summary,
     checks: item.checks as string[],

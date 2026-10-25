@@ -290,7 +290,7 @@ export async function persistEpicTasks(
       '',
       `## Acceptance Criteria\n${task.acceptanceCriteria.map((item) => `- [ ] ${item}`).join('\n')}`,
       '',
-      `## Verification\n${list(task.verification)}`,
+      `## Verification Suggestions\n${list(task.verification)}`,
       '',
       '## Check Policy',
       `### Required Checks\n${list(task.requiredChecks)}`,

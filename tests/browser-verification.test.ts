@@ -28,8 +28,7 @@ test('implementer result requires a loopback launch contract for browser smoke',
             readySelector: 'main',
           },
         },
-        true,
-        ['npm run dev']
+        true
       ),
     /loopback/
   )
@@ -45,8 +44,7 @@ test('implementer result requires a loopback launch contract for browser smoke',
           readySelector: 'canvas',
         },
       },
-      true,
-      ['npm run dev']
+      true
     ).devServer,
     {
       command: 'npm',
@@ -57,24 +55,19 @@ test('implementer result requires a loopback launch contract for browser smoke',
   )
 })
 
-test('implementer cannot introduce an unapproved server command', () => {
-  assert.throws(
-    () =>
-      validateImplementerResult(
-        {
-          summary: 'done',
-          checks: [],
-          devServer: {
-            command: 'npm',
-            args: ['run', 'preview'],
-            url: 'http://127.0.0.1:4173/',
-            readySelector: 'main',
-          },
-        },
-        true,
-        ['npm run dev']
-      ),
-    /human-approved task verification command/
+test('implementer chooses the server command without a planner command allowlist', () => {
+  const devServer = {
+    command: 'npm',
+    args: ['run', 'preview', '--', '--host', '127.0.0.1'],
+    url: 'http://127.0.0.1:4173/',
+    readySelector: 'main',
+  }
+  assert.deepEqual(
+    validateImplementerResult(
+      { summary: 'Built the application for preview', checks: ['npm run build'], devServer },
+      true
+    ).devServer,
+    devServer
   )
 })
 

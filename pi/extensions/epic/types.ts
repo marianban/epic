@@ -202,6 +202,7 @@ export interface EpicTask {
   }
   implementation: string[]
   acceptanceCriteria: string[]
+  /** Suggested verification commands; the implementer chooses the server launch. */
   verification: string[]
   manualReviewSteps: string[]
   risks: string[]

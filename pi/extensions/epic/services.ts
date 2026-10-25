@@ -878,8 +878,7 @@ export function createEpicServices(
           throw new Error(`Implementer failed: ${agentFailure(run)}`)
         const result = validateImplementerResult(
           parseJsonResponse<unknown>(run.output, 'implementer'),
-          task.requiredChecks.includes('browser-smoke'),
-          task.verification
+          task.requiredChecks.includes('browser-smoke')
         )
         devServer = result.devServer
       }
