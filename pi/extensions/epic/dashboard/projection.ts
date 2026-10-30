@@ -1,4 +1,5 @@
-import { currentManualReview, unresolvedReviewIds, humanRepairFeedback } from '../manual-review.ts'
+import { currentManualReview } from '../manual-review.ts'
+import { manualReviewSubmission } from './manual-review-submission.ts'
 import { acceptancePlanningFailureMessage } from '../acceptance-planning-recovery.ts'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -259,9 +260,7 @@ function actionRequired(
         const task = currentTaskDefinition(state)
         const manualReview = verificationRecord ? currentManualReview(verificationRecord) : undefined
         const reviewActions: DashboardAction[] | undefined = manualReview && verificationRecord?.report ? [
-          { id: EPIC_COMMANDS.approveTask, label: 'Approve task', kind: 'primary', disabled: verificationRecord.report.readiness !== 'verified' || unresolvedReviewIds(verificationRecord).length > 0 },
-          { id: EPIC_COMMANDS.repairTask, label: 'Request fixes', manualReview, disabled: !humanRepairFeedback(verificationRecord) && verificationRecord.report.readiness !== 'issues_remaining' },
-          { id: EPIC_COMMANDS.acceptTask, label: 'Accept limitations', manualReview, disabled: unresolvedReviewIds(verificationRecord).length === 0 && verificationRecord.report.readiness === 'verified' },
+          { id: 'manual-review-submit', label: manualReviewSubmission(verificationRecord).label, kind: 'primary', manualReview },
           ...(state.verificationReadiness !== 'verified' ? [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary')] : []),
           { id: 'manual-review-history', label: 'Review history', manualReview },
           action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),

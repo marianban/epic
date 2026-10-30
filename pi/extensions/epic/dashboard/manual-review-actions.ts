@@ -1,5 +1,6 @@
 import { prepareLimitationsAcceptance } from './manual-review-acceptance.ts'
 import { editManualReviewItem } from './manual-review-editor.ts'
+import { manualReviewSubmission } from './manual-review-submission.ts'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import type { DashboardAction } from './types.ts'
 import { loadActiveEpic } from '../persistence.ts'
@@ -9,7 +10,7 @@ import {
   taskVerificationPath,
 } from '../verification-store.ts'
 import { currentManualReview } from '../manual-review.ts'
-import { submitTaskDecision, taskDecisionCommand } from '../epic.ts'
+import { approveTask, submitTaskDecision, taskDecisionCommand } from '../epic.ts'
 
 let updateQueue: Promise<void> = Promise.resolve()
 
@@ -63,11 +64,16 @@ async function execute(
     }
     return
   }
-  if (action.id === 'task-repair') {
-    await taskDecisionCommand(ctx, 'grant', '')
-    return
-  }
-  if (action.id === 'task-accept') {
+  if (action.id === 'manual-review-submit') {
+    const submission = manualReviewSubmission(record)
+    if (submission.kind === 'grant') {
+      await taskDecisionCommand(ctx, 'grant', '')
+      return
+    }
+    if (submission.kind === 'approve') {
+      await approveTask(ctx)
+      return
+    }
     const request = await prepareLimitationsAcceptance(
       record,
       (title, description) => ctx.ui.confirm(title, description),
@@ -76,6 +82,8 @@ async function execute(
     if (request) await submitTaskDecision(ctx, request)
     return
   }
+  if (action.id !== 'manual-review-update')
+    throw new Error(`Unsupported manual review action: ${action.id}`)
   const request = await editManualReviewItem(
     review,
     action.itemId,

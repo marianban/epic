@@ -151,7 +151,7 @@ export async function runTaskVerification(
       }
       record.cycles.push(cycle)
       await store.write(record)
-      try {
+      verificationStages: try {
         for (const suite of ['fast', 'full'] as const) {
           try {
             const checked = await retry(() =>
@@ -166,6 +166,9 @@ export async function runTaskVerification(
             cycle.problems.push(`${suite}: ${errorText(error)}`)
           }
           await store.write(record)
+          // Repair a failed stage before spending allowance on later stages.
+          // Every repair starts a fresh cycle, invalidating earlier check results.
+          if (!cycle[suite]?.passed) break verificationStages
         }
         let browser: BrowserExecution | undefined
         const browserRequired =
