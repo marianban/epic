@@ -3,7 +3,7 @@ import type {
   ExtensionContext,
   Theme,
 } from '@earendil-works/pi-coding-agent'
-import type { Component, TUI } from '@earendil-works/pi-tui'
+import type { Component, TUI, TuiMouseEvent, TuiMouseEventResult } from '@earendil-works/pi-tui'
 import { isKeyRelease, parseKey, truncateToWidth } from '@earendil-works/pi-tui'
 import { ActionRequired } from './components/action-required.ts'
 import { CurrentTask } from './components/current-task.ts'
@@ -12,6 +12,8 @@ import { Pipeline } from './components/pipeline.ts'
 import { loadActiveDashboardState } from './data.ts'
 import type { DashboardState } from './state.ts'
 import type { DashboardAction } from './types.ts'
+import { DashboardScrollViewport, type DashboardDocument } from './scroll-viewport.ts'
+import { availableDashboardHeight } from './available-height.ts'
 
 const EPIC_STATUS_WIDGET_KEY = 'epicstatus'
 export const EPIC_STATUS_REFRESH_INTERVAL_MS = 1_000
@@ -45,6 +47,7 @@ export class EpicStatusWidget implements Component {
   private readonly notify: (message: string) => void
   private readonly executeAction: (action: DashboardAction) => void | Promise<void>
   private readonly unregisterTerminalInput: () => void
+  private readonly viewport: DashboardScrollViewport
   private stats: EpicStats | undefined
   private actionRequired: ActionRequired | undefined
   private currentTask: CurrentTask | undefined
@@ -68,6 +71,7 @@ export class EpicStatusWidget implements Component {
     this.repositoryRoot = repositoryRoot
     this.tui = tui
     this.theme = theme
+    this.viewport = new DashboardScrollViewport(() => this.tui.requestRender(), theme)
     this.load = load
     this.notify = notify
     this.executeAction = async (action) => {
@@ -75,10 +79,18 @@ export class EpicStatusWidget implements Component {
       finally { await this.refresh() }
     }
     this.unregisterTerminalInput = registerTerminalInput((data) => {
+      if (!isKeyRelease(data) && this.tui.mode === 'fullscreen' &&
+          this.viewport.handleKey(parseKey(data))) {
+        this.tui.requestRender()
+        return { consume: true }
+      }
       if (this.actionRequired?.focused === true) {
         if (isKeyRelease(data)) return { consume: true }
         const handled = this.actionRequired.handleInput(data)
-        if (handled) this.tui.requestRender()
+        if (handled) {
+          this.viewport.revealFocusedControl()
+          this.tui.requestRender()
+        }
         return handled ? { consume: true } : undefined
       }
       if (isKeyRelease(data)) return undefined
@@ -87,6 +99,7 @@ export class EpicStatusWidget implements Component {
       if (this.currentTask === undefined && this.pipeline === undefined) {
         return undefined
       }
+      this.viewport.revealFocusedControl()
       if (this.currentTask?.focused === true) {
         this.currentTask.setFocused(false)
         this.pipeline?.setFocused(true)
@@ -132,19 +145,48 @@ export class EpicStatusWidget implements Component {
   }
 
   render(width: number): string[] {
+    if (this.tui.mode !== 'fullscreen' || this.stats === undefined || width <= 0) {
+      return this.renderDocument(width).lines
+    }
+    return this.viewport.render(
+      width,
+      availableDashboardHeight(this.tui, this, width),
+      (contentWidth) => this.renderDocument(contentWidth)
+    )
+  }
+
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (this.tui.mode !== 'fullscreen' || event.type !== 'wheel' ||
+        event.wheelDelta === undefined) return undefined
+    this.viewport.scrollBy(event.wheelDelta)
+    return { handled: true, render: true }
+  }
+
+  private renderDocument(width: number): DashboardDocument {
     const stats = this.stats?.render(width)
     const actions = this.actionRequired?.render(width) ?? []
     const currentTask = this.currentTask?.render(width) ?? []
     const pipeline = this.pipeline?.render(width) ?? []
-    const panels = [stats ?? [], currentTask, pipeline, actions].filter(
-      (panel) => panel.length > 0
-    )
+    const panels = [
+      { lines: stats ?? [], focused: false },
+      { lines: currentTask, focused: this.currentTask?.focused === true },
+      { lines: pipeline, focused: this.pipeline?.focused === true },
+      { lines: actions, focused: this.actionRequired?.focused === true },
+    ].filter((panel) => panel.lines.length > 0)
     if (panels.length > 0) {
-      return panels.flatMap((panel, index) =>
-        index === 0 ? panel : ['', ...panel]
-      )
+      const lines: string[] = []
+      let focusRow: number | undefined
+      for (const panel of panels) {
+        if (lines.length > 0) lines.push('')
+        if (panel.focused) {
+          const selectedRow = panel.lines.findIndex((line) => line.includes('▸'))
+          focusRow = lines.length + Math.max(0, selectedRow)
+        }
+        lines.push(...panel.lines)
+      }
+      return { lines, focusRow }
     }
-    if (width <= 0) return []
+    if (width <= 0) return { lines: [], focusRow: undefined }
 
     const message =
       this.errorMessage === undefined
@@ -153,7 +195,7 @@ export class EpicStatusWidget implements Component {
             'error',
             `Epic status unavailable: ${this.errorMessage}`
           )
-    return [truncateToWidth(message, width, '…', true)]
+    return { lines: [truncateToWidth(message, width, '…', true)], focusRow: undefined }
   }
 
   invalidate(): void {
@@ -192,6 +234,7 @@ export class EpicStatusWidget implements Component {
         this.currentTask = undefined
         this.pipeline = undefined
       } else if (this.stats === undefined) {
+        this.viewport.revealFocusedControl()
         this.stats = new EpicStats(next, this.theme)
         this.actionRequired = new ActionRequired(
           next.actionRequired,
@@ -208,6 +251,9 @@ export class EpicStatusWidget implements Component {
         const hadCheckpoint = this.actionRequired?.focused === true
         const hadCurrentFocus = this.currentTask?.focused === true
         const hadPipelineFocus = this.pipeline?.focused === true
+        if (!hadCheckpoint && next.actionRequired !== undefined) {
+          this.viewport.revealFocusedControl()
+        }
         this.stats.setState(next)
         if (this.actionRequired === undefined) {
           this.actionRequired = new ActionRequired(

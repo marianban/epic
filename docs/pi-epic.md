@@ -26,6 +26,8 @@ The initial Scout is not necessarily the only discovery pass. A Planner may retu
 
 ## Commands
 
+In Pi fullscreen mode (`"tuiMode": "fullscreen"` in `.pi/settings.json` or `~/.pi/agent/settings.json`), the active dashboard fills the space remaining after Pi’s prompt, footer, status rows, and other widgets, retaining Pi’s required one-row conversation minimum. Its height adapts to terminal resizing and multi-line prompts. Scroll over it with the mouse wheel or trackpad, or use `Alt+PageUp` / `Alt+PageDown` and `Alt+Home` / `Alt+End`. A scrollbar and row counter appear when content overflows. Keyboard navigation brings the focused panel or checkpoint control into view; refreshes preserve your scroll position. Regular mode retains the expanded dashboard and terminal-owned scrollback.
+
 - `/epic <epic>` starts one epic, writes the run's `Epic.md`, and always pauses after writing its run-scoped `plan.md`.
 - `/epic-status` shows persisted state and the pending human action.
 - `/epic-resume` retries failed acceptance planning in a fresh bounded batch, revalidates a task at its verification checkpoint, or resumes the current workflow boundary.

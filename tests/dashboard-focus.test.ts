@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { Theme } from '@earendil-works/pi-coding-agent'
-import type { TUI } from '@earendil-works/pi-tui'
+import { Container, Text, visibleWidth, type Component, type TUI, type TuiMouseEvent } from '@earendil-works/pi-tui'
 import { EpicStatusWidget } from '../pi/extensions/epic/dashboard/widget-lifecycle.ts'
 import type { DashboardState } from '../pi/extensions/epic/dashboard/state.ts'
 
@@ -63,12 +63,14 @@ function dashboard(actionRequired: DashboardState['actionRequired'] = undefined)
 
 function createWidget(
   load: () => Promise<DashboardState | undefined>
-): { widget: EpicStatusWidget; input: (data: string) => { consume?: boolean } | undefined; renders: () => number } {
+): { widget: EpicStatusWidget; input: (data: string) => { consume?: boolean } | undefined; renders: () => number; terminal: { rows: number }; editor: Container; setFullscreen: () => void } {
   let inputHandler: ((data: string) => { consume?: boolean } | undefined) | undefined
   let renderRequests = 0
+  const terminal = { rows: 40 }
+  const tui = { mode: 'regular', terminal, children: [] as Component[], requestRender: () => { renderRequests++ } }
   const widget = new EpicStatusWidget(
     '/repo',
-    { requestRender: () => { renderRequests++ } } as unknown as TUI,
+    tui as unknown as TUI,
     theme,
     async () => load(),
     () => undefined,
@@ -79,10 +81,19 @@ function createWidget(
     },
     60_000
   )
+  const widgets = new Container()
+  widgets.addChild({ render: () => [''], invalidate: () => undefined })
+  widgets.addChild(widget)
+  const editor = new Container()
+  editor.addChild(new Text('prompt\ninput\nborder', 0, 0))
+  tui.children = [new Text('transcript', 0, 0), widgets, editor, new Text('footer\nstatus', 0, 0)]
   return {
     widget,
     input: (data) => inputHandler?.(data),
     renders: () => renderRequests,
+    terminal,
+    editor,
+    setFullscreen: () => { tui.mode = 'fullscreen' },
   }
 }
 
@@ -138,4 +149,105 @@ test('action-required focus owns input and no-active refresh clears Pipeline', a
   assert.doesNotMatch(created.widget.render(80).join('\n'), /PIPELINE/)
   assert.equal(created.input('\t'), undefined)
   created.widget.dispose()
+})
+
+function wheel(delta: number): TuiMouseEvent {
+  return {
+    type: 'wheel', button: 'none', wheelDelta: delta,
+    x: 2, y: 2, screenX: 2, screenY: 2, width: 80, height: 20,
+    shift: false, alt: false, ctrl: false,
+  }
+}
+
+test('fullscreen dashboard scrolls through pi inline containers and retains position on refresh', async () => {
+  const created = createWidget(async () => dashboard())
+  try {
+    created.setFullscreen()
+    created.terminal.rows = 20
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    const container = new Container()
+    container.addChild(created.widget)
+    const initial = container.render(80)
+    assert.equal(initial.length, 13)
+    assert.ok(initial.every((line) => visibleWidth(line) <= 80))
+    assert.match(initial.at(-1) ?? '', /Alt\+PgUp\/PgDn/)
+
+    assert.equal(container.handleMouse(wheel(10))?.handled, true)
+    const scrolled = container.render(80).join('\n')
+    assert.notEqual(scrolled, initial.join('\n'))
+    await created.widget.refresh()
+    assert.equal(container.render(80).join('\n'), scrolled)
+
+    assert.equal(created.input('\u001b[1;3H')?.consume, true)
+    assert.match(container.render(80).join('\n'), /EPIC/)
+    assert.equal(created.input('\u001b[6;3~')?.consume, true)
+    assert.doesNotMatch(container.render(80).join('\n'), /EPIC/)
+    assert.equal(created.input('\u001b[5;3~')?.consume, true)
+    assert.match(container.render(80).join('\n'), /EPIC/)
+    assert.equal(created.input('\u001b[1;3F')?.consume, true)
+    assert.match(container.render(80).join('\n'), /PIPELINE/)
+    // Ordinary PageUp remains available to pi's transcript.
+    assert.equal(created.input('\u001b[5~'), undefined)
+
+    created.terminal.rows = 12
+    const resized = container.render(35)
+    assert.equal(resized.length, 5)
+    assert.ok(resized.every((line) => visibleWidth(line) <= 35))
+    created.terminal.rows = 200
+    assert.match(container.render(120).join('\n'), /EPIC/)
+    assert.doesNotMatch(container.render(120).join('\n'), /Alt\+PgUp/)
+    assert.equal(container.render(120).length, 193)
+  } finally {
+    created.widget.dispose()
+  }
+})
+
+test('fullscreen dashboard yields height as the prompt grows and releases space without an active epic', async () => {
+  let current: DashboardState | undefined = dashboard()
+  const created = createWidget(async () => current)
+  try {
+    created.setFullscreen()
+    created.terminal.rows = 30
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    assert.equal(created.widget.render(80).length, 23)
+    created.editor.addChild(new Text('extra prompt line\nqueued input', 0, 0))
+    assert.equal(created.widget.render(80).length, 21)
+    created.editor.clear()
+    created.editor.addChild(new Text('prompt\ninput\nborder', 0, 0))
+    assert.equal(created.widget.render(80).length, 23)
+    current = undefined
+    await created.widget.refresh()
+    assert.equal(created.widget.render(80).length, 1)
+    assert.match(created.widget.render(80)[0], /No active epic/)
+  } finally {
+    created.widget.dispose()
+  }
+})
+
+test('fullscreen reveals keyboard focus and new checkpoints without resetting manual scrolling', async () => {
+  let current = dashboard()
+  const created = createWidget(async () => current)
+  try {
+    created.setFullscreen()
+    created.terminal.rows = 20
+    await new Promise<void>((resolve) => setImmediate(resolve))
+    created.widget.render(80)
+    created.input('\t')
+    assert.match(created.widget.render(80).join('\n'), /PIPELINE/)
+    current = dashboard({
+      id: 'checkpoint', severity: 'warning', title: 'Checkpoint',
+      manualReviewSteps: Array.from({ length: 30 }, (_, index) => `Review step ${index + 1}`),
+      actions: [{ id: 'continue', label: 'Continue' }],
+    })
+    await created.widget.refresh()
+    assert.match(created.widget.render(80).join('\n'), /Continue/)
+    created.widget.handleMouse(wheel(-5))
+    const scrolled = created.widget.render(80).join('\n')
+    await created.widget.refresh()
+    assert.equal(created.widget.render(80).join('\n'), scrolled)
+    created.input('\t')
+    assert.match(created.widget.render(80).join('\n'), /Continue/)
+  } finally {
+    created.widget.dispose()
+  }
 })
