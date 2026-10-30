@@ -6,7 +6,6 @@ export const EPIC_COMMANDS = {
   exit: 'epic-exit',
   approvePrerequisites: 'epic-approve-prerequisites',
   approveTask: 'task-approve',
-  acceptTask: 'task-accept',
   repairTask: 'task-repair',
   reviewTask: 'task-review',
   reviewPlan: 'plan-review',

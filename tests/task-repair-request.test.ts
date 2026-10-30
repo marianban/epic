@@ -23,3 +23,12 @@ test('repair shortcut rejects missing and already verified reports', () => {
     { identity: 'attempt', id: 'report', readiness: 'verified' }, allowance, false
   ), /already verified/)
 })
+
+test('repair shortcut rejects evidence gaps but permits recorded manual failures', () => {
+  const report = { identity: 'attempt', id: 'report', readiness: 'needs_manual_confirmation' as const }
+  const allowance = { repairs: 1, timeMs: 300_000 }
+  assert.throws(() => latestTaskRepairRequest(report, allowance, false), /No actionable failure.*Review the unresolved evidence/)
+  for (const readiness of ['verified', 'needs_manual_confirmation', 'issues_remaining'] as const) {
+    assert.equal(latestTaskRepairRequest({ ...report, readiness }, allowance, true).kind, 'grant')
+  }
+})

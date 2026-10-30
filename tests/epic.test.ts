@@ -407,7 +407,7 @@ test('verification errors finalize locally and leave task awaiting human review'
   await nextTurn()
   assert.equal(actor.getSnapshot().value, 'awaitingReview')
   assert.deepEqual(calls, ['verify', 'browser unavailable'])
-  assert.equal(actor.getSnapshot().can({ type: 'TASK.APPROVE' }), false)
+  assert.equal(actor.getSnapshot().can({ type: 'TASK.APPROVE' }), true)
   actor.stop()
 })
 
@@ -432,9 +432,28 @@ test('task decisions are validated before completing the actor', async () => {
   mocked.taskDecision = async () => { throw new Error('stale revision') }
   const actor = createActor(createTaskExecutionMachine(mocked), { input: { domain: domain() } }).start()
   actor.send({ type: 'TASK.APPROVE' }); await nextTurn()
-  actor.send({ type: 'TASK.DECIDE', request: { kind: 'accept_unresolved', reportId: 'old', identity: 'old', obligations: ['AC1'], reason: 'acknowledged' } }); await nextTurn()
+  actor.send({ type: 'TASK.DECIDE', request: { kind: 'approve' } }); await nextTurn()
   assert.equal(actor.getSnapshot().value, 'awaitingReview')
   assert.equal(actor.getSnapshot().context.failureReason, 'stale revision')
+  actor.stop()
+})
+
+test('manual-review approval delegates to the decision service despite incomplete automated evidence', async () => {
+  const mocked = services()
+  mocked.verifyTask = async state => ({ ...state, verificationReadiness: 'needs_manual_confirmation' })
+  let approvals = 0
+  mocked.taskDecision = async (state, request) => {
+    assert.equal(request.kind, 'approve')
+    assert.equal(state.verificationReadiness, 'needs_manual_confirmation')
+    approvals++
+    return { ...state, taskApproved: true }
+  }
+  const actor = createActor(createTaskExecutionMachine(mocked), { input: { domain: domain() } }).start()
+  actor.send({ type: 'TASK.APPROVE' }); await nextTurn()
+  assert.equal(actor.getSnapshot().value, 'awaitingReview')
+  actor.send({ type: 'TASK.APPROVE' }); await nextTurn()
+  assert.equal(actor.getSnapshot().status, 'done')
+  assert.equal(approvals, 1)
   actor.stop()
 })
 

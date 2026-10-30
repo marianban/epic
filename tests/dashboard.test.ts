@@ -181,19 +181,28 @@ for (const readiness of ['verified', 'issues_remaining', 'needs_manual_confirmat
     ])
     const checkpoint = waiting.actionRequired
     assert.ok(checkpoint)
+    assert.ok(!checkpoint.actions.some((action) => action.command === '/epic-resume'))
+    assert.doesNotMatch(checkpoint.message ?? '', /Reverify/)
     if (readiness === 'verified') {
       assert.equal(checkpoint.message, undefined)
       assert.equal(checkpoint.actions[0]?.command, '/task-approve')
       assert.equal(checkpoint.actions[0]?.label, 'Continue')
     } else {
-      assert.equal(checkpoint.actions[0]?.label, 'Reverify')
       assert.ok(!checkpoint.actions.some((action) => action.label === 'Continue'))
       if (readiness === undefined) {
-        assert.match(checkpoint.message ?? '', /Use Reverify/)
+        assert.match(checkpoint.message ?? '', /No verification report is available/)
         assert.doesNotMatch(checkpoint.message ?? '', /\/task-(accept|repair)/)
       } else {
-        assert.match(checkpoint.message ?? '', /\/task-repair/)
-        assert.match(checkpoint.message ?? '', /\/task-accept/)
+        if (readiness === 'issues_remaining') {
+          assert.match(checkpoint.message ?? '', /\/task-repair/)
+          assert.ok(checkpoint.actions.some((action) => action.label === 'Repair'))
+        } else {
+          assert.doesNotMatch(checkpoint.message ?? '', /\/task-repair/)
+          assert.ok(!checkpoint.actions.some((action) => action.label === 'Repair'))
+          assert.match(checkpoint.message ?? '', /Review the unresolved evidence manually/)
+        }
+        assert.doesNotMatch(checkpoint.message ?? '', /\/task-accept/)
+        assert.match(checkpoint.message ?? '', /choose Continue/)
         assert.match(checkpoint.message ?? '', readiness === 'issues_remaining'
           ? /Verification found unresolved issues/
           : /Verification needs manual confirmation/)

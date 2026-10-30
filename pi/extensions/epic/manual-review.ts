@@ -40,16 +40,6 @@ export function currentManualReview(
   return review
 }
 
-export function unresolvedReviewIds(record: TaskVerificationRecord): string[] {
-  if (!record.report) throw new Error('No human-review report is available.')
-  return [
-    ...record.report.unresolved,
-    ...currentManualReview(record)
-      .items.filter((i) => i.status !== 'passed')
-      .map((i) => i.id),
-  ]
-}
-
 export function humanRepairFeedback(record: TaskVerificationRecord): string {
   return currentManualReview(record)
     .items.filter((i) => i.status === 'failed')

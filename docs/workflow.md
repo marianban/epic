@@ -38,7 +38,7 @@ flowchart TD
         Repairable -->|No| Human["15. Human reviews immutable report"]
         Human -->|Failed manual steps; grant repair and time| Repair
         Human -->|Grant for automated issues or resume with remaining allowance| Checks
-        Human -->|Approve with checklist passed or explicitly accept limitations| Checkpoint["16. Create Git checkpoint"]
+        Human -->|Approve with checklist passed| Checkpoint["16. Create Git checkpoint"]
     end
 
     Checkpoint --> More{"More tasks?"}
@@ -65,14 +65,14 @@ flowchart TD
 | 12. Browser smoke | When `browser-smoke` is required or scenarios need a browser, launch and supervise the Implementer's declared development server and the runtime browser; check readiness and runtime errors. Close both after browser verification. |
 | 13. Verify acceptance | Execute planned command and browser scenarios and collect evidence for each criterion. Human-only obligations remain unverified in the automated report. |
 | 14. Independent code review | Review the implementation and evidence; actionable failures trigger repairs while shared allowances remain. |
-| 15. Human results review | Inspect the immutable report and record manual checklist results. Continue requests fixes for failed manual steps, accepts limitations for unchecked steps or unresolved automated results, or approves when automation and every manual step pass. `/task-accept` explicitly accepts unresolved results; `/task-repair` grants repairs. Exit hides the dashboard and leaves the task awaiting review. |
+| 15. Human results review | Inspect the immutable report and record manual checklist results. Continue requests fixes for recorded failures and approves when every manual step passes and no actionable failure remains, including incomplete automated evidence. Unchecked steps keep Continue disabled. `/task-repair` grants repairs. Exit hides the dashboard and leaves the task awaiting review. |
 | 16. Create checkpoint | Record accepted task changes in Git, then advance to the next task. |
 | 17. Final verification | Run repository-wide checks, including checks deferred by individual tasks; failures require recovery approval. |
 | 18. Complete epic | Mark the epic completed after final verification passes. |
 
 Repair attempts and infrastructure retries have separate task-wide counters and share a verification deadline across cycles and resumes. Acceptance planning has its own bounded correction batches and does not consume these verification allowances; initial implementation also precedes the verification deadline. Human review pauses the deadline. At the results checkpoint, `/epic-resume` reruns verification with the remaining allowance; `/task-repair` takes no arguments and explicitly adds one repair attempt and five minutes. Failed manual steps and their observations are sent to the Implementer before reverification. An interrupted repair requires an explicit additional grant before another repair can run. Acceptance criteria remain frozen through the normal workflow.
 
-Each report has its own manual checklist, initially unchecked. Failed steps require a nonblank observation and take priority over unchecked steps in the dashboard's Continue action. Accepting limitations requires acknowledging every unresolved automated and manual result and providing a nonblank reason; `/task-accept` requires the current attempt identity, report ID, and all unresolved IDs. Acceptance preserves failed or unverified findings. Rerunning verification creates a new report and checklist requiring fresh review and acceptance.
+Each report has its own manual checklist, initially unchecked. Failed steps require a nonblank observation and take priority over unchecked steps in the dashboard's Continue action. Every manual step must pass before approval, and actionable failures require repair. Completed manual review can resolve gaps in automated evidence without extra prompts; the report preserves its original findings. Rerunning verification creates a new report and checklist requiring fresh review and acceptance.
 
 The diagram shows the main path and key loops. Operational errors elsewhere also pause with diagnostics or a task report instead of silently advancing. State, events, evidence, and reports persist under `.pi/epics/runs/<epic-id>/`; `/epic-status` shows the pending action, and `/epic-exit` only hides the dashboard.
 

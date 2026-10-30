@@ -1,4 +1,5 @@
 import { createManualReview } from './manual-review.ts'
+import { canRepairTask } from './task-review-policy.ts'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -208,17 +209,13 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
     '',
     '## Human decisions',
     '',
-    'Ordinary approval requires passing checks from the current report, all criteria met, no actionable findings, and every manual checklist item passed. Use the dashboard to record manual results and accept limitations, including failed or unchecked manual items. Otherwise use /task-accept to accept the report and continue after manual review or acceptance of known limitations. Every unresolved result must be acknowledged with a reason; acceptance preserves the reported findings. Use /task-repair to grant one additional repair attempt and five additional minutes. To review later, use /epic-exit to hide the dashboard; the task remains awaiting review.',
-    ...(report.readiness !== 'verified'
-      ? [
-          '',
-          'Accept this report and continue:',
-          '',
-          '```text',
-          `/task-accept ${JSON.stringify({ identity: report.identity, reportId: report.id, obligations: report.unresolved, reason: 'Describe why the remaining issues are acceptable. Include unresolved manual checklist IDs in obligations when using this command.' })}`,
-          '```',
-        ]
-      : []),
+    'Complete the manual review checklist in the dashboard, then choose Continue. When every manual step passes and no actionable failure remains, the task is approved without additional prompts, including when automated evidence is incomplete. The report retains its original findings and evidence.',
+    ...(canRepairTask(report.readiness, false)
+      ? ['Use /task-repair to grant one additional repair attempt and five additional minutes for the recorded failures.']
+      : report.readiness === 'needs_manual_confirmation'
+        ? ['Verification has unresolved evidence, with no actionable failure recorded. Review it manually.']
+        : []),
+    'If a manual check reveals incorrect behavior, mark it failed in the dashboard and record an observation to request fixes. To review later, use /epic-exit to hide the dashboard; the task remains awaiting review.',
     '',
   ].join('\n')
 }

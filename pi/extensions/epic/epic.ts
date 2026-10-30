@@ -225,26 +225,15 @@ export async function reviseTask(ctx: ExtensionContext): Promise<void> {
     `Task review completed for epic ${view.metadata.epicId}.`
   )
 }
-export async function taskDecisionCommand(ctx: ExtensionContext, kind: 'accept_unresolved' | 'grant', args: string): Promise<void> {
-  if (kind === 'grant') {
-    if (args.trim()) throw new Error('/task-repair takes no arguments. Run /task-repair to repair the latest task report.')
-    const envelope = await loadActiveEpic(ctx.cwd)
-    const domain = domainFromActorSnapshot(envelope.snapshot)
-    const record = await new VerificationStore(taskVerificationPath(domain), systemClock).read()
-    const request = latestTaskRepairRequest(record.report, { repairs: 1, timeMs: 300_000 }, !!humanRepairFeedback(record))
-    const view = await dispatch(envelope, ctx, { type: 'TASK.DECIDE', request })
-    if (view.boundary.task?.failureReason) throw new Error(view.boundary.task.failureReason)
-    notifyNextAction(ctx, view, 'Granted one repair attempt and five additional minutes for the latest task report.')
-    return
-  }
-  let input: Record<string, unknown>
-  try { input = JSON.parse(args) as Record<string, unknown> } catch { throw new Error('Provide a JSON decision containing identity, reportId, reason, and the action-specific values shown in the report.') }
-  if (!input || typeof input !== 'object' || typeof input.identity !== 'string' || typeof input.reportId !== 'string' || typeof input.reason !== 'string') throw new Error('Decision requires identity, reportId, and reason.')
-  if (kind === 'accept_unresolved' && (!Array.isArray(input.obligations) || input.obligations.some(id => typeof id !== 'string'))) throw new Error('Decision requires obligation/check IDs.')
-  const request = { ...input, kind } as import('./verification-types.ts').TaskDecisionRequest
-  const view = await active(ctx, { type: 'TASK.DECIDE', request })
+export async function repairTaskCommand(ctx: ExtensionContext, args: string): Promise<void> {
+  if (args.trim()) throw new Error('/task-repair takes no arguments. Run /task-repair to repair the latest task report.')
+  const envelope = await loadActiveEpic(ctx.cwd)
+  const domain = domainFromActorSnapshot(envelope.snapshot)
+  const record = await new VerificationStore(taskVerificationPath(domain), systemClock).read()
+  const request = latestTaskRepairRequest(record.report, { repairs: 1, timeMs: 300_000 }, !!humanRepairFeedback(record))
+  const view = await dispatch(envelope, ctx, { type: 'TASK.DECIDE', request })
   if (view.boundary.task?.failureReason) throw new Error(view.boundary.task.failureReason)
-  notifyNextAction(ctx, view, `Task decision processed: ${kind}.`)
+  notifyNextAction(ctx, view, 'Granted one repair attempt and five additional minutes for the latest task report.')
 }
 export async function epicStatus(ctx: ExtensionContext): Promise<void> {
   const envelope = await loadActiveEpic(ctx.cwd)

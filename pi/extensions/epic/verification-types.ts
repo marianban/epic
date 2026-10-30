@@ -82,6 +82,7 @@ export interface AllowanceInvocation {
   completed: boolean
 }
 export interface HumanDecision {
+  /** Historical decision kinds are retained only as audit data. */
   kind: 'approve' | 'accept_unresolved' | 'confirm' | 'defer'
   /** Verification attempt identifier, independent of candidate file contents. */
   identity: string
@@ -178,13 +179,6 @@ export type TaskDecisionRequest =
       itemId: string
       status: ManualReviewStatus
       observation: string
-      reason: string
-    }
-  | {
-      kind: 'accept_unresolved'
-      identity: string
-      reportId: string
-      obligations: string[]
       reason: string
     }
   | {

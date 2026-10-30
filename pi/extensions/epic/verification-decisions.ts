@@ -1,10 +1,10 @@
 import {
   assertManualReviewTask,
   currentManualReview,
-  unresolvedReviewIds,
   humanRepairFeedback,
 } from './manual-review.ts'
 import type { EpicDomainState, EpicClock } from './types.ts'
+import { assertTaskRepairAvailable, canApproveTask } from './task-review-policy.ts'
 import type {
   TaskDecisionRequest,
   HumanReviewReport,
@@ -22,7 +22,6 @@ export async function decideTask(
   if (
     ![
       'approve',
-      'accept_unresolved',
       'grant',
       'revise_criteria',
       'update_manual_review',
@@ -62,29 +61,16 @@ export async function decideTask(
     await store.write(record)
     return { ...state, failureReason: undefined }
   }
-  const unresolved = unresolvedReviewIds(record)
   if (
     request.kind === 'approve' &&
-    (report.readiness !== 'verified' || unresolved.length > 0)
+    !canApproveTask(record)
   )
     throw new Error(
-      `Ordinary approval is unavailable: ${report.readiness}. Acknowledge unresolved results explicitly.`
-    )
-  if (
-    request.kind === 'accept_unresolved' &&
-    ((report.readiness === 'verified' && unresolved.length === 0) ||
-      !unresolved.every((id) => request.obligations.includes(id)) ||
-      request.obligations.some((id) => !unresolved.includes(id)))
-  )
-    throw new Error(
-      'Acknowledge every specific failed or unverified result in the current report.'
+      `Ordinary approval is unavailable: ${report.readiness}. Complete all manual steps and resolve actionable failures.`
     )
   if (request.kind === 'grant') {
     const feedback = humanRepairFeedback(record)
-    if (!feedback && report.readiness === 'verified')
-      throw new Error(
-        'The current task is already verified; no repair is needed.'
-      )
+    assertTaskRepairAvailable(report.readiness, !!feedback)
     if (record.humanRepairRequests.some((r) => !r.completed && !r.invocationId))
       throw new Error('A human repair request is already pending.')
     if (feedback)
@@ -129,15 +115,13 @@ export async function decideTask(
     }
   }
   record.decisions.push({
-    kind: request.kind,
+    kind: 'approve',
     identity,
     reportId: report.id,
-    obligations:
-      request.kind === 'accept_unresolved' ? request.obligations : [],
-    reason:
-      request.kind === 'approve'
-        ? 'All requirements verified.'
-        : request.reason,
+    obligations: report.unresolved,
+    reason: report.readiness === 'verified'
+      ? 'All requirements verified.'
+      : 'All manual review steps passed; the user verified the task despite incomplete automated evidence.',
     at: clock.nowMs(),
   })
   await store.write(record)
@@ -161,7 +145,7 @@ export async function assertAcceptedReport(
   if (
     !report ||
     !decision ||
-    !['approve', 'accept_unresolved'].includes(decision.kind) ||
+    decision.kind !== 'approve' ||
     decision.identity !== report.identity ||
     decision.reportId !== report.id
   )
@@ -169,21 +153,9 @@ export async function assertAcceptedReport(
       'Checkpoint requires acceptance of the current attempt and report.'
     )
   assertManualReviewTask(state, currentManualReview(record))
-  const unresolved = unresolvedReviewIds(record)
-  if (
-    decision.kind === 'approve' &&
-    (report.readiness !== 'verified' || unresolved.length)
-  )
+  if (!canApproveTask(record))
     throw new Error(
-      'Checkpoint requires all manual review items and automated checks to pass.'
-    )
-  if (
-    decision.kind === 'accept_unresolved' &&
-    (unresolved.some((id) => !decision.obligations.includes(id)) ||
-      !decision.reason.trim())
-  )
-    throw new Error(
-      'Checkpoint requires acknowledgement of every unresolved manual and automated result.'
+      'Checkpoint requires all manual review items to pass and no actionable failures.'
     )
   return report
 }

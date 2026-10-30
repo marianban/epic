@@ -13,7 +13,7 @@ import {
   approveTask,
   reviseTask,
   approveRecovery,
-  taskDecisionCommand,
+  repairTaskCommand,
 } from './epic.ts'
 import {
   EPIC_STATUS_REFRESH_INTERVAL_MS,
@@ -42,6 +42,9 @@ export async function executeEpicDashboardAction(
       return
     case EPIC_COMMANDS.approveTask:
       await approveTask(ctx)
+      return
+    case EPIC_COMMANDS.repairTask:
+      await repairTaskCommand(ctx, '')
       return
     case EPIC_COMMANDS.resume:
       await resumeEpic(ctx)
@@ -98,12 +101,10 @@ export default function epicExtension(pi: ExtensionAPI): void {
     description: 'Continue task planning review, or approve only after automated and manual review pass',
     handler: async (_args, ctx) => approveTask(ctx),
   })
-  for (const [command, kind] of [
-    [EPIC_COMMANDS.acceptTask, 'accept_unresolved'],
-    [EPIC_COMMANDS.repairTask, 'grant'],
-  ] as const) {
-    pi.registerCommand(command, { description: kind === 'grant' ? 'Repair current automated issues or failed manual steps (one attempt, five additional minutes; no arguments)' : kind === 'accept_unresolved' ? 'Accept the current task report and continue, acknowledging every unresolved automated result and manual item (JSON arguments)' : `Record report-bound task decision: ${kind} (JSON arguments)`, handler: async (args, ctx) => taskDecisionCommand(ctx, kind, args) })
-  }
+  pi.registerCommand(EPIC_COMMANDS.repairTask, {
+    description: 'Repair current automated issues or failed manual steps (one attempt, five additional minutes; no arguments)',
+    handler: async (args, ctx) => repairTaskCommand(ctx, args),
+  })
   pi.registerCommand(EPIC_COMMANDS.reviewTask, {
     description: 'Fix R: findings from the current task review',
     handler: async (_args, ctx) => reviseTask(ctx),

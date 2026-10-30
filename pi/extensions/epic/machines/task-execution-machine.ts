@@ -193,8 +193,6 @@ export function createTaskExecutionMachine(services: EpicServices) {
         tags: ['awaiting-human', 'awaiting-task-review'],
         on: {
           'TASK.APPROVE': {
-            guard: ({ context }) =>
-              context.domain.verificationReadiness === 'verified',
             target: 'deciding',
             actions: assign({ decision: { kind: 'approve' } }),
           },
@@ -220,8 +218,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
           onDone: [
             {
               guard: ({ context }) =>
-                context.decision?.kind === 'approve' ||
-                context.decision?.kind === 'accept_unresolved',
+                context.decision?.kind === 'approve',
               target: 'done',
               actions: 'captureState',
             },

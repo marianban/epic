@@ -1,4 +1,5 @@
 import { currentManualReview } from '../manual-review.ts'
+import { canApproveTask, canRepairTask } from '../task-review-policy.ts'
 import { manualReviewSubmission } from './manual-review-submission.ts'
 import { acceptancePlanningFailureMessage } from '../acceptance-planning-recovery.ts'
 import { join } from 'node:path'
@@ -173,15 +174,29 @@ function taskMessage(state: DashboardRunState): string {
   return `${task} is ready. Comments marked with R: will be refined.`
 }
 
-function taskReviewMessage(state: DashboardRunState): string | undefined {
-  if (state.verificationReadiness === 'verified') return undefined
+function taskReviewMessage(
+  state: DashboardRunState,
+  readiness: EpicDomainState['verificationReadiness'],
+  manualFailures: boolean,
+  manualApprovalReady: boolean
+): string | undefined {
+  if (readiness === 'verified' && !manualFailures) return undefined
+  if (manualApprovalReady)
+    return 'All manual review steps passed. Continue to approve the task.'
 
-  const status = state.verificationReadiness === 'issues_remaining'
+  const status = manualFailures
+    ? 'Manual review found incorrect behavior. Repair will use the recorded observations.'
+    : readiness === 'issues_remaining'
     ? 'Verification found unresolved issues.'
     : 'Verification needs manual confirmation.'
   const instructions = state.lastVerificationReportPath
-    ? 'Use /task-repair without arguments to grant one additional repair attempt and five minutes. To accept the current results, use /task-accept with the JSON from the report, acknowledging every unresolved result with a reason.'
-    : 'Use Reverify to generate a verification report.'
+    ? [
+        canRepairTask(readiness, manualFailures)
+          ? 'Use /task-repair without arguments to grant one additional repair attempt and five minutes.'
+          : 'No actionable failure is recorded. Review the unresolved evidence manually.',
+        'Complete the manual review steps, then choose Continue.',
+      ].join(' ')
+    : 'No verification report is available for this task.'
   return [status, state.failureReason, instructions].filter(Boolean).join(' ')
 }
 
@@ -259,9 +274,15 @@ function actionRequired(
       {
         const task = currentTaskDefinition(state)
         const manualReview = verificationRecord ? currentManualReview(verificationRecord) : undefined
+        const readiness = verificationRecord?.report ? verificationRecord.report.readiness : state.verificationReadiness
+        const manualFailures = manualReview?.items.some((item) => item.status === 'failed') ?? false
+        const manualApprovalReady = verificationRecord?.report ? canApproveTask(verificationRecord) : false
+        const repairActions = canRepairTask(readiness, manualFailures)
+          ? [action(EPIC_COMMANDS.repairTask, 'Repair', EPIC_COMMANDS.repairTask, 'secondary')]
+          : []
         const reviewActions: DashboardAction[] | undefined = manualReview && verificationRecord?.report ? [
-          { id: 'manual-review-submit', label: manualReviewSubmission(verificationRecord).label, kind: 'primary', manualReview },
-          ...(state.verificationReadiness !== 'verified' ? [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary')] : []),
+          { id: 'manual-review-submit', label: manualReviewSubmission(verificationRecord).label, kind: 'primary', manualReview, disabled: manualReviewSubmission(verificationRecord).kind === 'incomplete' },
+          ...repairActions,
           { id: 'manual-review-history', label: 'Review history', manualReview },
           action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
         ] : undefined
@@ -269,13 +290,13 @@ function actionRequired(
           id: 'task-action-required',
           severity: 'warning',
           title: 'Task awaits human review',
-          message: taskReviewMessage(state),
+          message: taskReviewMessage(state, readiness, manualFailures, manualApprovalReady),
           manualReview,
           manualReviewSteps: task.manualReviewSteps,
           verificationReportLink: state.lastVerificationReportPath
             ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'Verification report')
             : undefined,
-          actions: reviewActions ?? (state.verificationReadiness === 'verified' ? taskActions() : [action(EPIC_COMMANDS.resume, 'Reverify', EPIC_COMMANDS.resume, 'secondary'), action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')]),
+          actions: reviewActions ?? (readiness === 'verified' ? taskActions() : [...repairActions, action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')]),
         }
       }
     case 'escalating': {
