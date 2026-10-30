@@ -53,6 +53,14 @@ const DEFAULT_AGENT_PROFILES: Record<AgentRole, AgentProfile> = {
     temperature: 0.1,
     thinking: 'high',
   },
+  'verification-planner': {
+    role: 'verification-planner',
+    systemPromptPath: '.pi/agents/verification-planner.md',
+    tools: ['read', 'grep', 'find', 'ls'],
+    readOnly: true,
+    temperature: 0.1,
+    thinking: 'high',
+  },
   verifier: {
     role: 'verifier', systemPromptPath: '.pi/agents/verifier.md',
     tools: ['read', 'grep', 'find', 'ls'], readOnly: true, temperature: 0.1, thinking: 'high',
@@ -71,6 +79,7 @@ export const CANONICAL_AGENT_ROLE_ORDER: readonly AgentRole[] = [
   'scout',
   'planner',
   'task-planner',
+  'verification-planner',
   'implementer',
   'verifier',
   'reviewer',

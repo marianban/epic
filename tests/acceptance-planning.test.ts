@@ -127,6 +127,9 @@ async function fixture(
     {
       timer,
       runAgentActor: async (options) => {
+        assert.equal(options.role, 'verification-planner')
+        assert.equal(options.profile.systemPromptPath, '.pi/agents/verification-planner.md')
+        assert.equal(options.bridge, undefined)
         prompts.push(options.prompt)
         const response = responses.shift()
         assert.notEqual(
@@ -136,13 +139,13 @@ async function fixture(
         )
         if (response instanceof Error) throw response
         return {
-          role: 'verifier',
+          role: 'verification-planner',
           exitCode: 0,
           output: typeof response === 'string' ? response : '',
           stderr: '',
           stdoutLogPath: path.join(
             root,
-            `verifier-${prompts.length}.stdout.log`
+            `verification-planner-${prompts.length}.stdout.log`
           ),
           ...(typeof response === 'object' ? response : {}),
         }
@@ -421,11 +424,11 @@ test('storage and persisted-criteria errors are not retried', async (t) => {
       run: async () => {
         calls++
         return {
-          role: 'verifier',
+          role: 'verification-planner',
           exitCode: 0,
           output: JSON.stringify(validPlan()),
           stderr: '',
-          stdoutLogPath: 'verifier.log',
+          stdoutLogPath: 'verification-planner.log',
         }
       },
       persistPlan: async () => {

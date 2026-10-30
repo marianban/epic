@@ -749,7 +749,7 @@ export function createEpicServices(
         initialize: () => store.initialize(state),
         write: (record) => store.write(record),
         persistPlan: (plan) => persistImmutableJsonArtifact(state, `reviews/${randomUUID()}-verification-plan.json`, plan),
-        run: (prompt, invocationId) => runRoleInvocation(state, 'verifier', prompt, 'acceptance scenario planning', state.tasks?.[state.currentTaskIndex]?.id, invocationId),
+        run: (prompt, invocationId) => runRoleInvocation(state, 'verification-planner', prompt, 'acceptance scenario planning', state.tasks?.[state.currentTaskIndex]?.id, invocationId),
         event: (type, timestamp, payload) => appendEvent(state, getBoundary().stage, timestamp, type, payload),
       })
     },

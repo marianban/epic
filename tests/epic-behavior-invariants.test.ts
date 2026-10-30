@@ -104,18 +104,31 @@ test('agent output collector reports protocol failures independently of process 
 
 test('agent profiles merge defaults and partial overrides into a complete canonical collection', () => {
   const configuration = {
-    agents: { scout: { model: 'scout-model' } },
+    agents: {
+      scout: { model: 'scout-model' },
+      'verification-planner': { model: 'planning-model' },
+      verifier: { model: 'execution-model' },
+    },
   } as ResolvedEpicConfiguration
   assert.equal(resolveAgentProfile('scout', configuration).thinking, 'low')
   assert.equal(resolveAgentProfile('scout', configuration).model, 'scout-model')
   assert.equal(resolveAgentProfile('planner', configuration).systemPromptPath, '.pi/agents/planner.md')
   assert.equal(resolveAgentProfile('task-planner', configuration).systemPromptPath, '.pi/agents/task-planner.md')
   assert.equal(resolveAgentProfile('task-planner', configuration).thinking, 'high')
+  const verificationPlanner = resolveAgentProfile('verification-planner', configuration)
+  assert.equal(verificationPlanner.model, 'planning-model')
+  assert.equal(verificationPlanner.systemPromptPath, '.pi/agents/verification-planner.md')
+  assert.equal(verificationPlanner.readOnly, true)
+  assert.deepEqual(verificationPlanner.tools, ['read', 'grep', 'find', 'ls'])
+  const verifier = resolveAgentProfile('verifier', configuration)
+  assert.equal(verifier.model, 'execution-model')
+  assert.equal(verifier.systemPromptPath, '.pi/agents/verifier.md')
   const roles = resolveAgentProfiles(configuration).map((profile) => profile.role)
   const expected: AgentRole[] = [
     'scout',
     'planner',
     'task-planner',
+    'verification-planner',
     'implementer',
     'verifier',
     'reviewer',

@@ -41,6 +41,7 @@ export type AgentRole =
   | 'plan-reviewer'
   | 'task-reviewer'
   | 'implementer'
+  | 'verification-planner'
   | 'verifier'
   | 'reviewer'
 export type PendingHumanAction =

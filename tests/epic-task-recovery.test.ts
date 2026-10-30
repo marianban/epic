@@ -155,7 +155,7 @@ function dependencies(calls: string[]): EpicServiceDependencies {
       role: input.role,
       exitCode: 0,
       output:
-        input.role === 'verifier'
+        input.role === 'verification-planner'
           ? JSON.stringify({ version: 1, criterionVersion: 1, criteria: [], obligations: [] })
           : input.role === 'reviewer'
           ? JSON.stringify({
@@ -598,7 +598,7 @@ test('recovered task reaches review, checkpoints once, and gives T2 a clean base
       domain: EpicDomainState
     }
     assert.equal(output.kind, 'completed')
-    assert.deepEqual(calls, ['verifier', 'reviewer'])
+    assert.deepEqual(calls, ['verification-planner', 'reviewer'])
 
     const checkpointed = await epicServices.checkpointTask(output.domain)
     assert.equal(checkpointed.checkpoint?.kind, 'task')
@@ -622,7 +622,7 @@ test('recovered task reaches review, checkpoints once, and gives T2 a clean base
       t2.taskBaselineSha,
       await gitOutput(root, ['rev-parse', 'HEAD'])
     )
-    assert.deepEqual(calls, ['verifier', 'reviewer', 'implementer'])
+    assert.deepEqual(calls, ['verification-planner', 'reviewer', 'implementer'])
     actor.stop()
   } finally {
     await fs.rm(root, { recursive: true, force: true })
