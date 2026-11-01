@@ -1,5 +1,6 @@
 import { createManualReview } from './manual-review.ts'
 import { canRepairTask } from './task-review-policy.ts'
+import { hasLikelyFailure } from './evidence-outcome.ts'
 import { randomUUID } from 'node:crypto'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -53,7 +54,7 @@ export function constructReviewReport(
           criterionId: criterion.id,
           expected: obligation.expected,
           actual: obligation.reason ?? 'No current validated evidence.',
-          outcome: 'unverified',
+          outcome: 'inconclusive',
           gap:
             obligation.method === 'human_only' ? 'human_only' : 'not_attempted',
           method: obligation.method,
@@ -172,6 +173,11 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
         (e) =>
           `  - ${e.obligationId}: ${e.outcome}${e.gap ? ` (${e.gap})` : ''}. Expected: ${e.expected}. Observed: ${e.actual}${e.reproduction ? ` Reproduce: ${e.reproduction}` : ''}. ${e.artifacts.map((p) => `[evidence](${p})`).join(' ')}`
       ),
+      ...c.evidence.flatMap((e) => e.suspectedFailure ? [
+        `  - Suspected failure: ${e.suspectedFailure.contradiction}`,
+        `  - Uncertainty: ${e.suspectedFailure.uncertainty}`,
+        `  - Confirmation check: ${e.suspectedFailure.confirmationCheck}`,
+      ] : []),
       ...c.evidence.flatMap(e => e.conclusion ? [
         `  - Conclusion ${e.conclusion.id} (${e.conclusion.basis}): ${e.conclusion.explanation}`,
         `  - Cited evidence: ${e.conclusion.evidenceIds.join(', ') || 'none'}. Limitations: ${e.conclusion.limitations.join('; ') || 'none'}.`,
@@ -224,10 +230,13 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
     '',
     '## Human decisions',
     '',
-    'Complete the manual review checklist in the dashboard, then choose Continue. When every manual step passes and no actionable failure remains, the task is approved without additional prompts, including when automated evidence is incomplete. The report retains its original findings and evidence.',
+    'Complete the manual review checklist in the dashboard, then choose Continue. When every manual step passes and no confirmed or likely failure remains, the task is approved without additional prompts, including when automated evidence is incomplete. The report retains its original findings and evidence.',
+    ...(hasLikelyFailure(report)
+      ? ['Likely failure blocks approval. Investigate the recorded contradiction and perform its confirmation check before obtaining a new verification result. A likely failure alone does not authorize an implementation repair.']
+      : []),
     ...(canRepairTask(report.readiness, false)
       ? ['Use /task-repair to grant one additional repair attempt and five additional minutes for the recorded failures.']
-      : report.readiness === 'needs_manual_confirmation'
+      : report.readiness === 'needs_manual_confirmation' && !hasLikelyFailure(report)
         ? ['Verification has unresolved evidence, with no actionable failure recorded. Review it manually.']
         : []),
     'If a manual check reveals incorrect behavior, mark it failed in the dashboard and record an observation to request fixes. To review later, use /epic-exit to hide the dashboard; the task remains awaiting review.',

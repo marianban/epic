@@ -1,5 +1,6 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import { assertSuspectedFailure } from './evidence-outcome.ts'
 import type {
   AcceptanceEvidence,
   VerificationPlan,
@@ -43,24 +44,25 @@ export async function validateAcceptanceEvidence(
         result.attempt !== attempt ||
         typeof result.actual !== 'string' ||
         !result.actual.trim() ||
-        !['pass', 'fail', 'unverified'].includes(result.outcome) ||
+        !['pass', 'fail', 'likely-fail', 'inconclusive'].includes(result.outcome) ||
         !Array.isArray(result.artifacts)
       )
         throw new Error('Invalid, duplicate, or stale result.')
       if (
-        result.outcome === 'unverified' &&
+        result.outcome === 'inconclusive' &&
         !['human_only', 'blocked', 'not_attempted', 'inconclusive'].includes(
           String(result.gap)
         )
       )
         throw new Error('Missing evidence classification.')
       if (
-        result.outcome !== 'unverified' &&
+        result.outcome !== 'inconclusive' &&
         (result.gap !== undefined || !result.artifacts.length)
       )
         throw new Error('Unsupported success/failure claim.')
-      if (result.method === 'human_only' && result.outcome !== 'unverified')
+      if (result.method === 'human_only' && result.outcome !== 'inconclusive')
         throw new Error('Human confirmation must be a recorded user decision.')
+      assertSuspectedFailure(result.outcome, result.suspectedFailure)
       if (result.method === 'agent_browser' && !result.conclusion)
         throw new Error('Browser acceptance requires an explicit recorded conclusion.')
       for (const artifact of result.artifacts) {
@@ -76,12 +78,14 @@ export async function validateAcceptanceEvidence(
           outcome?: string
           attachments?: string[]
           conclusion?: AcceptanceEvidence['conclusion']
+          suspectedFailure?: AcceptanceEvidence['suspectedFailure']
         }
         if (
           data.identity !== identity ||
           data.attempt !== attempt ||
           data.obligationId !== result.obligationId ||
-          data.outcome !== result.outcome
+          data.outcome !== result.outcome ||
+          JSON.stringify(data.suspectedFailure) !== JSON.stringify(result.suspectedFailure)
         )
           throw new Error(
             'Artifact does not establish the claimed observation.'

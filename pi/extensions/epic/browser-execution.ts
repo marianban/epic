@@ -291,7 +291,7 @@ export class BrowserExecution {
       ? 'fail'
       : asserted && !gap
         ? 'pass'
-        : 'unverified'
+        : 'inconclusive'
     const result: AcceptanceEvidence = {
       obligationId: obligation.id,
       criterionId: obligation.criterionId,
@@ -302,7 +302,7 @@ export class BrowserExecution {
           ? `Assertions passed: ${JSON.stringify(observations)}`
           : `Expected outcome not established: ${JSON.stringify(observations)}`,
       outcome,
-      ...(outcome === 'unverified'
+      ...(outcome === 'inconclusive'
         ? { gap: gap ?? ('inconclusive' as const) }
         : {}),
       method: obligation.method,

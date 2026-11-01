@@ -255,14 +255,14 @@ test('runtime errors survive corrected probes while probe failures can be correc
   )
   const unresolved = await f.conclude({
     ...f.conclusion,
-    outcome: 'unverified',
+    outcome: 'inconclusive',
     evidenceIds: [],
     gap: 'inconclusive',
     limitations: ['Trajectory not measurable.'],
   })
   assert.equal(unresolved.gap, 'inconclusive')
   await assert.rejects(
-    f.conclude({ ...f.conclusion, outcome: 'unverified' }),
+    f.conclude({ ...f.conclusion, outcome: 'inconclusive' }),
     /gap/
   )
 })
@@ -335,4 +335,36 @@ test('all browser tools are sequential and reject unknown/text-only models befor
     if (oldToken === undefined) delete process.env.PI_EPIC_BROWSER_TOKEN
     else process.env.PI_EPIC_BROWSER_TOKEN = oldToken
   }
+})
+
+
+test('likely failures require cited contradictions, uncertainty and a confirmation check', async t => {
+  const f = await fixture(t)
+  const suspectedFailure = {
+    contradiction: 'Paddle stayed centered after repeated held arrow inputs.',
+    uncertainty: 'Keyboard delivery to Phaser could not be confirmed.',
+    confirmationCheck: 'Focus the canvas and record key state and paddle x before and after a held Right key.',
+  }
+  const conclusion: BrowserConclusion = {
+    ...f.conclusion,
+    outcome: 'likely-fail',
+    explanation: suspectedFailure.contradiction,
+    suspectedFailure,
+    limitations: [suspectedFailure.uncertainty],
+  }
+  for (const field of ['contradiction', 'uncertainty', 'confirmationCheck'] as const) {
+    await assert.rejects(f.conclude({ ...conclusion, suspectedFailure: { ...suspectedFailure, [field]: ' ' } }), /Likely-fail requires/)
+  }
+  await assert.rejects(f.conclude({ ...conclusion, suspectedFailure: undefined }), /Likely-fail requires/)
+  await assert.rejects(f.conclude({ ...conclusion, evidenceIds: [] }), /recorded evidence/)
+  await assert.rejects(f.conclude({ ...conclusion, basis: 'observations', evidenceIds: ['probe'] }), /measured observations/)
+  await assert.rejects(f.conclude({ ...conclusion, gap: 'inconclusive' }), /Only inconclusive/)
+  await assert.rejects(f.conclude({ ...conclusion, outcome: 'pass' }), /Only likely-fail/)
+  const result = await f.conclude(conclusion)
+  const plan = { version: 1, criterionVersion: 1, criteria: [{ id: 'AC1', text: f.options.obligation.expected }], obligations: [f.options.obligation] }
+  assert.equal(result.outcome, 'likely-fail')
+  assert.deepEqual(result.suspectedFailure, suspectedFailure)
+  assert.deepEqual((await validateAcceptanceEvidence([result], plan, 'cycle', 1, f.root)).problems, [])
+  const altered = { ...result, suspectedFailure: { ...suspectedFailure, confirmationCheck: 'Changed claim' } }
+  assert.match((await validateAcceptanceEvidence([altered], plan, 'cycle', 1, f.root)).problems.join(' '), /Artifact does not establish/)
 })

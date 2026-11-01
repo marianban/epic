@@ -31,6 +31,7 @@ async function ensureEpicDirectories(
   await fs.mkdir(path.join(dir, 'reviews'), { recursive: true })
   await fs.mkdir(path.join(dir, 'diffs'), { recursive: true })
   await fs.mkdir(path.join(dir, 'tasks'), { recursive: true })
+  await fs.mkdir(path.join(dir, 'artifacts'), { recursive: true })
   return dir
 }
 
@@ -273,7 +274,7 @@ export async function persistEpicTasks(
   state: EpicRunIdentity,
   tasks: EpicTask[]
 ): Promise<string> {
-  const manifest = await persistJsonArtifact(state, 'tasks/tasks.json', tasks)
+  const manifest = await persistJsonArtifact(state, 'artifacts/tasks.json', tasks)
   for (const [index, task] of tasks.entries()) {
     const list = (items: string[]) =>
       items.map((item) => `- ${item}`).join('\n') || '- None.'

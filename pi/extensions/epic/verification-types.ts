@@ -12,6 +12,12 @@ export type EvidenceGap =
   'human_only' | 'blocked' | 'not_attempted' | 'inconclusive'
 export type CriterionStatus =
   'met' | 'partially_met' | 'not_met' | 'manual_review_pending'
+export type EvidenceOutcome = 'pass' | 'fail' | 'likely-fail' | 'inconclusive'
+export interface SuspectedFailure {
+  contradiction: string
+  uncertainty: string
+  confirmationCheck: string
+}
 export interface ApprovedCriterion {
   id: string
   text: string
@@ -45,7 +51,8 @@ export interface AcceptanceEvidence {
   criterionId: string
   expected: string
   actual: string
-  outcome: 'pass' | 'fail' | 'unverified'
+  outcome: EvidenceOutcome
+  suspectedFailure?: SuspectedFailure
   gap?: EvidenceGap
   method: VerificationMethod
   artifacts: string[]

@@ -67,7 +67,7 @@ test('dashboard reads stage from the persisted actor snapshot', async () => {
   })
   actor.start()
   await saveState(domain, {
-    schemaVersion: 10,
+    schemaVersion: 12,
     machineVersion: 14,
     epicId: 'run',
     createdAt: '2026-01-01T00:00:00.000Z',

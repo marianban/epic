@@ -173,7 +173,7 @@ export interface EpicTimer {
 }
 
 export interface PersistedEpicEnvelope extends EpicRunMetadata {
-  schemaVersion: 10
+  schemaVersion: 12
   machineVersion: 14
   snapshot: unknown
 }

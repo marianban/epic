@@ -66,7 +66,7 @@ export async function decideTask(
     !canApproveTask(record)
   )
     throw new Error(
-      `Ordinary approval is unavailable: ${report.readiness}. Complete all manual steps and resolve actionable failures.`
+      `Ordinary approval is unavailable: ${report.readiness}. Complete all manual steps and resolve actionable failures and likely failures.`
     )
   if (request.kind === 'grant') {
     const feedback = humanRepairFeedback(record)
@@ -155,7 +155,7 @@ export async function assertAcceptedReport(
   assertManualReviewTask(state, currentManualReview(record))
   if (!canApproveTask(record))
     throw new Error(
-      'Checkpoint requires all manual review items to pass and no actionable failures.'
+      'Checkpoint requires all manual review items to pass and no actionable failures or likely failures.'
     )
   return report
 }

@@ -170,7 +170,7 @@ test('task completion validation rejects malformed domains and repair counters b
 
 test('persisted envelope parser rejects extra fields, identity mismatches, and incomplete domains', () => {
   const state = domain('/repo')
-  const envelope = { schemaVersion: 10 as const, machineVersion: 14 as const, epicId: 'run', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', snapshot: { value: 'idle', context: { state } } }
+  const envelope = { schemaVersion: 12 as const, machineVersion: 14 as const, epicId: 'run', createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z', snapshot: { value: 'idle', context: { state } } }
   assert.equal(parsePersistedEpicEnvelope(envelope).epicId, 'run')
   assert.throws(() => parsePersistedEpicEnvelope({ ...envelope, legacyDomain: state }), /unsupported fields/)
   assert.throws(() => parsePersistedEpicEnvelope({ ...envelope, epicId: 'other' }), /does not match/)

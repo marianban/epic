@@ -76,18 +76,28 @@ export default function verifierTools(pi: ExtensionAPI): void {
     executionMode: 'sequential',
     label: 'Conclude browser verification',
     description:
-      'Conclude one obligation using recorded evidence IDs from this invocation. Explain why observations establish the expectation, and list limitations honestly. Pass/fail needs cited evidence; unverified needs gap. basis is observations, visual (cite images), or motion (cite two timed records in one probe and explain temporalComparison). When combining independent fresh-page probes, explain separateExecutions. Runtime errors prevent pass. Invalid conclusions return feedback; correct them or report unverified. Prose outside this tool cannot establish acceptance.',
+      'Conclude one obligation using recorded evidence IDs from this invocation. Explain why observations establish the expectation, and list limitations honestly. Pass/fail/likely-fail needs cited evidence; inconclusive needs gap. Use likely-fail for an observed contradiction with a specific uncertainty, and provide suspectedFailure containing contradiction, uncertainty, and confirmationCheck. Use inconclusive when evidence cannot judge behavior. basis is observations, visual (cite images), or motion (cite two timed records in one probe and explain temporalComparison). When combining independent fresh-page probes, explain separateExecutions. Runtime errors prevent pass. Invalid conclusions return feedback; correct them or report inconclusive. Prose outside this tool cannot establish acceptance.',
     parameters: {
       type: 'object',
       properties: {
         obligationId: { type: 'string' },
-        outcome: { type: 'string', enum: ['pass', 'fail', 'unverified'] },
+        outcome: { type: 'string', enum: ['pass', 'fail', 'likely-fail', 'inconclusive'] },
         gap: {
           type: 'string',
           enum: ['blocked', 'not_attempted', 'inconclusive'],
         },
         evidenceIds: { type: 'array', items: { type: 'string' } },
         explanation: { type: 'string' },
+        suspectedFailure: {
+          type: 'object',
+          properties: {
+            contradiction: { type: 'string' },
+            uncertainty: { type: 'string' },
+            confirmationCheck: { type: 'string' },
+          },
+          required: ['contradiction', 'uncertainty', 'confirmationCheck'],
+          additionalProperties: false,
+        },
         limitations: { type: 'array', items: { type: 'string' } },
         basis: { type: 'string', enum: ['observations', 'visual', 'motion'] },
         separateExecutions: { type: 'string' },

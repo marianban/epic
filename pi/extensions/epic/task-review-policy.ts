@@ -1,9 +1,11 @@
 import { currentManualReview } from './manual-review.ts'
+import { hasLikelyFailure } from './evidence-outcome.ts'
 import type { HumanReviewReport, TaskVerificationRecord } from './verification-types.ts'
 
 export function canApproveTask(record: TaskVerificationRecord): boolean {
   const report = record.report
   if (!report) throw new Error('No human-review report is available.')
+  if (hasLikelyFailure(report)) return false
   const items = currentManualReview(record).items
   if (items.some((item) => item.status !== 'passed')) return false
   return report.readiness === 'verified' ||

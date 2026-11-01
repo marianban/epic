@@ -220,7 +220,7 @@ export async function runTaskVerification(
                   criterionId: obligation.criterionId,
                   expected: obligation.expected,
                   actual: obligation.reason ?? 'Human confirmation required.',
-                  outcome: 'unverified',
+                  outcome: 'inconclusive',
                   gap: 'human_only',
                   method: obligation.method,
                   artifacts: [],
@@ -249,7 +249,7 @@ export async function runTaskVerification(
                   actual: obligation.steps
                     ? 'Browser scope unavailable.'
                     : 'No executable static check.',
-                  outcome: 'unverified',
+                  outcome: 'inconclusive',
                   gap: obligation.steps ? 'blocked' : 'inconclusive',
                   method: obligation.method,
                   artifacts: [],
@@ -265,7 +265,7 @@ export async function runTaskVerification(
                 criterionId: obligation.criterionId,
                 expected: obligation.expected,
                 actual: reason,
-                outcome: 'unverified',
+                outcome: 'inconclusive',
                 gap:
                   signal.aborted || store.remaining(record) <= 0
                     ? 'not_attempted'
@@ -330,7 +330,7 @@ export async function runTaskVerification(
                     criterionId: o.criterionId,
                     expected: o.expected,
                     actual,
-                    outcome: 'unverified' as const,
+                    outcome: 'inconclusive' as const,
                     gap: 'blocked' as const,
                     method: o.method,
                     artifacts: [],

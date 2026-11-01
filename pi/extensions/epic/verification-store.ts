@@ -1,4 +1,5 @@
 import { validateManualReviews } from './manual-review.ts'
+import { assertSuspectedFailure } from './evidence-outcome.ts'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -16,7 +17,7 @@ export function taskVerificationPath(state: EpicDomainState): string {
     'epics',
     'runs',
     state.epicId,
-    'tasks',
+    'artifacts',
     `task-${state.currentTaskIndex + 1}-verification.json`
   )
 }
@@ -43,6 +44,13 @@ export class VerificationStore {
     )
       throw new Error('Invalid task verification ledger.')
     validateManualReviews(value)
+    for (const cycle of value.cycles) {
+      for (const evidence of cycle.evidence) {
+        if (!['pass', 'fail', 'likely-fail', 'inconclusive'].includes(evidence.outcome))
+          throw new Error(`Incompatible task verification evidence outcome: ${String(evidence.outcome)}. Required pass/fail/likely-fail/inconclusive; no migration was applied.`)
+        assertSuspectedFailure(evidence.outcome, evidence.suspectedFailure)
+      }
+    }
     for (const n of [
       value.repairsLimit,
       value.infrastructureLimit,

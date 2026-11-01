@@ -1,6 +1,7 @@
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { assertSuspectedFailure } from './evidence-outcome.ts'
 import type {
   AcceptanceEvidence,
   VerificationObligation,
@@ -28,7 +29,7 @@ export async function concludeBrowserProbe(input: {
   if (c.obligationId !== input.obligation.id)
     throw new Error('Conclusion identifies a different obligation.')
   if (
-    !['pass', 'fail', 'unverified'].includes(c.outcome) ||
+    !['pass', 'fail', 'likely-fail', 'inconclusive'].includes(c.outcome) ||
     !nonEmpty(c.explanation) ||
     !Array.isArray(c.limitations) ||
     c.limitations.some((v) => !nonEmpty(v)) ||
@@ -41,13 +42,14 @@ export async function concludeBrowserProbe(input: {
       'Conclusion requires an outcome, explanation, limitations array, unique evidenceIds, and observations/visual/motion basis.'
     )
   if (
-    c.outcome === 'unverified'
+    c.outcome === 'inconclusive'
       ? !['blocked', 'not_attempted', 'inconclusive'].includes(String(c.gap))
       : c.gap !== undefined
   )
     throw new Error(
-      'Only unverified conclusions require a blocked/not_attempted/inconclusive gap.'
+      'Only inconclusive conclusions require a blocked/not_attempted/inconclusive gap.'
     )
+  assertSuspectedFailure(c.outcome, c.suspectedFailure)
   const current = input.probes.filter(
     (p) =>
       p.obligationId === input.obligation.id &&
@@ -77,8 +79,8 @@ export async function concludeBrowserProbe(input: {
     throw new Error(
       'Explain separateExecutions: these probes ran on independent fresh pages.'
     )
-  if (c.outcome !== 'unverified' && !c.evidenceIds.length)
-    throw new Error('Pass/fail conclusions require recorded evidence.')
+  if (c.outcome !== 'inconclusive' && !c.evidenceIds.length)
+    throw new Error('Pass/fail/likely-fail conclusions require recorded evidence.')
   if (c.outcome === 'pass') {
     if (
       input.probes.some(
@@ -98,8 +100,10 @@ export async function concludeBrowserProbe(input: {
       )
     )
       throw new Error(
-        'Cited probe has errors or failed assertions; correct the probe or report fail/unverified.'
+        'Cited probe has errors or failed assertions; correct the probe or report fail/likely-fail/inconclusive.'
       )
+  }
+  if (c.outcome === 'pass' || c.outcome === 'likely-fail') {
     const meaningful = cited.some(
       (p) =>
         p.images.some((i) => ids.has(i.id)) ||
@@ -117,16 +121,16 @@ export async function concludeBrowserProbe(input: {
     )
     if (!meaningful)
       throw new Error(
-        'A pass must cite measured observations or images; probe completion, fixtures, visibility, and inspect:true alone do not establish behavior.'
+        'A pass or likely-fail must cite measured observations or images; probe completion, fixtures, visibility, and inspect:true alone do not establish behavior.'
       )
   }
   if (
-    c.outcome !== 'unverified' &&
+    c.outcome !== 'inconclusive' &&
     c.basis === 'visual' &&
     !cited.some((p) => p.images.some((i) => ids.has(i.id)))
   )
     throw new Error('Visual conclusions must cite captured image IDs.')
-  if (c.outcome !== 'unverified' && c.basis === 'motion') {
+  if (c.outcome !== 'inconclusive' && c.basis === 'motion') {
     const temporal = cited.some((p) => {
       const times = [
         ...p.images.filter((i) => ids.has(i.id)),
@@ -155,6 +159,7 @@ export async function concludeBrowserProbe(input: {
     expected: input.obligation.expected,
     actual: c.explanation,
     outcome: c.outcome,
+    ...(c.suspectedFailure ? { suspectedFailure: c.suspectedFailure } : {}),
     ...(c.gap ? { gap: c.gap } : {}),
     method: 'agent_browser',
     artifacts: [artifact],

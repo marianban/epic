@@ -40,7 +40,7 @@ import { createActor } from 'xstate'
 import { createEpicMachine } from '../pi/extensions/epic/machines/epic-machine.ts'
 import { createEpicRuntime } from '../pi/extensions/epic/runtime.ts'
 import type { EpicServices } from '../pi/extensions/epic/services.ts'
-import { loadActiveEpic } from '../pi/extensions/epic/persistence.ts'
+import { loadActiveEpic, persistEpicTasks } from '../pi/extensions/epic/persistence.ts'
 import { constructReviewReport, reviewReportMarkdown } from '../pi/extensions/epic/verification-report.ts'
 import { latestTaskRepairRequest } from '../pi/extensions/epic/task-repair-request.ts'
 
@@ -155,6 +155,29 @@ async function fixture(t: TestContext, repairs = 3, clock = realClock) {
   }
   return { root, state, store, record, plan, calls, dependencies }
 }
+
+test('task review Markdown stays separate from execution artifacts', async (t) => {
+  const f = await fixture(t)
+  assert.ok(f.state.tasks)
+  const manifest = await persistEpicTasks(f.state, f.state.tasks)
+  const run = path.join(f.root, '.pi', 'epics', 'runs', f.state.epicId)
+  const taskFile = path.join(run, 'tasks', 'task-001.md')
+  await fs.appendFile(taskFile, 'R: Keep this human review instruction.\n')
+  const markdown = await fs.readFile(taskFile, 'utf8')
+  const state = await runTaskVerification(
+    f.state,
+    new AbortController().signal,
+    f.dependencies
+  )
+  assert.equal((await f.store.read()).report?.readiness, 'verified')
+  assert.equal(manifest, path.join(run, 'artifacts', 'tasks.json'))
+  assert.equal(f.store.file, path.join(run, 'artifacts', 'task-1-verification.json'))
+  assert.deepEqual(await fs.readdir(path.join(run, 'tasks')), ['task-001.md'])
+  assert.equal(await fs.readFile(taskFile, 'utf8'), markdown)
+  const artifacts = await fs.readdir(path.join(run, 'artifacts'))
+  assert.ok(artifacts.some(file => file.endsWith('-command.json')))
+  assert.ok(state.lastVerificationReportPath)
+})
 
 test('successful acceptance remains report-bound across candidate changes', async (t) => {
   const f = await fixture(t)
@@ -1406,7 +1429,7 @@ test('evidence gaps offer manual review without repair; a recorded manual defect
     const record = await f.store.read()
     const cycle = record.cycles.at(-1)
     assert.ok(cycle)
-    cycle.evidence = cycle.evidence.map(e => ({ ...e, outcome: 'unverified', gap, actual: `Verification ${gap}` }))
+    cycle.evidence = cycle.evidence.map(e => ({ ...e, outcome: 'inconclusive', gap, actual: `Verification ${gap}` }))
     const report = { ...constructReviewReport(record, f.review.identity, f.store.remaining(record)), id: f.review.reportId }
     assert.equal(report.readiness, 'needs_manual_confirmation')
     record.report = report
@@ -1472,7 +1495,7 @@ test('completed manual review approves evidence gaps directly and checkpoints th
   const record = await f.store.read()
   const cycle = record.cycles.at(-1)
   assert.ok(cycle)
-  cycle.evidence = cycle.evidence.map(e => ({ ...e, outcome: 'unverified', gap: 'inconclusive', actual: 'Canvas content could not be inspected.' }))
+  cycle.evidence = cycle.evidence.map(e => ({ ...e, outcome: 'inconclusive', gap: 'inconclusive', actual: 'Canvas content could not be inspected.' }))
   cycle.problems = ['Verifier could not establish the expected outcome.']
   record.report = { ...constructReviewReport(record, f.review.identity, f.store.remaining(record)), id: f.review.reportId }
   const report = structuredClone(record.report)
@@ -1588,4 +1611,69 @@ test('dashboard continues after manual review without limitation dialogs', async
   await f.update(0, 'failed', 'Rendering is broken')
   assert.equal((await actions())?.[0]?.label, 'Continue (request fixes)')
   assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
+})
+
+
+test('likely failures block completed manual approval without authorizing repair', async t => {
+  const f = await manualFixture(t)
+  const record = await f.store.read()
+  const cycle = record.cycles.at(-1)
+  assert.ok(cycle)
+  cycle.evidence = cycle.evidence.map(e => ({
+    ...e, outcome: 'likely-fail',
+    suspectedFailure: {
+      contradiction: 'Paddle remained centered after held inputs.',
+      uncertainty: 'Keyboard delivery is uncertain.',
+      confirmationCheck: 'Focus the canvas and measure key state and paddle position.',
+    },
+  }))
+  const report = { ...constructReviewReport(record, f.review.identity, f.store.remaining(record)), id: f.review.reportId }
+  record.report = report
+  assert.equal(report.readiness, 'needs_manual_confirmation')
+  assert.ok(report.unresolved.length)
+  assert.match(reviewReportMarkdown(report), /Confirmation check: Focus the canvas/)
+  await f.store.write(record)
+  await f.update(0, 'passed')
+  await f.update(1, 'passed')
+  assert.deepEqual(manualReviewSubmission(await f.store.read()), { kind: 'incomplete', label: 'Continue (resolve likely failure)' })
+  await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /likely failures/)
+  await assert.rejects(decideTask(f.state, {
+    kind: 'grant', identity: report.identity, reportId: report.id, repairs: 1, timeMs: 300_000, reason: 'Suspected defect',
+  }, realClock), /No actionable failure/)
+  await f.update(1, 'failed', 'Confirmed: paddle does not respond with canvas focused.')
+  assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
+})
+
+test('likely failure alone never consumes an automatic repair attempt', async t => {
+  const f = await fixture(t)
+  await runTaskVerification(f.state, new AbortController().signal, {
+    ...f.dependencies,
+    review: async (state, cycle) => {
+      const evidence = cycle.evidence[0]
+      evidence.outcome = 'likely-fail'
+      evidence.suspectedFailure = {
+        contradiction: 'Observed behavior contradicts the expectation.',
+        uncertainty: 'Input delivery is uncertain.',
+        confirmationCheck: 'Measure received input and resulting state together.',
+      }
+      return f.dependencies.review(state, cycle, { signal: new AbortController().signal, remainingMs: () => 30_000 })
+    },
+  })
+  const record = await f.store.read()
+  assert.equal(record.report?.readiness, 'needs_manual_confirmation')
+  assert.equal(record.cycles.length, 1)
+  assert.ok(!f.calls.includes('repair'))
+  assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 0)
+})
+
+
+test('legacy unverified ledger evidence is rejected without conversion', async t => {
+  const f = await fixture(t)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const saved = JSON.parse(await fs.readFile(f.store.file, 'utf8'))
+  saved.cycles[0].evidence[0].outcome = 'unverified'
+  const legacy = JSON.stringify(saved)
+  await fs.writeFile(f.store.file, legacy)
+  await assert.rejects(f.store.read(), /Incompatible task verification evidence outcome: unverified.*no migration/)
+  assert.equal(await fs.readFile(f.store.file, 'utf8'), legacy)
 })

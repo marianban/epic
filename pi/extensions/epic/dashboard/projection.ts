@@ -1,5 +1,6 @@
 import { currentManualReview } from '../manual-review.ts'
 import { canApproveTask, canRepairTask } from '../task-review-policy.ts'
+import { hasLikelyFailure } from '../evidence-outcome.ts'
 import { manualReviewSubmission } from './manual-review-submission.ts'
 import { acceptancePlanningFailureMessage } from '../acceptance-planning-recovery.ts'
 import { join } from 'node:path'
@@ -290,7 +291,9 @@ function actionRequired(
           id: 'task-action-required',
           severity: 'warning',
           title: 'Task awaits human review',
-          message: taskReviewMessage(state, readiness, manualFailures, manualApprovalReady),
+          message: verificationRecord?.report && hasLikelyFailure(verificationRecord.report) && !manualFailures
+            ? 'Likely failure blocks approval. Investigate the contradiction, uncertainty, and confirmation check in the verification report. Record a confirmed manual defect to request fixes; suspicion alone does not authorize repair.'
+            : taskReviewMessage(state, readiness, manualFailures, manualApprovalReady),
           manualReview,
           manualReviewSteps: task.manualReviewSteps,
           verificationReportLink: state.lastVerificationReportPath

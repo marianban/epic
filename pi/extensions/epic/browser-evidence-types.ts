@@ -1,4 +1,4 @@
-import type { BrowserStep, EvidenceGap } from './verification-types.ts'
+import type { BrowserStep, EvidenceGap, EvidenceOutcome, SuspectedFailure } from './verification-types.ts'
 
 export interface BrowserProbeLimits {
   maxFrames: number
@@ -44,7 +44,8 @@ export interface BrowserProbe {
 
 export interface BrowserConclusion {
   obligationId: string
-  outcome: 'pass' | 'fail' | 'unverified'
+  outcome: EvidenceOutcome
+  suspectedFailure?: SuspectedFailure
   gap?: EvidenceGap
   evidenceIds: string[]
   explanation: string
