@@ -193,7 +193,7 @@ export function validateBrowserStep(
     nonEmptyString(value.selector, `${path}.selector`)
     if (typeof value.value !== 'string')
       reject(`${path}.value`, 'invalid_string', 'a string', value.value)
-  } else if (action === 'pointer') {
+  } else if (action === 'pointer' || action === 'click_at') {
     for (const axis of ['x', 'y'])
       if (!Number.isFinite(value[axis]))
         reject(
@@ -202,11 +202,29 @@ export function validateBrowserStep(
           'a finite coordinate',
           value[axis]
         )
+    if (action === 'click_at' && !['left', 'middle', 'right'].includes(value.button as string))
+      reject(`${path}.button`, 'invalid_button', 'left, middle, or right', value.button)
+  } else if (action === 'mouse_down' || action === 'mouse_up') {
+    if (!['left', 'middle', 'right'].includes(value.button as string))
+      reject(`${path}.button`, 'invalid_button', 'left, middle, or right', value.button)
+  } else if (action === 'resize') {
+    for (const dimension of ['width', 'height'])
+      if (!Number.isSafeInteger(value[dimension]) || (value[dimension] as number) < 1)
+        reject(`${path}.${dimension}`, 'invalid_dimension', 'a positive integer', value[dimension])
+  } else if (action === 'playwright') {
+    nonEmptyString(value.code, `${path}.code`)
   } else if (action === 'inspect' || action === 'observe' || action === 'fixture') {
     nonEmptyString(value.expression, `${path}.expression`)
   } else if (action === 'key_down' || action === 'key_up') {
     nonEmptyString(value.key, `${path}.key`)
-  } else if (action === 'wait') {
+  } else if (action === 'wait' || action === 'hold') {
+    if (action === 'hold') {
+      if (!Array.isArray(value.keys) || !value.keys.length)
+        reject(`${path}.keys`, 'invalid_keys', 'a non-empty array of unique key strings', value.keys)
+      value.keys.forEach((key, index) => nonEmptyString(key, `${path}.keys[${index}]`))
+      if (new Set(value.keys).size !== value.keys.length)
+        reject(`${path}.keys`, 'duplicate_keys', 'unique key strings', value.keys)
+    }
     if (!Number.isSafeInteger(value.durationMs) || (value.durationMs as number) < 0)
       reject(`${path}.durationMs`, 'invalid_duration', 'a non-negative integer', value.durationMs)
   } else if (action === 'capture') {
@@ -219,7 +237,7 @@ export function validateBrowserStep(
     reject(
       `${path}.action`,
       'unknown_action',
-      'a supported action (click, press, text, visible, pointer, inspect, observe, fixture)',
+      'a supported action (click, press, text, visible, pointer, mouse_down, mouse_up, click_at, hold, resize, playwright, inspect, observe, fixture, key_down, key_up, wait, capture)',
       action
     )
 }
@@ -283,6 +301,12 @@ export function scenarioPlanningPrompt(
     { action: 'text', selector: '#count', value: '1' },
     { action: 'visible', selector: '#counter', value: 'true' },
     { action: 'pointer', x: 100, y: 120 },
+    { action: 'mouse_down', button: 'left' },
+    { action: 'mouse_up', button: 'left' },
+    { action: 'click_at', x: 100, y: 120, button: 'left' },
+    { action: 'hold', keys: ['ArrowRight', 'Space'], durationMs: 300 },
+    { action: 'resize', width: 900, height: 900 },
+    { action: 'playwright', code: 'await page.mouse.wheel(0, 300); return await page.evaluate(() => ({ scrollY }));' },
     {
       action: 'inspect',
       expression: "document.querySelector('#game-container') !== null",
@@ -297,6 +321,7 @@ Complete example (illustrative only; use the actual frozen criteria and versions
 Method examples (illustrative obligations): ${JSON.stringify(methods)}
 Automated obligations require command or steps. Prefer agent_browser for behavior that requires browser exploration or interpretation. For agent_browser, expected defines the required observable behavior; omit steps unless a useful starting suggestion is known. Any supplied steps are suggestions the verifier may adjust, not frozen assertions. Do not encode incidental representation details such as computed CSS serialization as requirements. Static evidence requires a command independently executed by the verifier. Human-only requires a genuine subjective/access reason.
 Browser step examples (use these exact field names): ${JSON.stringify(steps)}
+mouse_down/mouse_up require an explicit button (left, middle, or right) at the current pointer position. click_at uses viewport CSS pixel coordinates and an explicit button. hold presses a non-empty list of unique keys together for durationMs, then releases them even on failure/cancellation. Do not overlap hold keys with keys already held by key_down; use key_down/key_up when measurements must occur during a hold. Holds share the per-wait duration cap and remaining deadline. resize changes the actual viewport on the same page. For interactions without a predefined action, playwright runs an async JavaScript body with page (the runtime-owned Playwright Page) and timeoutMs (remaining budget); return JSON-serializable measurements. Use the supplied page only, await all work, and do not launch/close browsers, contexts, or pages. Use capture steps for image evidence. Page expressions run inside the webpage and cannot access Playwright; do not use window.resizeTo or synthetic resize events to test viewport resizing.
 Automated browser scenarios require an assertion: text asserts exact text; visible asserts visibility; inspect must return true. observe returns diagnostic values without asserting success. The agent_browser verifier chooses assertions at execution time and may inspect observations and correct probes while preserving expected behavior. Fixtures may establish state, never bypass the interaction under test. {"inspect":"..."} is INVALID; use {"action":"inspect","expression":"..."}.`
 }
 

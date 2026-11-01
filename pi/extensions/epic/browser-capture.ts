@@ -22,8 +22,8 @@ export function validateCaptureBudget(
       frames += step.count
       durationMs += (step.count - 1) * step.intervalMs
     }
-    if (step.action === 'wait' && step.durationMs > limits.maxCaptureDurationMs)
-      throw new Error(`A wait may not exceed ${limits.maxCaptureDurationMs}ms.`)
+    if ((step.action === 'wait' || step.action === 'hold') && step.durationMs > limits.maxCaptureDurationMs)
+      throw new Error(`A ${step.action} may not exceed ${limits.maxCaptureDurationMs}ms.`)
   }
   if (frames > limits.maxFrames || durationMs > limits.maxCaptureDurationMs)
     throw new Error(

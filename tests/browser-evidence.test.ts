@@ -274,8 +274,33 @@ test('capture counts, intervals and held-key/wait steps are validated', () => {
     { action: 'capture', count: 2, intervalMs: 0 },
     { action: 'wait', durationMs: -1 },
     { action: 'key_down', key: '' },
+    { action: 'mouse_down' },
+    { action: 'mouse_up', button: 'primary' },
+    { action: 'click_at', x: 10, y: 20 },
+    { action: 'click_at', x: NaN, y: 20, button: 'left' },
+    { action: 'click_at', x: 10, y: Infinity, button: 'right' },
+    { action: 'hold', keys: [], durationMs: 10 },
+    { action: 'hold', keys: ['ArrowRight', 'ArrowRight'], durationMs: 10 },
+    { action: 'hold', keys: [' '], durationMs: 10 },
+    { action: 'hold', keys: [42], durationMs: 10 },
+    { action: 'hold', keys: 'ArrowRight', durationMs: 10 },
+    { action: 'hold', keys: ['ArrowRight'], durationMs: -1 },
+    { action: 'hold', keys: ['ArrowRight'], durationMs: 1.5 },
+    { action: 'hold', keys: ['ArrowRight'], durationMs: Infinity },
+    { action: 'resize', width: 0, height: 600 },
+    { action: 'resize', width: 800, height: 1.5 },
+    { action: 'resize', width: 800, height: Infinity },
+    { action: 'playwright', code: ' ' },
   ])
     assert.throws(() => validateBrowserStep(step, 'step'))
+  validateBrowserStep({ action: 'resize', width: 900, height: 900 }, 'step')
+  for (const button of ['left', 'middle', 'right']) {
+    validateBrowserStep({ action: 'mouse_down', button }, 'step')
+    validateBrowserStep({ action: 'mouse_up', button }, 'step')
+    validateBrowserStep({ action: 'click_at', x: 10.5, y: 20, button }, 'step')
+  }
+  validateBrowserStep({ action: 'hold', keys: ['ArrowRight', 'Space'], durationMs: 0 }, 'step')
+  validateBrowserStep({ action: 'playwright', code: 'return await page.title();' }, 'step')
   assert.throws(
     () =>
       validateCaptureBudget(
@@ -301,6 +326,11 @@ test('capture counts, intervals and held-key/wait steps are validated', () => {
     [{ action: 'capture', count: 12, intervalMs: 900 }],
     limits
   )
+  assert.throws(
+    () => validateCaptureBudget([{ action: 'hold', keys: ['Space'], durationMs: 10001 }], limits),
+    /hold/
+  )
+  validateCaptureBudget([{ action: 'hold', keys: ['Space'], durationMs: 10000 }], limits)
 })
 
 test('all browser tools are sequential and reject unknown/text-only models before making requests', async () => {

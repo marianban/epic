@@ -10,6 +10,7 @@ import { promisify } from 'node:util'
 import { createServer } from 'node:net'
 import type { EpicDomainState, EpicClock } from '../pi/extensions/epic/types.ts'
 import type {
+  BrowserStep,
   VerificationPlan,
   VerificationOperation,
   AcceptanceEvidence,
@@ -1316,27 +1317,165 @@ test('real browser: adaptive canvas images, held keys, timed frames and explicit
   assert.match(reviewReportMarkdown(record.report as NonNullable<typeof record.report>), /Temporal comparison/)
 })
 
-test('real browser: deadline cancellation closes a probe evaluating a never-resolving expression', async t => {
+test('real browser: game mouse controls and simultaneous held keys deliver real input', async t => {
   const f = await fixture(t, 0)
   const port = await availablePort()
-  await fs.writeFile(path.join(f.root, 'counter.html'), '<main>Ready</main>')
-  const controller = new AbortController()
-  const operation = { signal: controller.signal, remainingMs: () => { controller.signal.throwIfAborted(); return 5000 } }
+  await fs.writeFile(path.join(f.root, 'counter.html'), `
+    <style>body { margin: 0 } canvas { position: absolute; left: 40px; top: 50px }</style>
+    <canvas width="400" height="300" tabindex="0"></canvas>
+    <script>
+      window.events = []; window.held = []; window.combo = false; window.holdStarted = 0; window.holdElapsed = 0;
+      const canvas = document.querySelector('canvas');
+      canvas.addEventListener('contextmenu', e => e.preventDefault());
+      for (const type of ['mousedown', 'mouseup', 'mousemove', 'click', 'auxclick'])
+        canvas.addEventListener(type, e => window.events.push([type, e.clientX, e.clientY, e.button, e.buttons]));
+      document.addEventListener('keydown', e => {
+        window.held.push(e.code);
+        if (window.held.includes('ArrowRight') && window.held.includes('Space')) {
+          window.combo = true; window.holdStarted = performance.now();
+        }
+      });
+      document.addEventListener('keyup', e => {
+        if (e.code === 'Space') window.holdElapsed = performance.now() - window.holdStarted;
+        window.held = window.held.filter(key => key !== e.code);
+      });
+    </script>`)
+  const operation = { signal: new AbortController().signal, remainingMs: () => 5000 }
   const browser = await BrowserExecution.open({ state: { ...f.state, devServer: {
     command: process.execPath, args: [path.resolve('tests/fixtures/acceptance-server.mjs'), String(port)],
-    url: `http://127.0.0.1:${port}/`, readySelector: 'main',
+    url: `http://127.0.0.1:${port}/`, readySelector: 'canvas',
   } }, operation, executablePath: undefined, maxOutputBytes: 5000,
-    artifactRoot: path.dirname(f.store.file), identity: 'cancel-cycle', attempt: 1, nowMs: () => Date.now() })
+    artifactRoot: path.dirname(f.store.file), identity: 'game-input-cycle', attempt: 1, nowMs: () => Date.now() })
+  const obligation = { id: 'game-input', criterionId: 'T1:AC1', expected: 'Game receives mouse and simultaneous keyboard input', method: 'agent_browser' as const }
   try {
-    const timeout = setTimeout(() => controller.abort(new Error('Deadline exhausted')), 300)
-    const probe = await browser.probe({ id: 'cancel', criterionId: 'T1:AC1', expected: 'Observe result', method: 'agent_browser' },
-      [{ action: 'observe', expression: 'new Promise(() => {})' }], 'cancel-invocation', f.dependencies.browserProbeLimits)
-    clearTimeout(timeout)
-    assert.ok(probe.probeErrors.length)
-    assert.equal(browser.browser.contexts().length, 0)
-    assert.equal((JSON.parse(await fs.readFile(probe.artifact, 'utf8')) as BrowserProbe).id, probe.id)
+    const probe = await browser.probe(obligation, [
+      { action: 'click_at', x: 80, y: 90, button: 'left' },
+      { action: 'hold', keys: ['ArrowRight', 'Space'], durationMs: 30 },
+      { action: 'observe', expression: '({ combo: window.combo, held: window.held, elapsed: window.holdElapsed >= 20 })' },
+      { action: 'fixture', expression: 'window.events = []' },
+      { action: 'pointer', x: 100, y: 110 },
+      { action: 'mouse_down', button: 'left' },
+      { action: 'pointer', x: 140, y: 150 },
+      { action: 'mouse_up', button: 'left' },
+      { action: 'click_at', x: 160, y: 170, button: 'right' },
+      { action: 'click_at', x: 180, y: 190, button: 'middle' },
+      { action: 'observe', expression: 'window.events' },
+    ], 'game-input-invocation', f.dependencies.browserProbeLimits)
+    assert.deepEqual(probe.probeErrors, [])
+    assert.deepEqual(probe.runtimeErrors, [])
+    assert.deepEqual(probe.observations[0].value, { combo: true, held: [], elapsed: true })
+    const events = probe.observations.at(-1)?.value as unknown[][]
+    assert.ok(events.some(e => JSON.stringify(e) === JSON.stringify(['mousedown', 100, 110, 0, 1])))
+    assert.ok(events.some(e => e[0] === 'mousemove' && e[1] === 140 && e[2] === 150 && e[4] === 1))
+    assert.ok(events.some(e => JSON.stringify(e) === JSON.stringify(['mouseup', 140, 150, 0, 0])))
+    assert.ok(events.some(e => JSON.stringify(e) === JSON.stringify(['auxclick', 160, 170, 2, 0])))
+    assert.ok(events.some(e => JSON.stringify(e) === JSON.stringify(['auxclick', 180, 190, 1, 0])))
+    const artifact = JSON.parse(await fs.readFile(probe.artifact, 'utf8')) as BrowserProbe
+    assert.deepEqual(artifact.steps, probe.steps)
   } finally { await browser.close() }
 })
+
+test('real browser: resize and custom Playwright steps retain measurements and isolate pages', async t => {
+  const f = await fixture(t, 0)
+  const port = await availablePort()
+  await fs.writeFile(path.join(f.root, 'counter.html'), `
+    <style>
+      body { margin: 0; height: 100vh; display: grid; place-items: center; }
+      canvas { width: min(100vw, calc(100vh * 4 / 3)); height: auto; }
+      input { position: fixed; top: 0; left: 0; }
+    </style>
+    <canvas width="800" height="600"></canvas><input type="checkbox" aria-label="Enabled">`)
+  const operation = { signal: new AbortController().signal, remainingMs: () => 5000 }
+  const browser = await BrowserExecution.open({ state: { ...f.state, devServer: {
+    command: process.execPath, args: [path.resolve('tests/fixtures/acceptance-server.mjs'), String(port)],
+    url: `http://127.0.0.1:${port}/`, readySelector: 'canvas',
+  } }, operation, executablePath: undefined, maxOutputBytes: 5000,
+    artifactRoot: path.dirname(f.store.file), identity: 'resize-cycle', attempt: 1, nowMs: () => Date.now() })
+  const obligation = { id: 'resize', criterionId: 'T1:AC1', expected: 'Canvas stays centered and proportional after resize', method: 'agent_browser' as const }
+  const measure = `(() => {
+    const c = document.querySelector('canvas'), r = c.getBoundingClientRect();
+    return { viewport: [innerWidth, innerHeight], intrinsic: [c.width, c.height],
+      bounds: [r.x, r.y, r.width, r.height] };
+  })()`
+  try {
+    const probe = await browser.probe(obligation, [
+      { action: 'observe', expression: measure },
+      { action: 'resize', width: 900, height: 900 },
+      { action: 'observe', expression: measure },
+      { action: 'resize', width: 600, height: 900 },
+      { action: 'observe', expression: measure },
+      { action: 'resize', width: 1280, height: 720 },
+      { action: 'observe', expression: measure },
+      { action: 'playwright', code: `
+        await page.getByRole('checkbox', { name: 'Enabled' }).check({ timeout: timeoutMs });
+        return { checked: await page.getByRole('checkbox').isChecked(), budgetPositive: timeoutMs > 0 };
+      ` },
+      { action: 'observe', expression: "document.querySelector('input').checked" },
+      { action: 'capture', count: 1, intervalMs: 0 },
+    ], 'resize-invocation', f.dependencies.browserProbeLimits)
+    assert.deepEqual(probe.probeErrors, [])
+    assert.deepEqual(probe.runtimeErrors, [])
+    assert.deepEqual(probe.observations.map(o => o.value), [
+      { viewport: [1280, 720], intrinsic: [800, 600], bounds: [160, 0, 960, 720] },
+      { before: { width: 1280, height: 720 }, after: { width: 900, height: 900 } },
+      { viewport: [900, 900], intrinsic: [800, 600], bounds: [0, 112.5, 900, 675] },
+      { before: { width: 900, height: 900 }, after: { width: 600, height: 900 } },
+      { viewport: [600, 900], intrinsic: [800, 600], bounds: [0, 225, 600, 450] },
+      { before: { width: 600, height: 900 }, after: { width: 1280, height: 720 } },
+      { viewport: [1280, 720], intrinsic: [800, 600], bounds: [160, 0, 960, 720] },
+      { checked: true, budgetPositive: true }, true,
+    ])
+    assert.ok(probe.observations.every(o => o.id && o.timestamp))
+    assert.equal(probe.images.length, 1)
+    const artifact = JSON.parse(await fs.readFile(probe.artifact, 'utf8')) as BrowserProbe
+    assert.deepEqual(artifact.steps, probe.steps)
+    assert.deepEqual(artifact.observations, probe.observations)
+    const fresh = await browser.probe(obligation, [
+      { action: 'observe', expression: "document.querySelector('input').checked" },
+    ], 'resize-invocation', f.dependencies.browserProbeLimits)
+    assert.equal(fresh.observations[0].value, false)
+    for (const [code, error] of [
+      ['throw new Error("custom probe failed")', /custom probe failed/],
+      ['await page.title();', /must return JSON-serializable/],
+      ['const value = {}; value.self = value; return value;', /circular/i],
+      ['return await page.getByRole(', /Unexpected token/],
+    ] as const) {
+      const failed = await browser.probe(obligation, [
+        { action: 'playwright', code }, { action: 'observe', expression: 'true' },
+      ], 'resize-invocation', f.dependencies.browserProbeLimits)
+      assert.match(failed.probeErrors.join('\n'), error)
+      assert.equal(failed.observations.length, 0)
+      assert.equal(browser.browser.contexts().length, 0)
+    }
+  } finally { await browser.close() }
+})
+
+for (const step of [
+  { action: 'observe', expression: 'new Promise(() => {})' },
+  { action: 'playwright', code: 'return await new Promise(() => {});' },
+] satisfies BrowserStep[]) {
+  test(`real browser: deadline cancellation closes a never-resolving ${step.action} step`, async t => {
+    const f = await fixture(t, 0)
+    const port = await availablePort()
+    await fs.writeFile(path.join(f.root, 'counter.html'), '<main>Ready</main>')
+    const controller = new AbortController()
+    const operation = { signal: controller.signal, remainingMs: () => { controller.signal.throwIfAborted(); return 5000 } }
+    const browser = await BrowserExecution.open({ state: { ...f.state, devServer: {
+      command: process.execPath, args: [path.resolve('tests/fixtures/acceptance-server.mjs'), String(port)],
+      url: `http://127.0.0.1:${port}/`, readySelector: 'main',
+    } }, operation, executablePath: undefined, maxOutputBytes: 5000,
+      artifactRoot: path.dirname(f.store.file), identity: 'cancel-cycle', attempt: 1, nowMs: () => Date.now() })
+    try {
+      const timeout = setTimeout(() => controller.abort(new Error('Deadline exhausted')), 300)
+      const probe = await browser.probe({ id: 'cancel', criterionId: 'T1:AC1', expected: 'Observe result', method: 'agent_browser' },
+        [step], 'cancel-invocation', f.dependencies.browserProbeLimits)
+      clearTimeout(timeout)
+      assert.ok(probe.probeErrors.length)
+      assert.equal(browser.browser.contexts().length, 0)
+      assert.equal((JSON.parse(await fs.readFile(probe.artifact, 'utf8')) as BrowserProbe).id, probe.id)
+    } finally { await browser.close() }
+  })
+}
 
 async function manualFixture(t: TestContext) {
   const f = await fixture(t, 0)

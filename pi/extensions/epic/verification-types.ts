@@ -26,6 +26,11 @@ export type BrowserStep =
   | { action: 'click' | 'press'; selector: string; value: string }
   | { action: 'text' | 'visible'; selector: string; value: string }
   | { action: 'pointer'; x: number; y: number }
+  | { action: 'mouse_down' | 'mouse_up'; button: 'left' | 'middle' | 'right' }
+  | { action: 'click_at'; x: number; y: number; button: 'left' | 'middle' | 'right' }
+  | { action: 'hold'; keys: string[]; durationMs: number }
+  | { action: 'resize'; width: number; height: number }
+  | { action: 'playwright'; code: string }
   | { action: 'inspect' | 'observe' | 'fixture'; expression: string }
   | { action: 'key_down' | 'key_up'; key: string }
   | { action: 'wait'; durationMs: number }
