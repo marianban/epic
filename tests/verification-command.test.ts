@@ -3,10 +3,12 @@ import * as fs from 'node:fs/promises'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import test from 'node:test'
+import { SandboxManager } from '@anthropic-ai/sandbox-runtime'
 import { verifyCommand } from '../pi/extensions/epic/verification-command.ts'
+import { quoteProcessInvocation } from '../pi/extensions/epic/execution-sandbox.ts'
 import type { VerificationOperation } from '../pi/extensions/epic/verification-types.ts'
 
-test('acceptance assertions may reference dev scripts while installation remains blocked', async (t) => {
+test('acceptance assertions allow script references and arbitrary build output', async (t) => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'verification-command-'))
   t.after(() => fs.rm(root, { recursive: true, force: true }))
   await fs.writeFile(
@@ -41,9 +43,15 @@ test('acceptance assertions may reference dev scripts while installation remains
   const artifact = result.artifacts[0]
   assert.ok(artifact)
   assert.equal(JSON.parse(await fs.readFile(artifact, 'utf8')).exitCode, 0)
+  const build = await verifyCommand(
+    { ...obligation, command: "mkdir -p arbitrary/build-output && node -e \"const cp=require('child_process');cp.execFileSync('git',['--version']);require('fs').writeFileSync('arbitrary/build-output/result.txt','built')\"" },
+    root, root, 'attempt', 1, operation, 4096
+  )
+  assert.equal(build.outcome, 'pass')
+  assert.equal(await fs.readFile(path.join(root, 'arbitrary/build-output/result.txt'), 'utf8'), 'built')
   await assert.rejects(
     verifyCommand(
-      { ...obligation, command: 'npm install' },
+      { ...obligation, command: '   ' },
       root,
       root,
       'attempt',
@@ -51,6 +59,41 @@ test('acceptance assertions may reference dev scripts while installation remains
       operation,
       4096
     ),
-    /non-empty read-only check/
+    /non-empty string/
   )
+
+  await fs.mkdir(path.join(root, '.git'))
+  await fs.mkdir(path.join(root, '.pi', 'epics'), { recursive: true })
+  for (const protectedPath of ['.git/config', '.pi/epics/state.json', '.env']) {
+    const denied = await verifyCommand(
+      { ...obligation, command: quoteProcessInvocation(process.execPath, ['-e', `require('fs').writeFileSync(${JSON.stringify(protectedPath)}, 'forbidden')`]) },
+      root, root, 'attempt', 1, operation, 4096
+    )
+    assert.equal(denied.outcome, 'fail', protectedPath)
+    await assert.rejects(fs.access(path.join(root, protectedPath)))
+  }
+
+  // Use a sibling outside temporary directories, which are intentionally writable.
+  const outside = await fs.mkdtemp(path.join(process.cwd(), '.sandbox-boundary-'))
+  t.after(() => fs.rm(outside, { recursive: true, force: true }))
+  const sentinel = path.join(outside, 'keep.txt')
+  await fs.writeFile(sentinel, 'preserved')
+  const deletion = await verifyCommand(
+    { ...obligation, command: quoteProcessInvocation(process.execPath, ['-e', `require('fs').unlinkSync(${JSON.stringify(sentinel)})`]) },
+    root, root, 'attempt', 1, operation, 4096
+  )
+  assert.equal(deletion.outcome, 'fail')
+  assert.equal(await fs.readFile(sentinel, 'utf8'), 'preserved')
+
+  t.mock.method(SandboxManager, 'wrapWithSandbox', async () => {
+    throw new Error('Sandbox setup failed')
+  })
+  await assert.rejects(
+    verifyCommand(
+      { ...obligation, command: 'touch must-not-execute' },
+      root, root, 'attempt', 1, operation, 4096
+    ),
+    /Sandbox setup failed/
+  )
+  await assert.rejects(fs.access(path.join(root, 'must-not-execute')))
 })

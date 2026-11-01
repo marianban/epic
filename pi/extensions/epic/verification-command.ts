@@ -7,7 +7,8 @@ import type {
   VerificationOperation,
   AcceptanceEvidence,
 } from './verification-types.ts'
-import { isSafeReadOnlyCommand, redactSecrets } from './tools.ts'
+import { redactSecrets } from './tools.ts'
+import { wrapSandboxedInvocation } from './execution-sandbox.ts'
 
 export async function verifyCommand(
   obligation: VerificationObligation,
@@ -19,12 +20,20 @@ export async function verifyCommand(
   maxOutputBytes: number
 ): Promise<AcceptanceEvidence> {
   const command = obligation.command
-  if (!command || !isSafeReadOnlyCommand(command))
-    throw new Error('Acceptance command must be a non-empty read-only check.')
+  if (!command?.trim())
+    throw new Error('Acceptance command must be a non-empty string.')
   operation.signal.throwIfAborted()
+  const sandboxedInvocation = await wrapSandboxedInvocation(
+    root,
+    '/bin/sh',
+    ['-c', command],
+    operation.signal
+  )
+  operation.signal.throwIfAborted()
+  operation.remainingMs()
   const execution = await new Promise<{ code: number; output: string }>(
     (resolve, reject) => {
-      const child = spawn('/bin/sh', ['-c', command], {
+      const child = spawn('/bin/bash', ['-c', sandboxedInvocation], {
         cwd: root,
         detached: process.platform !== 'win32',
         env: { ...process.env, CI: '1' },

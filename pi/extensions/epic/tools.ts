@@ -6,9 +6,6 @@ const SECRET_PATHS = [
   /(?:id_rsa|id_ed25519|known_hosts|credentials|token|secret)/i,
   /[/\\]\.ssh([/\\]|$)/i,
 ]
-const DESTRUCTIVE_COMMANDS =
-  /\b(rm|mv|cp|mkdir|touch|chmod|chown|git\s+(add|commit|push|reset|checkout|branch|stash|merge|rebase)|npm\s+(install|publish)|pnpm\s+(add|install)|yarn\s+(add|install)|sudo|kill|shutdown)\b/i
-
 function isSecretPath(filePath: string): boolean {
   return SECRET_PATHS.some((pattern) => pattern.test(filePath))
 }
@@ -48,15 +45,6 @@ export function redactSecrets(value: string): string {
     .replace(/\b(sk-[A-Za-z0-9_-]{10,}|ghp_[A-Za-z0-9]{10,})\b/g, '[REDACTED]')
 }
 
-export function isSafeReadOnlyCommand(command: string): boolean {
-  return (
-    !DESTRUCTIVE_COMMANDS.test(command) &&
-    !/[;&|`]\s*(?:rm|mv|cp|npm\s+install|git\s+(?:commit|push|reset))/i.test(
-      command
-    )
-  )
-}
-
 /** Guard extension loaded into each role's child Pi process. */
 export default function epicToolGuard(pi: ExtensionAPI): void {
   const root = process.cwd()
@@ -89,15 +77,10 @@ export default function epicToolGuard(pi: ExtensionAPI): void {
     }
     if (event.toolName === 'bash') {
       const command = String(input.command ?? '')
-      if (role === 'implementer' && process.env.PI_EPIC_SANDBOX !== '1')
+      if (process.env.PI_EPIC_SANDBOX !== '1')
         return {
           block: true,
-          reason: 'implementer bash requires the OS sandbox.',
-        }
-      if (role !== 'implementer' && !isSafeReadOnlyCommand(command))
-        return {
-          block: true,
-          reason: `${role} may only run read-only commands.`,
+          reason: `${role} bash requires the OS sandbox.`,
         }
       if (/\.pi[/\\]epics/i.test(command))
         return {

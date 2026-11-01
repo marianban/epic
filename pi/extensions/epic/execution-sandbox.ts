@@ -32,14 +32,14 @@ export function canonicalTemporaryPaths(
   return [...paths]
 }
 
-export function isImplementerSandboxSupported(
+export function isExecutionSandboxSupported(
   platform = process.platform
 ): boolean {
   return platform === 'darwin' || platform === 'linux'
 }
 
-function implementerSandboxConfig(root: string): SandboxRuntimeConfig {
-  const repositoryRoot = path.resolve(root)
+function executionSandboxConfig(root: string): SandboxRuntimeConfig {
+  const repositoryRoot = realpathSync(root)
   return {
     // sandbox-runtime treats an omitted allowedDomains field as filesystem-only
     // isolation. Its public type currently requires the allowlist fields even
@@ -55,7 +55,7 @@ function implementerSandboxConfig(root: string): SandboxRuntimeConfig {
         path.join(repositoryRoot, '**', '*.pem'),
         path.join(repositoryRoot, '**', '*.key'),
       ],
-      // The implementer works in the repository as a whole. Task paths still
+      // Agents and verification commands work in the repository as a whole. Task paths still
       // describe the intended change and are validated after the run, but
       // they cannot be the sandbox's filesystem boundary because normal
       // workflows create derived files and directories such as node_modules.
@@ -90,38 +90,40 @@ export function quoteProcessInvocation(
 
 function missingDependencyMessage(): string {
   if (process.platform === 'darwin')
-    return 'Implementer sandbox requires ripgrep (rg) on macOS.'
-  return 'Implementer sandbox requires ripgrep (rg), bubblewrap (bwrap), and socat on Linux.'
+    return 'Execution sandbox requires ripgrep (rg) on macOS.'
+  return 'Execution sandbox requires ripgrep (rg), bubblewrap (bwrap), and socat on Linux.'
 }
 
-async function initializeImplementerSandbox(root: string): Promise<void> {
-  if (!isImplementerSandboxSupported()) {
+async function initializeExecutionSandbox(root: string): Promise<void> {
+  const repositoryRoot = realpathSync(root)
+  if (!isExecutionSandboxSupported()) {
     throw new Error(
-      `Implementer sandbox is only supported on macOS and Linux; native ${process.platform} is unsupported. Run Pi from WSL on Windows.`
+      `Execution sandbox is only supported on macOS and Linux; native ${process.platform} is unsupported. Run Pi from WSL on Windows.`
     )
   }
 
   if (
-    initializedRoot === path.resolve(root) &&
+    initializedRoot === repositoryRoot &&
     SandboxManager.isSandboxingEnabled()
   )
     return
 
-  if (!SandboxManager.checkDependencies({ command: 'rg' }))
-    throw new Error(missingDependencyMessage())
+  const dependencies = SandboxManager.checkDependencies({ command: 'rg' })
+  if (dependencies.errors.length)
+    throw new Error(`${missingDependencyMessage()} ${dependencies.errors.join('; ')}`)
 
   if (SandboxManager.isSandboxingEnabled()) await SandboxManager.reset()
-  await SandboxManager.initialize(implementerSandboxConfig(root))
-  initializedRoot = path.resolve(root)
+  await SandboxManager.initialize(executionSandboxConfig(repositoryRoot))
+  initializedRoot = repositoryRoot
 }
 
-export async function wrapImplementerInvocation(
+export async function wrapSandboxedInvocation(
   root: string,
   command: string,
   args: string[],
-  signal?: AbortSignal
+  signal: AbortSignal | undefined
 ): Promise<string> {
-  await initializeImplementerSandbox(root)
+  await initializeExecutionSandbox(root)
   return SandboxManager.wrapWithSandbox(
     quoteProcessInvocation(command, args),
     undefined,

@@ -22,12 +22,12 @@ import {
   implementationDiffArtifactPath,
   reviewResultArtifactPath,
 } from '../pi/extensions/epic/artifact-paths.ts'
-import { isImplementerSandboxSupported, quoteProcessInvocation } from '../pi/extensions/epic/implementer-sandbox.ts'
+import { isExecutionSandboxSupported, quoteProcessInvocation } from '../pi/extensions/epic/execution-sandbox.ts'
 import { formatDuration } from '../pi/extensions/epic/dashboard/formatting.ts'
 import { extractReviewInstructions, hashPlan, validatePlanCompleteness } from '../pi/extensions/epic/plan-review.ts'
 import { humanContinuation } from '../pi/extensions/epic/human-actions.ts'
 import { discoverPrerequisites, packageInstallCommand } from '../pi/extensions/epic/prerequisites.ts'
-import { assertRepositoryPath, isSafeReadOnlyCommand, redactSecrets } from '../pi/extensions/epic/tools.ts'
+import { assertRepositoryPath, redactSecrets } from '../pi/extensions/epic/tools.ts'
 import type { AgentRole, EpicDomainState, ResolvedEpicConfiguration } from '../pi/extensions/epic/types.ts'
 
 function domain(root: string): EpicDomainState {
@@ -57,9 +57,7 @@ test('path guards reject escapes, secrets, and epic managed paths', () => {
   assert.equal(assertRepositoryPath('/repo', 'src/file.ts'), '/repo/src/file.ts')
 })
 
-test('read-only command guard blocks mutations and secret redaction removes tokens', () => {
-  assert.equal(isSafeReadOnlyCommand('git status'), true)
-  assert.equal(isSafeReadOnlyCommand('git commit -m x'), false)
+test('secret redaction removes tokens', () => {
   assert.equal(redactSecrets('token=abc123 ghp_abcdefghijk'), 'token=[REDACTED] [REDACTED]')
 })
 
@@ -244,8 +242,8 @@ test('immutable artifacts fail instead of overwriting an existing result', async
 })
 
 test('sandbox capability is platform-specific and invocation quoting is shell-safe', () => {
-  assert.equal(isImplementerSandboxSupported('win32'), false)
-  assert.equal(isImplementerSandboxSupported('linux'), true)
+  assert.equal(isExecutionSandboxSupported('win32'), false)
+  assert.equal(isExecutionSandboxSupported('linux'), true)
   assert.equal(quoteProcessInvocation('pi', ['a b', "x'y"]), "'pi' 'a b' 'x'\\''y'")
 })
 
@@ -361,11 +359,7 @@ test('task artifact path starts with task one at index zero', () => {
 })
 
 test('sandbox support includes macOS', () => {
-  assert.equal(isImplementerSandboxSupported('darwin'), true)
-})
-
-test('read-only command guard accepts a simple test command', () => {
-  assert.equal(isSafeReadOnlyCommand('npm test'), true)
+  assert.equal(isExecutionSandboxSupported('darwin'), true)
 })
 
 test('secret redaction handles password assignments', () => {

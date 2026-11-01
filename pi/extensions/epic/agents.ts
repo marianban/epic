@@ -13,7 +13,7 @@ import type {
 } from './types.ts'
 import { createAgentRunStdoutLog } from './agent-runs.ts'
 import { redactSecrets } from './tools.ts'
-import { wrapImplementerInvocation } from './implementer-sandbox.ts'
+import { wrapSandboxedInvocation } from './execution-sandbox.ts'
 import { stripProtocolImageData } from './agent-image-log.ts'
 
 export interface AgentRunResult {
@@ -356,30 +356,25 @@ export async function runAgent(
     throw new Error(`Agent timeout must be a positive integer: ${timeoutMs}`)
   }
   const invocation = getPiInvocation(args)
-  let childCommand = invocation.command
-  let childArgs = invocation.args
   const childEnv: NodeJS.ProcessEnv = { ...process.env, PI_EPIC_ROLE: role }
   if (options.bridge) { childEnv.PI_EPIC_BROWSER_URL = options.bridge.url; childEnv.PI_EPIC_BROWSER_TOKEN = options.bridge.token }
-  if (role === 'implementer') {
-    try {
-      const sandboxedInvocation = await wrapImplementerInvocation(
-        root,
-        invocation.command,
-        invocation.args,
-        options.signal
-      )
-      childCommand = '/bin/bash'
-      childArgs = ['-c', sandboxedInvocation]
-      childEnv.PI_EPIC_SANDBOX = '1'
-      childEnv.npm_config_cache = path.join(promptDir, 'npm-cache')
-    } catch (error) {
-      await fs.rm(promptDir, { recursive: true, force: true })
-      throw error
-    }
+  let sandboxedInvocation: string
+  try {
+    sandboxedInvocation = await wrapSandboxedInvocation(
+      root,
+      invocation.command,
+      invocation.args,
+      options.signal
+    )
+    childEnv.PI_EPIC_SANDBOX = '1'
+    childEnv.npm_config_cache = path.join(promptDir, 'npm-cache')
+  } catch (error) {
+    await fs.rm(promptDir, { recursive: true, force: true })
+    throw error
   }
   const stdoutLog = createAgentRunStdoutLog(options.agentRunDirectory, role)
   return new Promise((resolve, reject) => {
-    const child = spawn(childCommand, childArgs, {
+    const child = spawn('/bin/bash', ['-c', sandboxedInvocation], {
       cwd: root,
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],
