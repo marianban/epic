@@ -16,6 +16,9 @@ import type {
   DevServerDiagnostics,
 } from './types.ts'
 import { validateBrowserStep } from './verification-plan.ts'
+import { executeBrowserStep } from './browser-steps.ts'
+import { runBrowserProbe } from './browser-probe.ts'
+import type { BrowserProbeLimits } from './browser-evidence-types.ts'
 
 export interface BrowserExecutionInput {
   state: EpicDomainState
@@ -219,6 +222,10 @@ export class BrowserExecution {
       ],
     }
   }
+  probe(obligation: VerificationObligation, steps: BrowserStep[], invocationId: string, limits: BrowserProbeLimits) {
+    return runBrowserProbe({ browser: this.browser, execution: this.input, obligation, steps, invocationId, limits,
+      ready: (page) => this.ready(page), monitor: (page, errors) => this.monitor(page, errors) })
+  }
   async scenario(
     obligation: VerificationObligation,
     steps: BrowserStep[]
@@ -243,37 +250,14 @@ export class BrowserExecution {
       await this.ready(page)
       for (const step of steps) {
         this.input.operation.signal.throwIfAborted()
-        const timeout = this.input.operation.remainingMs()
-        if (step.action === 'click')
-          await page.locator(step.selector).click({ timeout })
-        else if (step.action === 'press')
-          await page.locator(step.selector).press(step.value, { timeout })
-        else if (step.action === 'pointer')
-          await page.mouse.move(step.x, step.y)
-        else if (step.action === 'visible') {
-          await page
-            .locator(step.selector)
-            .waitFor({ state: 'visible', timeout })
-          asserted = true
-        } else if (step.action === 'text') {
-          await page.waitForFunction(
-            ({ selector, value }) =>
-              document.querySelector(selector)?.textContent === value,
-            step,
-            { timeout }
-          )
-          observations.push(await page.locator(step.selector).textContent())
-          asserted = true
-        } else if (step.action === 'inspect' || step.action === 'observe' || step.action === 'fixture') {
-          const value = await page.evaluate(step.expression)
-          observations.push(value)
-          if (step.action === 'inspect') {
-            if (value !== true)
-              errors.push(
-                `Inspection assertion expected true, returned ${JSON.stringify(value)}.`
-              )
-            else asserted = true
-          }
+        if (step.action === 'capture')
+          throw new Error('Adaptive image capture belongs to agent_browser probes.')
+        const observation = await executeBrowserStep(page, step, this.input.operation)
+        if (observation) {
+          observations.push(observation.value)
+          if (observation.passed === false)
+            errors.push(`Inspection assertion expected true, returned ${JSON.stringify(observation.value)}.`)
+          if (observation.passed === true) asserted = true
         }
         // Surface interaction exceptions before waiting on an impossible outcome.
         if (errors.length) break

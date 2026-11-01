@@ -65,3 +65,20 @@ test('agent run logs preserve retained bytes across chunk and UTF-8 boundaries',
 
   assert.equal(output, `${retained}${trailing}`)
 })
+
+test('agent diagnostics omit image payloads and retain evidence metadata', async () => {
+  const { AgentOutputCollector } = await import('../pi/extensions/epic/agents.ts')
+  const record = { type: 'tool_execution_end', result: {
+    content: [{ type: 'text', text: 'Image evidence ID: frame-1' }, { type: 'image', mimeType: 'image/png', data: 'PRIVATE_BITMAP_PAYLOAD' }],
+    details: { id: 'probe-1', images: [{ id: 'frame-1', path: '/artifacts/frame.png' }] },
+  } }
+  const line = `${JSON.stringify(record)}\n`
+  const chunks = [Buffer.from(line.slice(0, 100)), Buffer.from(line.slice(100))]
+  const output = await capture(chunks)
+  assert.doesNotMatch(output, /PRIVATE_BITMAP_PAYLOAD/)
+  assert.match(output, /frame-1/)
+  assert.match(output, /frame.png/)
+  const collector = new AgentOutputCollector()
+  chunks.forEach(chunk => collector.append(chunk))
+  assert.doesNotMatch(collector.finish().diagnosticTail, /PRIVATE_BITMAP_PAYLOAD/)
+})

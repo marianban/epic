@@ -172,6 +172,21 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
         (e) =>
           `  - ${e.obligationId}: ${e.outcome}${e.gap ? ` (${e.gap})` : ''}. Expected: ${e.expected}. Observed: ${e.actual}${e.reproduction ? ` Reproduce: ${e.reproduction}` : ''}. ${e.artifacts.map((p) => `[evidence](${p})`).join(' ')}`
       ),
+      ...c.evidence.flatMap(e => e.conclusion ? [
+        `  - Conclusion ${e.conclusion.id} (${e.conclusion.basis}): ${e.conclusion.explanation}`,
+        `  - Cited evidence: ${e.conclusion.evidenceIds.join(', ') || 'none'}. Limitations: ${e.conclusion.limitations.join('; ') || 'none'}.`,
+        ...(e.conclusion.temporalComparison ? [`  - Temporal comparison: ${e.conclusion.temporalComparison}`] : []),
+        ...(e.conclusion.separateExecutions ? [`  - Separate executions: ${e.conclusion.separateExecutions}`] : []),
+      ] : []),
+    ]),
+    '',
+    '## Browser probes (each ran on a fresh page)',
+    ...(report.cycle?.probes ?? []).flatMap(p => [
+      `- [Probe ${p.id}](${p.artifact}), obligation ${p.obligationId}, invocation ${p.invocationId}, ${p.startedAt}–${p.completedAt}.`,
+      ...p.observations.map(o => `  - ${o.id} at ${o.timestamp}: ${o.kind}, ${JSON.stringify(o.value)}${o.passed === undefined ? '' : ` (assertion ${o.passed ? 'passed' : 'failed'})`}`),
+      ...p.images.map(i => `  - [Image ${i.id}](${i.path}) at ${i.timestamp}, ${i.width}×${i.height}${i.selector ? `, crop ${i.selector}` : ''}.`),
+      ...p.runtimeErrors.map(e => `  - Application/runtime error: ${e}`),
+      ...p.probeErrors.map(e => `  - Probe error: ${e}`),
     ]),
     '',
     '## Checks and remaining issues',

@@ -4,6 +4,7 @@ import type {
   EpicDomainState,
   ReviewResult,
 } from './types.ts'
+import type { BrowserProbe, RecordedBrowserConclusion } from './browser-evidence-types.ts'
 
 export type VerificationMethod =
   'automated' | 'agent_browser' | 'static' | 'human_only'
@@ -20,6 +21,9 @@ export type BrowserStep =
   | { action: 'text' | 'visible'; selector: string; value: string }
   | { action: 'pointer'; x: number; y: number }
   | { action: 'inspect' | 'observe' | 'fixture'; expression: string }
+  | { action: 'key_down' | 'key_up'; key: string }
+  | { action: 'wait'; durationMs: number }
+  | { action: 'capture'; selector?: string; count: number; intervalMs: number }
 export interface VerificationObligation {
   id: string
   criterionId: string
@@ -50,6 +54,7 @@ export interface AcceptanceEvidence {
   /** Verification attempt identifier, independent of candidate file contents. */
   identity: string
   reproduction?: string
+  conclusion?: RecordedBrowserConclusion
 }
 export interface VerificationCycle {
   id: string
@@ -66,6 +71,7 @@ export interface VerificationCycle {
   state: EpicDomainState
   plan?: VerificationPlan
   invalidated?: string
+  probes?: BrowserProbe[]
 }
 export interface AllowanceGrant {
   repairs: number
@@ -168,7 +174,7 @@ export interface HumanReviewReport {
 export interface VerificationOperation {
   signal: AbortSignal
   remainingMs(): number
-  bridge?: { url: string; token: string }
+  bridge?: { url: string; token: string; invocationId: string }
 }
 export type TaskDecisionRequest =
   | { kind: 'approve' }

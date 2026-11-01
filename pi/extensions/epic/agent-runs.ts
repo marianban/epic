@@ -3,6 +3,7 @@ import { closeSync, fsyncSync, mkdirSync, openSync, writeSync } from 'node:fs'
 import * as path from 'node:path'
 import { StringDecoder } from 'node:string_decoder'
 import { shouldPersistAgentRunLogLine } from './agent-run-log-records.ts'
+import { stripProtocolImageData } from './agent-image-log.ts'
 
 const FLUSH_BYTES = 64 * 1024
 const FLUSH_INTERVAL_MS = 250
@@ -26,7 +27,7 @@ function writeAll(fileDescriptor: number, chunk: Buffer): void {
 /**
  * Create a private, per-invocation diagnostic log. Complete JSONL records that
  * duplicate terminal protocol events are discarded; retained records are
- * written unchanged and periodically synced so a parent-process crash leaves
+ * written with image payloads omitted and periodically synced so a parent-process crash leaves
  * an inspectable log.
  */
 export function createAgentRunStdoutLog(
@@ -46,7 +47,7 @@ export function createAgentRunStdoutLog(
   let pendingLine = ''
   const persist = (line: string) => {
     if (!shouldPersistAgentRunLogLine(line)) return
-    const chunk = Buffer.from(line, 'utf8')
+    const chunk = Buffer.from(stripProtocolImageData(line), 'utf8')
     writeAll(fileDescriptor, chunk)
     bytesSinceSync += chunk.length
     if (bytesSinceSync >= FLUSH_BYTES) sync()

@@ -63,10 +63,11 @@ export function summarizeVerificationCycle(cycle: VerificationCycle) {
     evidence: cycle.evidence.map((evidence) => ({
       ...evidence,
       actual:
-        evidence.outcome === 'pass' && evidence.artifacts.length
+        evidence.outcome === 'pass' && evidence.artifacts.length && !evidence.conclusion
           ? 'Passed; see evidence artifact.'
           : preview(evidence.actual),
     })),
+    probes: cycle.probes,
     review: cycle.review,
     problems: cycle.problems,
     artifacts: cycle.artifacts,

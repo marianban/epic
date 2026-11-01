@@ -61,6 +61,8 @@ export async function validateAcceptanceEvidence(
         throw new Error('Unsupported success/failure claim.')
       if (result.method === 'human_only' && result.outcome !== 'unverified')
         throw new Error('Human confirmation must be a recorded user decision.')
+      if (result.method === 'agent_browser' && !result.conclusion)
+        throw new Error('Browser acceptance requires an explicit recorded conclusion.')
       for (const artifact of result.artifacts) {
         if (typeof artifact !== 'string')
           throw new Error('Invalid artifact reference.')
@@ -73,6 +75,7 @@ export async function validateAcceptanceEvidence(
           obligationId?: string
           outcome?: string
           attachments?: string[]
+          conclusion?: AcceptanceEvidence['conclusion']
         }
         if (
           data.identity !== identity ||
@@ -83,6 +86,8 @@ export async function validateAcceptanceEvidence(
           throw new Error(
             'Artifact does not establish the claimed observation.'
           )
+        if (result.method === 'agent_browser' && JSON.stringify(data.conclusion) !== JSON.stringify(result.conclusion))
+          throw new Error('Conclusion differs from its immutable artifact.')
         if (
           JSON.stringify(data.attachments) !==
           JSON.stringify(result.attachments)

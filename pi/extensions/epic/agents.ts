@@ -14,6 +14,7 @@ import type {
 import { createAgentRunStdoutLog } from './agent-runs.ts'
 import { redactSecrets } from './tools.ts'
 import { wrapImplementerInvocation } from './implementer-sandbox.ts'
+import { stripProtocolImageData } from './agent-image-log.ts'
 
 export interface AgentRunResult {
   role: AgentRole
@@ -171,12 +172,6 @@ export class AgentOutputCollector {
   private model: string | undefined
 
   append(chunk: Buffer): void {
-    const text = chunk.toString('utf8')
-    this.diagnosticTail = appendTail(
-      this.diagnosticTail,
-      text,
-      MAX_STDOUT_DIAGNOSTIC_CHARS
-    )
     this.consume(this.decoder.write(chunk))
   }
 
@@ -215,6 +210,7 @@ export class AgentOutputCollector {
   }
 
   private processLine(line: string): void {
+    this.diagnosticTail = appendTail(this.diagnosticTail, `${stripProtocolImageData(line)}\n`, MAX_STDOUT_DIAGNOSTIC_CHARS)
     if (!line.trim()) return
     let event: unknown
     try {
@@ -342,7 +338,7 @@ export async function runAgent(
     '-e',
     guard,
     '--tools',
-    [...profile.tools, ...(options.bridge ? ['browser_verify'] : [])].join(','),
+    [...profile.tools, ...(options.bridge ? ['browser_verify', 'browser_conclude'] : [])].join(','),
   ]
   if (options.bridge) args.push('-e', path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'verifier-tools.ts'))
   if (profile.provider) args.push('--provider', profile.provider)

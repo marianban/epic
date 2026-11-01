@@ -761,6 +761,7 @@ export function createEpicServices(
           clock,
           timer: dependencies.timer,
           executablePath: configuration.checks.browserSmoke.executablePath,
+          browserProbeLimits: { maxFrames: 12, maxCaptureDurationMs: 10_000 },
           maxOutputBytes: configuration.maxOutputBytes,
           checks: (current, suite, operation) =>
             this.checks(current, suite, operation),
@@ -785,12 +786,14 @@ export function createEpicServices(
           repair: (current, feedback, operation) =>
             this.implement(current, feedback, operation),
           explore: async (current, plan, operation, errors) => {
-            const run = await runRole(
+            if (!operation.bridge) throw new Error('Verifier requires an invocation-bound browser bridge.')
+            const run = await runRoleInvocation(
               current,
               'verifier',
               browserVerificationPrompt(plan, errors),
               'browser acceptance verification',
               current.tasks?.[current.currentTaskIndex]?.id,
+              operation.bridge.invocationId,
               operation
             )
             if (run.exitCode !== 0)

@@ -10,3 +10,5 @@ Return valid JSON only:
 "acceptanceCriteria": [{"criterion":"","status":"met | partially_met | not_met | manual_review_pending","evidence":""}],
 "findings": [{"severity":"blocker | major | minor | suggestion","category":"","file":"","lineStart":0,"lineEnd":0,"symbol":"","message":"","failureScenario":"","requiredFix":"","affectedPaths":["exact repository-relative path"],"repairPaths":["exact safe repository-relative path"]}]
 }
+
+Inspect the actual browser probe steps, recorded observations, image artifacts, conclusions, and limitations. Ask whether a probe would also pass if the required behavior were broken. A recorded pass label, unconditional assertion, canvas presence, or successful screenshot capture is not sufficient behavioral proof. Distinguish observed facts from the verifier's interpretation. Do not cite unsupported passes as established behavior; describe evidence gaps honestly while continuing code review. Missing evidence alone is not an actionable application defect and must not trigger implementation repairs.

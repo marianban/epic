@@ -1,5 +1,12 @@
 import { createServer } from 'node:http'
 import { randomBytes } from 'node:crypto'
+import { concludeBrowserProbe } from './browser-conclusion.ts'
+import { browserProbeResponse } from './browser-image-transport.ts'
+import type {
+  BrowserProbe,
+  BrowserProbeLimits,
+  BrowserConclusion,
+} from './browser-evidence-types.ts'
 import type { BrowserExecution } from './browser-execution.ts'
 import type {
   VerificationPlan,
@@ -9,7 +16,12 @@ import type {
 
 export async function openBrowserBridge(
   scope: BrowserExecution,
-  plan: VerificationPlan
+  plan: VerificationPlan,
+  options: {
+    invocationId: string
+    probes: BrowserProbe[]
+    limits: BrowserProbeLimits
+  }
 ): Promise<{
   url: string
   token: string
@@ -22,7 +34,7 @@ export async function openBrowserBridge(
   const server = createServer(async (request, response) => {
     if (
       request.method !== 'POST' ||
-      request.url !== '/scenario' ||
+      !['/scenario', '/conclude'].includes(request.url ?? '') ||
       request.headers.authorization !== `Bearer ${token}`
     ) {
       response.writeHead(403).end()
@@ -42,20 +54,54 @@ export async function openBrowserBridge(
       const input = JSON.parse(body) as {
         obligationId: string
         steps: BrowserStep[]
+        conclusion?: BrowserConclusion
       }
       const obligation = plan.obligations.find(
         (o) => o.id === input.obligationId && o.method === 'agent_browser'
       )
       if (!obligation) throw new Error('Unknown browser obligation.')
-      const result = await scope.scenario(obligation, input.steps)
-      const prior = evidence.findIndex(
-        (e) => e.obligationId === result.obligationId
-      )
-      if (prior >= 0) evidence.splice(prior, 1)
-      evidence.push(result)
-      response
-        .writeHead(200, { 'content-type': 'application/json' })
-        .end(JSON.stringify(result))
+      scope.input.operation.remainingMs()
+      if (request.url === '/conclude') {
+        if (
+          !input.conclusion ||
+          input.conclusion.obligationId !== obligation.id
+        )
+          throw new Error('Conclusion must identify the requested obligation.')
+        const result = await concludeBrowserProbe({
+          conclusion: input.conclusion,
+          obligation,
+          probes: options.probes,
+          invocationId: options.invocationId,
+          identity: scope.input.identity,
+          attempt: scope.input.attempt,
+          artifactRoot: scope.input.artifactRoot,
+          nowMs: scope.input.nowMs,
+        })
+        const prior = evidence.findIndex(
+          (e) => e.obligationId === result.obligationId
+        )
+        if (prior >= 0) evidence.splice(prior, 1)
+        evidence.push(result)
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify(result))
+      } else {
+        const probe = await scope.probe(
+          obligation,
+          input.steps,
+          options.invocationId,
+          options.limits
+        )
+        options.probes.push(probe)
+        // A new probe invalidates a prior conclusion for this obligation until explicitly concluded again.
+        const prior = evidence.findIndex(
+          (e) => e.obligationId === obligation.id
+        )
+        if (prior >= 0) evidence.splice(prior, 1)
+        response
+          .writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify(await browserProbeResponse(probe)))
+      }
     } catch (error) {
       response.writeHead(400).end(
         JSON.stringify({

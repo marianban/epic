@@ -1,3 +1,4 @@
+import type { BrowserProbeLimits } from './browser-evidence-types.ts'
 import { summarizeVerificationCycle } from './verification-summary.ts'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -30,6 +31,7 @@ export interface VerificationDependencies {
   timer: EpicTimer
   executablePath: string | undefined
   maxOutputBytes: number
+  browserProbeLimits: BrowserProbeLimits
   checks(
     state: EpicDomainState,
     suite: 'fast' | 'full',
@@ -278,39 +280,41 @@ export async function runTaskVerification(
           }
           if (plan.obligations.some((o) => o.method === 'agent_browser')) {
             if (browser) {
-              const bridge = await openBrowserBridge(browser, plan)
+              const scope = browser
+              const probes: NonNullable<VerificationCycle['probes']> = []
+              cycle.probes = probes
               let errors: string[] = []
               try {
                 await retry(async () => {
-                  await dependencies.explore(
-                    state,
-                    plan,
-                    { ...operation, bridge },
-                    errors
-                  )
-                  const validated = await validateAcceptanceEvidence(
-                    bridge.evidence,
-                    {
-                      ...plan,
-                      obligations: plan.obligations.filter(
-                        (o) => o.method === 'agent_browser'
-                      ),
-                    },
-                    identity,
-                    cycle.attempt,
-                    root
-                  )
-                  errors = validated.problems
-                  if (errors.length)
-                    throw new Error(
-                      `Invalid verifier evidence: ${errors.join(' ')}`
+                  const invocationId = randomUUID()
+                  const bridge = await openBrowserBridge(scope, plan, {
+                    invocationId, probes, limits: dependencies.browserProbeLimits,
+                  })
+                  // A new invocation must establish its own conclusions; never reuse
+                  // a prior pass when a later probe fails or remains inconclusive.
+                  cycle.evidence = cycle.evidence.filter(e => e.method !== 'agent_browser')
+                  try {
+                    await dependencies.explore(state, plan, { ...operation, bridge: { ...bridge, invocationId } }, errors)
+                    const validated = await validateAcceptanceEvidence(
+                      bridge.evidence,
+                      { ...plan, obligations: plan.obligations.filter(o => o.method === 'agent_browser') },
+                      identity, cycle.attempt, root
                     )
+                    errors = validated.problems
+                    if (errors.length) throw new Error(`Invalid verifier evidence: ${errors.join(' ')}`)
+                  } finally {
+                    for (const evidence of bridge.evidence) {
+                      cycle.evidence = cycle.evidence.filter(e => e.obligationId !== evidence.obligationId)
+                      cycle.evidence.push(evidence)
+                    }
+                    cycle.artifacts.push(...probes.flatMap(p => [p.artifact, ...p.images.map(i => i.path), ...(p.trace ? [p.trace] : [])]))
+                    cycle.artifacts.push(...bridge.evidence.flatMap(e => e.artifacts))
+                    await bridge.close()
+                    await store.write(record)
+                  }
                 })
               } catch (error) {
                 cycle.problems.push(`Verifier exploration: ${errorText(error)}`)
-              } finally {
-                cycle.evidence.push(...bridge.evidence)
-                await bridge.close()
               }
             } else {
               const actual =

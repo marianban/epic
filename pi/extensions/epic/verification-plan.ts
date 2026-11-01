@@ -204,6 +204,17 @@ export function validateBrowserStep(
         )
   } else if (action === 'inspect' || action === 'observe' || action === 'fixture') {
     nonEmptyString(value.expression, `${path}.expression`)
+  } else if (action === 'key_down' || action === 'key_up') {
+    nonEmptyString(value.key, `${path}.key`)
+  } else if (action === 'wait') {
+    if (!Number.isSafeInteger(value.durationMs) || (value.durationMs as number) < 0)
+      reject(`${path}.durationMs`, 'invalid_duration', 'a non-negative integer', value.durationMs)
+  } else if (action === 'capture') {
+    if (value.selector !== undefined) nonEmptyString(value.selector, `${path}.selector`)
+    if (!Number.isSafeInteger(value.count) || (value.count as number) < 1)
+      reject(`${path}.count`, 'invalid_count', 'a positive integer', value.count)
+    if (!Number.isSafeInteger(value.intervalMs) || (value.intervalMs as number) < 0 || ((value.count as number) > 1 && value.intervalMs === 0))
+      reject(`${path}.intervalMs`, 'invalid_interval', 'a positive interval for sequences, or zero for a single frame', value.intervalMs)
   } else
     reject(
       `${path}.action`,

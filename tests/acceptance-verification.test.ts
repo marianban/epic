@@ -30,6 +30,8 @@ import {
 } from '../pi/extensions/epic/verification-decisions.ts'
 import { BrowserExecution } from '../pi/extensions/epic/browser-execution.ts'
 import { openBrowserBridge } from '../pi/extensions/epic/browser-bridge.ts'
+import type { BrowserProbe, BrowserProbeResponse } from '../pi/extensions/epic/browser-evidence-types.ts'
+import type { ToolDefinition } from '@earendil-works/pi-coding-agent'
 import { resolveEpicConfiguration } from '../pi/extensions/epic/configuration.ts'
 import verifierTools from '../pi/extensions/epic/verifier-tools.ts'
 import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
@@ -112,6 +114,7 @@ async function fixture(t: TestContext, repairs = 3, clock = realClock) {
     timer,
     executablePath: undefined,
     maxOutputBytes: 5000,
+    browserProbeLimits: { maxFrames: 12, maxCaptureDurationMs: 10_000 },
     checks: async (current, suite, operation) => {
       assert.ok(operation.remainingMs() > 0)
       calls.push(suite)
@@ -974,7 +977,7 @@ test('real browser: verifier corrects a CSS probe without spending an implementa
   }
   f.record.plan = { ...f.plan, obligations: [obligation] }
   await f.store.write(f.record)
-  const attempts: AcceptanceEvidence[] = []
+  const attempts: BrowserProbe[] = []
   f.dependencies.explore = async (_current, plan, operation) => {
     assert.deepEqual(plan.obligations, [obligation])
     assert.ok(operation.bridge)
@@ -989,23 +992,31 @@ test('real browser: verifier corrects a CSS probe without spending an implementa
         body: JSON.stringify({ obligationId: obligation.id, steps: [step] }),
       })
       assert.equal(response.status, 200)
-      attempts.push(await response.json() as AcceptanceEvidence)
+      attempts.push((await response.json() as BrowserProbeResponse).probe)
     }
+    const response = await fetch(new URL('/conclude', operation.bridge.url), {
+      method: 'POST', headers: { authorization: `Bearer ${operation.bridge.token}` },
+      body: JSON.stringify({ obligationId: obligation.id, conclusion: {
+        obligationId: obligation.id, outcome: 'pass', basis: 'observations',
+        evidenceIds: [attempts[2].observations[0].id],
+        explanation: 'All four computed margin sides are zero pixels.', limitations: [],
+      } }),
+    })
+    assert.equal(response.status, 200, await response.text())
   }
   await runTaskVerification(state, new AbortController().signal, f.dependencies)
-  assert.deepEqual(attempts.map((e) => e.outcome), ['fail', 'unverified', 'pass'])
-  assert.match(attempts[1]?.actual ?? '', /0px/)
-  for (const attempt of attempts) {
-    const artifactPath = attempt.artifacts[0]
-    assert.ok(artifactPath)
-    const artifact = JSON.parse(await fs.readFile(artifactPath, 'utf8'))
-    assert.equal(artifact.outcome, attempt.outcome)
+  assert.deepEqual(attempts.map(p => p.observations[0]?.passed), [false, undefined, true])
+  assert.equal(attempts[1]?.observations[0]?.value, '0px')
+  for (const probe of attempts) {
+    const artifact = JSON.parse(await fs.readFile(probe.artifact, 'utf8'))
+    assert.equal(artifact.id, probe.id)
   }
   const record = await f.store.read()
   assert.equal(record.report?.readiness, 'verified')
   assert.equal(record.cycles.length, 1)
   assert.equal(record.report?.usage.repairs, 0)
-  assert.deepEqual(record.cycles[0]?.evidence, [attempts[2]])
+  assert.equal(record.cycles[0]?.evidence[0]?.outcome, 'pass')
+  assert.equal(record.cycles[0]?.probes?.length, 3)
   assert.deepEqual(f.calls, ['fast', 'full', 'review'])
 })
 
@@ -1098,7 +1109,7 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
     ...f.record.plan,
     obligations: [{ ...obligation, method: 'agent_browser' as const }],
   }
-  const bridge = await openBrowserBridge(browser, plan)
+  const bridge = await openBrowserBridge(browser, plan, { invocationId: 'test-invocation', probes: [], limits: f.dependencies.browserProbeLimits })
   try {
     assert.equal(
       (await fetch(bridge.url, { method: 'POST', body: '{}' })).status,
@@ -1114,8 +1125,17 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
         }),
       })
       assert.equal(response.status, 200)
-      const observed = (await response.json()) as AcceptanceEvidence
-      assert.equal(observed.outcome, 'pass')
+      const probe = (await response.json() as BrowserProbeResponse).probe
+      assert.equal(probe.observations[0]?.value, '1')
+      const concluded = await fetch(new URL('/conclude', bridge.url), {
+        method: 'POST', headers: { authorization: `Bearer ${bridge.token}` },
+        body: JSON.stringify({ obligationId: 'counter', conclusion: {
+          obligationId: 'counter', outcome: 'pass', basis: 'observations',
+          evidenceIds: [probe.observations[0].id], explanation: 'One real click produced count 1 from a fresh page.', limitations: [],
+        } }),
+      })
+      assert.equal(concluded.status, 200)
+      const observed = await concluded.json() as AcceptanceEvidence
       const validated = await validateAcceptanceEvidence(
         [observed],
         plan,
@@ -1139,6 +1159,7 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
     if (explorations === 1) return // Incomplete verifier output consumes the shared retry.
     assert.ok(errors.some((e) => e.includes('missing valid evidence')))
     assert.ok(operation.bridge)
+    const toolBridge = operation.bridge
     const previousUrl = process.env.PI_EPIC_BROWSER_URL
     const previousToken = process.env.PI_EPIC_BROWSER_TOKEN
     process.env.PI_EPIC_BROWSER_URL = operation.bridge.url
@@ -1147,15 +1168,26 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
     try {
       verifierTools({
         registerTool: (tool) => {
+          if (tool.name !== 'browser_verify') return
+          assert.equal(tool.executionMode, 'sequential')
           executeTool = async () => {
             const result = await tool.execute(
               'verification-tool',
               { obligationId: 'counter', steps: obligation.steps } as never,
               operation.signal,
               undefined,
-              {} as never
+              { model: { input: ['text', 'image'] } } as never
             )
             assert.equal(result.content[0]?.type, 'text')
+            const probe = JSON.parse(result.content[0].text) as BrowserProbe
+            const conclusion = await fetch(new URL('/conclude', toolBridge.url), {
+              method: 'POST', headers: { authorization: `Bearer ${toolBridge.token}` },
+              body: JSON.stringify({ obligationId: 'counter', conclusion: {
+                obligationId: 'counter', outcome: 'pass', basis: 'observations', evidenceIds: [probe.observations[0].id],
+                explanation: 'Click increments count to 1 on a fresh page.', limitations: [],
+              } }),
+            })
+            assert.equal(conclusion.status, 200)
           }
         },
       } as ExtensionAPI)
@@ -1184,6 +1216,103 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
     agentVerified.invocations.filter((i) => i.kind === 'infrastructure').length,
     1
   )
+})
+
+test('real browser: adaptive canvas images, held keys, timed frames and explicit conclusions', async t => {
+  const f = await fixture(t, 0)
+  const port = await availablePort()
+  await fs.writeFile(path.join(f.root, 'counter.html'), `
+    <main><canvas width="160" height="100" tabindex="0"></canvas></main>
+    <script>
+      window.x = 20; const canvas = document.querySelector('canvas');
+      const context = canvas.getContext('2d');
+      function draw() { context.fillStyle = '#101020'; context.fillRect(0, 0, 160, 100);
+        context.fillStyle = '#ff0000'; context.fillRect(window.x, 60, 20, 10); }
+      document.addEventListener('keydown', e => { if(e.key === 'ArrowRight') { window.x += 30; draw(); } }); draw();
+    </script>`)
+  const state = { ...f.state, devServer: { command: process.execPath,
+    args: [path.resolve('tests/fixtures/acceptance-server.mjs'), String(port)], url: `http://127.0.0.1:${port}/`, readySelector: 'canvas' } }
+  const obligation = { id: 'paddle', criterionId: 'T1:AC1', expected: 'Right moves the red paddle right', method: 'agent_browser' as const }
+  f.record.plan = { ...f.plan, obligations: [obligation] }
+  await f.store.write(f.record)
+  f.dependencies.explore = async (_state, _plan, operation) => {
+    assert.ok(operation.bridge)
+    const oldUrl = process.env.PI_EPIC_BROWSER_URL, oldToken = process.env.PI_EPIC_BROWSER_TOKEN
+    process.env.PI_EPIC_BROWSER_URL = operation.bridge.url
+    process.env.PI_EPIC_BROWSER_TOKEN = operation.bridge.token
+    const tools = new Map<string, ToolDefinition>()
+    try {
+      verifierTools({ registerTool: tool => { tools.set(tool.name, tool as unknown as ToolDefinition) } } as ExtensionAPI)
+      const verify = tools.get('browser_verify'), conclude = tools.get('browser_conclude')
+      assert.ok(verify && conclude)
+      const ctx = { model: { input: ['text', 'image'] } } as never
+      const result = await verify.execute('probe', { obligationId: 'paddle', steps: [
+        { action: 'observe', expression: 'window.x' },
+        { action: 'capture', selector: 'canvas', count: 1, intervalMs: 0 },
+        { action: 'key_down', key: 'ArrowRight' }, { action: 'wait', durationMs: 30 }, { action: 'key_up', key: 'ArrowRight' },
+        { action: 'observe', expression: 'window.x' },
+        { action: 'capture', selector: 'canvas', count: 2, intervalMs: 40 },
+      ] } as never, operation.signal, undefined, ctx)
+      const probe = result.details as BrowserProbe
+      assert.deepEqual(probe.observations.map(o => o.value), [20, 50])
+      assert.equal(probe.images.length, 3)
+      assert.ok(probe.images.every(i => i.width === 160 && i.height === 100 && i.selector === 'canvas'))
+      assert.ok(probe.images[2].timestamp > probe.images[1].timestamp)
+      const images = result.content.filter(c => c.type === 'image')
+      assert.equal(images.length, 3)
+      assert.ok(images.every(i => Buffer.from(i.data, 'base64').subarray(1, 4).toString() === 'PNG'))
+      assert.notEqual(images[0].data, images[1].data)
+      assert.ok(!JSON.stringify(result.details).includes(images[0].data))
+      // Repeating a probe repeats setup on a fresh page: the old x=50 is gone.
+      const fresh = await verify.execute('fresh', { obligationId: 'paddle', steps: [
+        { action: 'observe', expression: 'window.x' }, { action: 'capture', count: 1, intervalMs: 0 },
+      ] } as never, operation.signal, undefined, ctx)
+      const freshProbe = fresh.details as BrowserProbe
+      assert.equal(freshProbe.observations[0].value, 20)
+      assert.equal(freshProbe.images[0].selector, undefined)
+      assert.equal(freshProbe.images[0].width, 1280)
+      // Images and measured motion belong to the earlier single execution, still available by evidence ID.
+      const conclusion = await conclude.execute('conclude', {
+        obligationId: 'paddle', outcome: 'pass', basis: 'motion',
+        evidenceIds: [...probe.observations.map(o => o.id), ...probe.images.map(i => i.id)],
+        explanation: 'The real ArrowRight input moved x from 20 to 50, confirmed by the red paddle shifting right in the captured canvas.',
+        temporalComparison: 'Before and after input on the same fresh page, x increased by 30 and the red paddle moved right.', limitations: [],
+      } as never, operation.signal, undefined, ctx)
+      assert.equal((conclusion.details as AcceptanceEvidence).outcome, 'pass')
+    } finally {
+      if (oldUrl === undefined) delete process.env.PI_EPIC_BROWSER_URL
+      else process.env.PI_EPIC_BROWSER_URL = oldUrl
+      if (oldToken === undefined) delete process.env.PI_EPIC_BROWSER_TOKEN
+      else process.env.PI_EPIC_BROWSER_TOKEN = oldToken
+    }
+  }
+  await runTaskVerification(state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.equal(record.report?.readiness, 'verified', JSON.stringify(record.report?.problems))
+  assert.equal(record.cycles[0].probes?.length, 2)
+  assert.match(reviewReportMarkdown(record.report as NonNullable<typeof record.report>), /Temporal comparison/)
+})
+
+test('real browser: deadline cancellation closes a probe evaluating a never-resolving expression', async t => {
+  const f = await fixture(t, 0)
+  const port = await availablePort()
+  await fs.writeFile(path.join(f.root, 'counter.html'), '<main>Ready</main>')
+  const controller = new AbortController()
+  const operation = { signal: controller.signal, remainingMs: () => { controller.signal.throwIfAborted(); return 5000 } }
+  const browser = await BrowserExecution.open({ state: { ...f.state, devServer: {
+    command: process.execPath, args: [path.resolve('tests/fixtures/acceptance-server.mjs'), String(port)],
+    url: `http://127.0.0.1:${port}/`, readySelector: 'main',
+  } }, operation, executablePath: undefined, maxOutputBytes: 5000,
+    artifactRoot: path.dirname(f.store.file), identity: 'cancel-cycle', attempt: 1, nowMs: () => Date.now() })
+  try {
+    const timeout = setTimeout(() => controller.abort(new Error('Deadline exhausted')), 300)
+    const probe = await browser.probe({ id: 'cancel', criterionId: 'T1:AC1', expected: 'Observe result', method: 'agent_browser' },
+      [{ action: 'observe', expression: 'new Promise(() => {})' }], 'cancel-invocation', f.dependencies.browserProbeLimits)
+    clearTimeout(timeout)
+    assert.ok(probe.probeErrors.length)
+    assert.equal(browser.browser.contexts().length, 0)
+    assert.equal((JSON.parse(await fs.readFile(probe.artifact, 'utf8')) as BrowserProbe).id, probe.id)
+  } finally { await browser.close() }
 })
 
 async function manualFixture(t: TestContext) {
