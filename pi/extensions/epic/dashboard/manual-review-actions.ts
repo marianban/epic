@@ -1,3 +1,4 @@
+import { editFailureReview } from './failure-review-editor.ts'
 import { editManualReviewItem } from './manual-review-editor.ts'
 import { manualReviewSubmission } from './manual-review-submission.ts'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
@@ -42,6 +43,13 @@ async function execute(
     throw new Error(
       'This review action belongs to a stale report. Refresh the dashboard.'
     )
+  if (action.id === 'manual-review-failures') {
+    const request = await editFailureReview(record,
+      (title, options) => ctx.ui.select(title, options),
+      (title, value) => ctx.ui.editor(title, value))
+    if (request) await submitTaskDecision(ctx, request)
+    return
+  }
   if (action.id === 'manual-review-history') {
     const entries = record.manualReviews.map(
       (r, index) =>
@@ -57,7 +65,9 @@ async function execute(
             `${index + 1}. ${item.text} — ${item.status.replace('_', ' ')}${item.observation ? `\n   ${item.observation}` : ''}`
         )
         .join('\n')
-      await ctx.ui.select(`${selected}\n\n${details || 'No manual steps.'}`, [
+      const decisions = record.decisions.filter(d => d.reportId === saved.reportId && d.identity === saved.identity)
+        .map(d => `${d.kind}: ${d.obligations.join(', ')} — ${d.reason}`).join('\n')
+      await ctx.ui.select(`${selected}\n\n${details || 'No manual steps.'}\n${decisions}`, [
         'Back',
       ])
     }

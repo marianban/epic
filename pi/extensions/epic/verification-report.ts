@@ -230,7 +230,7 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
     '',
     '## Human decisions',
     '',
-    'Complete the manual review checklist in the dashboard, then choose Continue. When every manual step passes and no confirmed or likely failure remains, the task is approved without additional prompts, including when automated evidence is incomplete. The report retains its original findings and evidence.',
+    'Complete the manual review checklist in the dashboard, then choose Continue. When every manual step passes and no confirmed or likely failure remains, the task is approved without additional prompts, including when automated evidence is incomplete. Use Review failures to mark each finding as a real issue, false positive, or accepted noncritical issue, with a reason. Dismissed or explicitly accepted findings no longer block approval for this report. The report retains its original findings and evidence; decisions are recorded separately in the verification ledger and dashboard review history.',
     ...(hasLikelyFailure(report)
       ? ['Likely failure blocks approval. Investigate the recorded contradiction and perform its confirmation check before obtaining a new verification result. A likely failure alone does not authorize an implementation repair.']
       : []),

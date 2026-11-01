@@ -1,3 +1,5 @@
+import { reviewFailures, canRepairReviewedTask } from '../pi/extensions/epic/failure-review.ts'
+import { editFailureReview } from '../pi/extensions/epic/dashboard/failure-review-editor.ts'
 import { manualReviewSubmission } from '../pi/extensions/epic/dashboard/manual-review-submission.ts'
 import { projectDashboardState } from '../pi/extensions/epic/dashboard/projection.ts'
 import assert from 'node:assert/strict'
@@ -1815,4 +1817,155 @@ test('legacy unverified ledger evidence is rejected without conversion', async t
   await fs.writeFile(f.store.file, legacy)
   await assert.rejects(f.store.read(), /Incompatible task verification evidence outcome: unverified.*no migration/)
   assert.equal(await fs.readFile(f.store.file, 'utf8'), legacy)
+})
+
+
+for (const disposition of ['false_positive', 'accepted_noncritical'] as const) {
+  test(`${disposition} permits approval after manual review, preserves evidence, and expires with the report`, async t => {
+    const f = await manualFixture(t)
+    const record = await f.store.read()
+    assert.ok(record.report)
+    record.report.readiness = 'issues_remaining'
+    record.report.criteria[0].evidence[0].outcome = 'fail'
+    record.report.criteria[0].evidence[0].actual = 'SVG namespace matched HTTP URL regex'
+    record.report.unresolved = ['good']
+    await f.store.write(record)
+    const originalReport = structuredClone(record.report)
+    const request = { kind: 'review_failure' as const, identity: record.report.identity,
+      reportId: record.report.id, failureId: 'good', disposition,
+      reason: 'Embedded SVG needs no external resource.' }
+    await assert.rejects(decideTask(f.state, { ...request, reason: ' ' }, realClock), /explicit reason/)
+    await assert.rejects(decideTask(f.state, { ...request, failureId: 'unknown' }, realClock), /current report/)
+    await assert.rejects(decideTask(f.state, { ...request, reportId: 'stale' }, realClock), /current attempt/)
+    await decideTask(f.state, request, realClock)
+    assert.deepEqual(manualReviewSubmission(await f.store.read()), {
+      kind: 'incomplete', label: 'Continue (complete manual review)',
+    })
+    await f.update(0, 'passed')
+    await f.update(1, 'passed')
+    const reviewed = await f.store.read()
+    assert.deepEqual(manualReviewSubmission(reviewed), {
+      kind: 'approve', label: 'Continue (approve task)',
+    })
+    assert.equal(canRepairReviewedTask(reviewed), false)
+    assert.deepEqual(reviewed.report, originalReport)
+    const dashboard = projectDashboardState({
+      domain: f.state, metadata: { epicId: f.state.epicId, createdAt: realClock.now(), updatedAt: realClock.now() },
+      boundary: { stage: 'awaiting_task_review', wait: 'awaiting-human' }, events: [], agentProfiles: [], verificationRecord: reviewed,
+    }).actionRequired
+    assert.ok(dashboard?.actions.some(a => a.id === 'manual-review-failures'))
+    assert.equal(dashboard?.actions[0].label, 'Continue (approve task)')
+    assert.equal(dashboard?.actions[0].disabled, false)
+    assert.ok(!dashboard?.actions.some(a => a.command === '/task-repair'))
+    assert.match(dashboard?.failureReviewLines?.join('\n') ?? '', /Embedded SVG needs no external resource/)
+    const approved = await decideTask(f.state, { kind: 'approve' }, realClock)
+    await assertAcceptedReport(approved, realClock)
+    await assert.rejects(decideTask(f.state, { kind: 'grant', identity: request.identity,
+      reportId: request.reportId, repairs: 1, timeMs: 300_000, reason: 'Repair' }, realClock), /No actionable failure/)
+    await decideTask(f.state, { ...request, disposition: 'request_fix', reason: 'Actually this needs correction.' }, realClock)
+    assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
+    await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /Ordinary approval/)
+    await decideTask(f.state, request, realClock)
+    const next = await f.store.read()
+    assert.ok(next.report)
+    next.report.id = 'new-report'
+    next.manualReviews.push({ ...structuredClone(f.review), reportId: 'new-report' })
+    await f.store.write(next)
+    assert.equal(reviewFailures(await f.store.read())[0].decision, undefined)
+    assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
+  })
+}
+
+test('mixed finding decisions keep real issues blocking and include all human instructions in repair', async t => {
+  const f = await manualFixture(t)
+  await f.update(0, 'passed')
+  await f.update(1, 'passed')
+  const record = await f.store.read()
+  assert.ok(record.report)
+  record.report.readiness = 'issues_remaining'
+  const evidence = record.report.criteria[0].evidence[0]
+  evidence.outcome = 'fail'
+  record.report.criteria[0].evidence.push({ ...evidence, obligationId: 'real-defect', actual: 'Paddle leaves board' })
+  record.report.unresolved = ['good', 'real-defect']
+  await f.store.write(record)
+  const base = { kind: 'review_failure' as const, identity: record.report.identity, reportId: record.report.id }
+  await decideTask(f.state, { ...base, failureId: 'good', disposition: 'false_positive', reason: 'Namespace only.' }, realClock)
+  await decideTask(f.state, { ...base, failureId: 'real-defect', disposition: 'request_fix', reason: 'Paddle must stay inside board.' }, realClock)
+  await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /Ordinary approval/)
+  await decideTask(f.state, { kind: 'grant', identity: base.identity, reportId: base.reportId,
+    repairs: 1, timeMs: 300_000, reason: 'Fix real issues.' }, realClock)
+  const feedback = (await f.store.read()).humanRepairRequests[0].feedback
+  assert.match(feedback, /False positive — skip fix/)
+  assert.match(feedback, /Paddle must stay inside board/)
+})
+
+test('failure editor shows observations, requires a reason, and supports cancellation', async t => {
+  const f = await manualFixture(t)
+  const record = await f.store.read()
+  assert.ok(record.report)
+  record.report.criteria[0].evidence[0].outcome = 'fail'
+  const request = await editFailureReview(record, async (title, options) => {
+    if (title.startsWith('Select')) return options[0]
+    assert.match(title, /Observed:/)
+    return options[1]
+  }, async () => 'Inline asset, no external request.')
+  assert.equal(request?.disposition, 'false_positive')
+  assert.equal(await editFailureReview(record, async () => undefined, async () => { throw Error('Must not open') }), undefined)
+  await assert.rejects(editFailureReview(record, async (_, options) => options[0], async () => ' '), /explicit reason/)
+})
+
+
+test('likely findings and check failures can be individually dismissed without hiding raw evidence', async t => {
+  const f = await manualFixture(t)
+  await f.update(0, 'passed')
+  await f.update(1, 'passed')
+  const record = await f.store.read()
+  assert.ok(record.report)
+  record.report.readiness = 'issues_remaining'
+  const evidence = record.report.criteria[0].evidence[0]
+  evidence.outcome = 'likely-fail'
+  evidence.suspectedFailure = { contradiction: 'Image URL detected', uncertainty: 'May be inline', confirmationCheck: 'Inspect URL' }
+  record.report.unresolved = ['good', 'check:build', 'problem:1']
+  record.report.problems = ['Validator rejected namespace URL']
+  await f.store.write(record)
+  assert.deepEqual(reviewFailures(record).map(f => f.id), ['good', 'check:build', 'problem:1'])
+  for (const failureId of record.report.unresolved) {
+    await decideTask(f.state, { kind: 'review_failure', identity: record.report.identity,
+      reportId: record.report.id, failureId, disposition: 'false_positive', reason: 'Confirmed validator error.' }, realClock)
+  }
+  assert.equal(manualReviewSubmission(await f.store.read()).kind, 'approve')
+  const approved = await decideTask(f.state, { kind: 'approve' }, realClock)
+  assert.deepEqual(await assertAcceptedReport(approved, realClock), record.report)
+  const saved = await f.store.read()
+  const decision = saved.decisions.find(d => d.kind === 'false_positive')
+  assert.ok(decision)
+  decision.reason = ' '
+  await f.store.write(saved)
+  await assert.rejects(f.store.read(), /Invalid persisted failure review/)
+})
+
+
+test('mixed review runs the requested repair once and does not automatically repair dismissed findings', async t => {
+  const f = await manualFixture(t)
+  const record = await f.store.read()
+  assert.ok(record.report)
+  record.report.readiness = 'issues_remaining'
+  const evidence = record.report.criteria[0].evidence[0]
+  evidence.outcome = 'fail'
+  record.report.criteria[0].evidence.push({ ...evidence, obligationId: 'real-defect', actual: 'Real defect' })
+  record.report.unresolved = ['good', 'real-defect']
+  await f.store.write(record)
+  for (const [failureId, disposition] of [['good', 'false_positive'], ['real-defect', 'request_fix']] as const)
+    await decideTask(f.state, { kind: 'review_failure', identity: record.report.identity,
+      reportId: record.report.id, failureId, disposition, reason: 'Human inspection.' }, realClock)
+  await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
+  let repairs = 0
+  f.dependencies.repair = async state => { repairs++; return state }
+  await decideTask(f.state, { kind: 'grant', identity: record.report.identity,
+    reportId: record.report.id, repairs: 3, timeMs: 300_000, reason: 'Fix real issue only.' }, realClock)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  assert.equal(repairs, 1)
+  const next = await f.store.read()
+  assert.equal(next.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.equal(reviewFailures(next).find(f => f.id === 'good')?.decision, undefined)
 })

@@ -240,6 +240,10 @@ export class ActionRequired implements Component {
           this.checklistFocused ? this.selectedItem : undefined
         ).flatMap((line) => wrapTextWithAnsi(line, Math.max(1, innerWidth)))
       : this.renderManualReviewSteps(state.manualReviewSteps, innerWidth)
+    const failureReviewLines = state.failureReviewLines?.length
+      ? ['Failures — use Review failures to classify', ...state.failureReviewLines]
+          .flatMap((line) => wrapTextWithAnsi(line, Math.max(1, innerWidth)))
+      : []
     const actionLines = this.renderActions(state.actions, innerWidth)
     const reportLines =
       state.verificationReportLink === undefined
@@ -252,6 +256,7 @@ export class ActionRequired implements Component {
       ...titleLines,
       ...(messageLines.length > 0 ? ['', ...messageLines] : []),
       ...(manualReviewLines.length > 0 ? ['', ...manualReviewLines] : []),
+      ...(failureReviewLines.length > 0 ? ['', ...failureReviewLines] : []),
       ...(reportLines.length > 0 ? ['', ...reportLines] : []),
       ...(actionLines.length > 0 ? ['', ...actionLines] : []),
     ]

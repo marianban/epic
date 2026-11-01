@@ -1,6 +1,7 @@
+import { canRepairReviewedTask, reviewFailures, failureDispositionLabels, isFailureDismissed } from '../failure-review.ts'
+import type { FailureDisposition } from '../verification-types.ts'
 import { currentManualReview } from '../manual-review.ts'
 import { canApproveTask, canRepairTask } from '../task-review-policy.ts'
-import { hasLikelyFailure } from '../evidence-outcome.ts'
 import { manualReviewSubmission } from './manual-review-submission.ts'
 import { acceptancePlanningFailureMessage } from '../acceptance-planning-recovery.ts'
 import { join } from 'node:path'
@@ -179,11 +180,15 @@ function taskReviewMessage(
   state: DashboardRunState,
   readiness: EpicDomainState['verificationReadiness'],
   manualFailures: boolean,
-  manualApprovalReady: boolean
+  manualApprovalReady: boolean,
+  repairAvailable: boolean
 ): string | undefined {
   if (readiness === 'verified' && !manualFailures) return undefined
   if (manualApprovalReady)
     return 'All manual review steps passed. Continue to approve the task.'
+
+  if (readiness === 'issues_remaining' && !repairAvailable)
+    return 'Recorded findings have been dismissed or accepted. Complete the manual review steps, then choose Continue.'
 
   const status = manualFailures
     ? 'Manual review found incorrect behavior. Repair will use the recorded observations.'
@@ -192,7 +197,7 @@ function taskReviewMessage(
     : 'Verification needs manual confirmation.'
   const instructions = state.lastVerificationReportPath
     ? [
-        canRepairTask(readiness, manualFailures)
+        repairAvailable
           ? 'Use /task-repair without arguments to grant one additional repair attempt and five minutes.'
           : 'No actionable failure is recorded. Review the unresolved evidence manually.',
         'Complete the manual review steps, then choose Continue.',
@@ -278,11 +283,12 @@ function actionRequired(
         const readiness = verificationRecord?.report ? verificationRecord.report.readiness : state.verificationReadiness
         const manualFailures = manualReview?.items.some((item) => item.status === 'failed') ?? false
         const manualApprovalReady = verificationRecord?.report ? canApproveTask(verificationRecord) : false
-        const repairActions = canRepairTask(readiness, manualFailures)
+        const repairActions = (verificationRecord?.report ? canRepairReviewedTask(verificationRecord) || manualFailures : canRepairTask(readiness, manualFailures))
           ? [action(EPIC_COMMANDS.repairTask, 'Repair', EPIC_COMMANDS.repairTask, 'secondary')]
           : []
         const reviewActions: DashboardAction[] | undefined = manualReview && verificationRecord?.report ? [
           { id: 'manual-review-submit', label: manualReviewSubmission(verificationRecord).label, kind: 'primary', manualReview, disabled: manualReviewSubmission(verificationRecord).kind === 'incomplete' },
+          ...(reviewFailures(verificationRecord).length ? [{ id: 'manual-review-failures', label: 'Review failures', manualReview }] : []),
           ...repairActions,
           { id: 'manual-review-history', label: 'Review history', manualReview },
           action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
@@ -291,10 +297,18 @@ function actionRequired(
           id: 'task-action-required',
           severity: 'warning',
           title: 'Task awaits human review',
-          message: verificationRecord?.report && hasLikelyFailure(verificationRecord.report) && !manualFailures
+          message: manualApprovalReady
+            ? 'All manual review steps passed. Recorded findings have been reviewed. Continue to approve the task.'
+            : verificationRecord?.report && reviewFailures(verificationRecord).some(f => f.likely && !isFailureDismissed(f) && f.decision?.kind !== 'request_fix') && !manualFailures
             ? 'Likely failure blocks approval. Investigate the contradiction, uncertainty, and confirmation check in the verification report. Record a confirmed manual defect to request fixes; suspicion alone does not authorize repair.'
-            : taskReviewMessage(state, readiness, manualFailures, manualApprovalReady),
+            : taskReviewMessage(state, readiness, manualFailures, manualApprovalReady, repairActions.length > 0),
           manualReview,
+          failureReviewLines: verificationRecord?.report ? reviewFailures(verificationRecord).flatMap(f => [
+            `${f.id}: ${f.expected}`,
+            `Observed: ${f.actual}`,
+            `Decision: ${f.decision ? failureDispositionLabels[f.decision.kind as FailureDisposition] : 'Not reviewed'}`,
+            ...(f.decision ? [`Reason: ${f.decision.reason}`] : []),
+          ]) : undefined,
           manualReviewSteps: task.manualReviewSteps,
           verificationReportLink: state.lastVerificationReportPath
             ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'Verification report')

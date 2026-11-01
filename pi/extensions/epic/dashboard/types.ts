@@ -124,6 +124,7 @@ export interface DashboardActionRequest {
   readonly title: string
   readonly message?: string
   readonly manualReview?: ManualReview
+  readonly failureReviewLines?: readonly string[]
   readonly manualReviewSteps?: readonly string[]
   readonly verificationReportLink?: string
   readonly actions: readonly DashboardAction[]

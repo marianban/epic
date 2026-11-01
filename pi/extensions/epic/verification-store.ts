@@ -1,4 +1,5 @@
 import { validateManualReviews } from './manual-review.ts'
+import { validateFailureDecisions } from './failure-review.ts'
 import { assertSuspectedFailure } from './evidence-outcome.ts'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -44,6 +45,7 @@ export class VerificationStore {
     )
       throw new Error('Invalid task verification ledger.')
     validateManualReviews(value)
+    validateFailureDecisions(value)
     for (const cycle of value.cycles) {
       for (const evidence of cycle.evidence) {
         if (!['pass', 'fail', 'likely-fail', 'inconclusive'].includes(evidence.outcome))

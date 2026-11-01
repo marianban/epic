@@ -1,3 +1,4 @@
+import { reviewFailures, isFailureDismissed } from './failure-review.ts'
 import type { BrowserProbeLimits } from './browser-evidence-types.ts'
 import { summarizeVerificationCycle } from './verification-summary.ts'
 import * as path from 'node:path'
@@ -66,6 +67,9 @@ export async function runTaskVerification(
     dependencies.clock
   )
   const record = await store.read()
+  // A mixed human decision authorizes the requested repair, then a fresh report.
+  // Do not let automatic retries undo findings the user explicitly accepted.
+  const hasDismissedFindings = !!record.report && reviewFailures(record).some(isFailureDismissed)
   const interruptedRepair = [...record.invocations]
     .reverse()
     .find((i) => i.kind === 'repair')
@@ -386,6 +390,7 @@ export async function runTaskVerification(
         cycle.review?.findings.some((f) => f.severity !== 'suggestion')
       if (
         !actionable ||
+        hasDismissedFindings ||
         !repairAfterInterruptionGranted ||
         signal.aborted ||
         store.remaining(record) <= 0 ||

@@ -1,3 +1,4 @@
+import { canRepairReviewedTask } from './failure-review.ts'
 import { acceptancePlanningFailureMessage } from './acceptance-planning-recovery.ts'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
@@ -230,7 +231,7 @@ export async function repairTaskCommand(ctx: ExtensionContext, args: string): Pr
   const envelope = await loadActiveEpic(ctx.cwd)
   const domain = domainFromActorSnapshot(envelope.snapshot)
   const record = await new VerificationStore(taskVerificationPath(domain), systemClock).read()
-  const request = latestTaskRepairRequest(record.report, { repairs: 1, timeMs: 300_000 }, !!humanRepairFeedback(record))
+  const request = latestTaskRepairRequest(record.report ? { ...record.report, readiness: canRepairReviewedTask(record) ? 'issues_remaining' : record.report.readiness === 'verified' ? 'verified' : 'needs_manual_confirmation' } : undefined, { repairs: 1, timeMs: 300_000 }, !!humanRepairFeedback(record))
   const view = await dispatch(envelope, ctx, { type: 'TASK.DECIDE', request })
   if (view.boundary.task?.failureReason) throw new Error(view.boundary.task.failureReason)
   notifyNextAction(ctx, view, 'Granted one repair attempt and five additional minutes for the latest task report.')

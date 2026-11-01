@@ -99,9 +99,10 @@ export interface AllowanceInvocation {
   at: number
   completed: boolean
 }
+export type FailureDisposition = 'request_fix' | 'false_positive' | 'accepted_noncritical'
 export interface HumanDecision {
-  /** Historical decision kinds are retained only as audit data. */
-  kind: 'approve' | 'accept_unresolved' | 'confirm' | 'defer'
+  /** Legacy accept_unresolved/confirm/defer decisions remain audit data only. */
+  kind: 'approve' | 'accept_unresolved' | 'confirm' | 'defer' | FailureDisposition
   /** Verification attempt identifier, independent of candidate file contents. */
   identity: string
   reportId: string
@@ -190,6 +191,14 @@ export interface VerificationOperation {
 }
 export type TaskDecisionRequest =
   | { kind: 'approve' }
+  | {
+      kind: 'review_failure'
+      identity: string
+      reportId: string
+      failureId: string
+      disposition: FailureDisposition
+      reason: string
+    }
   | {
       kind: 'update_manual_review'
       identity: string

@@ -1,3 +1,4 @@
+import { reviewFailures, failureRepairFeedback, canRepairReviewedTask } from './failure-review.ts'
 import {
   assertManualReviewTask,
   currentManualReview,
@@ -25,6 +26,7 @@ export async function decideTask(
       'grant',
       'revise_criteria',
       'update_manual_review',
+      'review_failure',
     ].includes(request.kind)
   )
     throw new Error(`Unsupported task decision: ${request.kind}`)
@@ -44,6 +46,15 @@ export async function decideTask(
     )
   const manualReview = currentManualReview(record)
   assertManualReviewTask(state, manualReview)
+  if (request.kind === 'review_failure') {
+    if (!reviewFailures(record).some(f => f.id === request.failureId) ||
+        !['request_fix', 'false_positive', 'accepted_noncritical'].includes(request.disposition))
+      throw new Error('Failure decision requires a finding from the current report and a valid disposition.')
+    record.decisions.push({ kind: request.disposition, identity, reportId: report.id,
+      obligations: [request.failureId], reason: request.reason, at: clock.nowMs() })
+    await store.write(record)
+    return { ...state, failureReason: undefined }
+  }
   if (request.kind === 'update_manual_review') {
     const item = manualReview.items.find((i) => i.id === request.itemId)
     if (
@@ -69,8 +80,9 @@ export async function decideTask(
       `Ordinary approval is unavailable: ${report.readiness}. Complete all manual steps and resolve actionable failures and likely failures.`
     )
   if (request.kind === 'grant') {
-    const feedback = humanRepairFeedback(record)
-    assertTaskRepairAvailable(report.readiness, !!feedback)
+    const manualFeedback = humanRepairFeedback(record)
+    assertTaskRepairAvailable(canRepairReviewedTask(record) ? 'issues_remaining' : report.readiness === 'verified' ? 'verified' : 'needs_manual_confirmation', !!manualFeedback)
+    const feedback = [manualFeedback, failureRepairFeedback(record)].filter(Boolean).join('\n\n')
     if (record.humanRepairRequests.some((r) => !r.completed && !r.invocationId))
       throw new Error('A human repair request is already pending.')
     if (feedback)
@@ -119,7 +131,9 @@ export async function decideTask(
     identity,
     reportId: report.id,
     obligations: report.unresolved,
-    reason: report.readiness === 'verified'
+    reason: reviewFailures(record).some(f => f.decision && f.decision.kind !== 'request_fix')
+      ? 'User reviewed and dismissed or accepted the recorded findings; all manual review steps passed.'
+      : report.readiness === 'verified'
       ? 'All requirements verified.'
       : 'All manual review steps passed; the user verified the task despite incomplete automated evidence.',
     at: clock.nowMs(),
