@@ -774,7 +774,7 @@ function currentTask(
     id: taskId,
     index: index + 1,
     totalTasks: tasks.length,
-    name: task.title,
+    name: linkedFile(currentTaskArtifactPath(state), task.title),
     status: taskStatus(state.stage, input.events, taskId),
     agentTimeMs: taskAgentTimeMs(input.events, activeAgentRuns, taskId, nowMs),
     attempt: input.boundary.task?.state === 'planningAcceptance' || input.boundary.task?.state === 'acceptancePlanningFailed'
