@@ -46,6 +46,9 @@ import type { EpicServices } from '../pi/extensions/epic/services.ts'
 import { loadActiveEpic, persistEpicTasks } from '../pi/extensions/epic/persistence.ts'
 import { constructReviewReport, reviewReportMarkdown } from '../pi/extensions/epic/verification-report.ts'
 import { latestTaskRepairRequest } from '../pi/extensions/epic/task-repair-request.ts'
+import { currentVerificationProblems } from '../pi/extensions/epic/verification-problems.ts'
+import { reportVerificationCycle } from '../pi/extensions/epic/verification-report-cycle.ts'
+import { validateBrowserEvidenceAssessment } from '../pi/extensions/epic/browser-evidence-review.ts'
 
 const exec = promisify(execFile)
 const realClock: EpicClock = {
@@ -145,6 +148,10 @@ async function fixture(t: TestContext, repairs = 3, clock = realClock) {
         },
       }
     },
+    reviewEvidence: async (current, cycle) => ({
+      state: current, result: { passed: true, summary: 'Evidence independently inspected', acceptanceCriteria: [], findings: [] },
+      inspectedObligationIds: cycle.evidence.filter(e => e.method === 'agent_browser' && e.conclusion).map(e => e.obligationId), limitations: [],
+    }),
     repair: async (current) => {
       const saved = await store.read()
       assert.equal(saved.invocations.at(-1)?.kind, 'repair')
@@ -231,7 +238,7 @@ test('successful acceptance remains report-bound across candidate changes', asyn
   )
 })
 
-test('repair is charged before invocation and reruns every required phase', async (t) => {
+test('repair is charged before invocation, targets the criterion, then runs a final full pass', async (t) => {
   const f = await fixture(t)
   await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
   await runTaskVerification(
@@ -245,6 +252,8 @@ test('repair is charged before invocation and reruns every required phase', asyn
     'full',
     'review',
     'repair',
+    'fast',
+    'full',
     'fast',
     'full',
     'review',
@@ -302,7 +311,7 @@ for (const failedSuite of ['fast', 'full'] as const) {
       const record = await f.store.read()
       const firstStages = failedSuite === 'fast' ? ['fast'] : ['fast', 'full']
       assert.deepEqual(f.calls, repairs
-        ? [...firstStages, 'repair', 'fast', 'full', 'review']
+        ? [...firstStages, 'repair', 'fast', 'full', 'fast', 'full', 'review']
         : firstStages)
       assert.equal(record.invocations.filter(i => i.kind === 'repair').length, repairs)
       assert.equal(record.report?.readiness, repairs ? 'verified' : 'issues_remaining')
@@ -1152,6 +1161,8 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
     'repair',
     'fast',
     'full',
+    'fast',
+    'full',
     'review',
   ])
   const report = record.report
@@ -1685,7 +1696,7 @@ test('completed manual review approves evidence gaps directly and checkpoints th
   const cycle = record.cycles.at(-1)
   assert.ok(cycle)
   cycle.evidence = cycle.evidence.map(e => ({ ...e, outcome: 'inconclusive', gap: 'inconclusive', actual: 'Canvas content could not be inspected.' }))
-  cycle.problems = ['Verifier could not establish the expected outcome.']
+  cycle.problems = [{ stage: 'obligation', obligationIds: ['good'], message: 'Verifier could not establish the expected outcome.' }]
   record.report = { ...constructReviewReport(record, f.review.identity, f.store.remaining(record)), id: f.review.reportId }
   const report = structuredClone(record.report)
   assert.equal(report.readiness, 'needs_manual_confirmation')
@@ -1833,7 +1844,7 @@ test('likely failures block completed manual approval without authorizing repair
   assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
 })
 
-test('likely failure alone never consumes an automatic repair attempt', async t => {
+test('likely failure gets a targeted confirmation without consuming a repair attempt', async t => {
   const f = await fixture(t)
   await runTaskVerification(f.state, new AbortController().signal, {
     ...f.dependencies,
@@ -1849,8 +1860,8 @@ test('likely failure alone never consumes an automatic repair attempt', async t 
     },
   })
   const record = await f.store.read()
-  assert.equal(record.report?.readiness, 'needs_manual_confirmation')
-  assert.equal(record.cycles.length, 1)
+  assert.equal(record.report?.readiness, 'verified')
+  assert.equal(record.cycles.length, 2)
   assert.ok(!f.calls.includes('repair'))
   assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 0)
 })
@@ -2016,4 +2027,335 @@ test('mixed review runs the requested repair once and does not automatically rep
   const next = await f.store.read()
   assert.equal(next.invocations.filter(i => i.kind === 'repair').length, 1)
   assert.equal(reviewFailures(next).find(f => f.id === 'good')?.decision, undefined)
+})
+
+
+for (const regression of [false, true]) {
+  test(`repairs target separate criteria before full regression verification (${regression})`, async t => {
+    const f = await fixture(t, 3)
+    const names = ['candidate.txt', 'second.txt', 'third.txt']
+    await Promise.all(names.map((name, i) => fs.writeFile(path.join(f.root, name), i < 2 ? 'bad' : 'good')))
+    f.record.criteria = names.map((name, i) => ({ id: `T1:AC${i + 1}`, text: `${name} is good` }))
+    f.record.plan = { ...f.plan, criteria: f.record.criteria, obligations: names.map((name, i) => ({
+      id: `file-${i}`, criterionId: `T1:AC${i + 1}`, expected: `${name} is good`, method: 'automated',
+      command: `node -e "if(require('fs').readFileSync('${name}','utf8') !== 'good') throw Error('Defect in ${name}')"`,
+    })) }
+    await f.store.write(f.record)
+    f.dependencies.repair = async (state, feedback) => {
+      const record = await f.store.read()
+      const target = record.schedule.queue[0]
+      assert.ok(target?.criterionId)
+      assert.match(feedback, new RegExp(target.id))
+      const i = Number(target.criterionId.slice(-1)) - 1
+      await fs.writeFile(path.join(f.root, names[i]), 'good')
+      if (regression && i === 1) await fs.writeFile(path.join(f.root, names[2]), 'regression')
+      return state
+    }
+    await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+    const record = await f.store.read()
+    assert.deepEqual(record.cycles.map(c => [c.kind, c.evidence.map(e => e.obligationId)]), [
+      ['initial_full', ['file-0', 'file-1', 'file-2']],
+      ['targeted', ['file-0']], ['targeted', ['file-1']],
+      ['final_full', ['file-0', 'file-1', 'file-2']],
+      ...(regression ? [['targeted', ['file-2']], ['final_full', ['file-0', 'file-1', 'file-2']]] : []),
+    ])
+    assert.equal(record.report?.readiness, 'verified')
+    assert.equal(record.invocations.filter(i => i.kind === 'repair').length, regression ? 3 : 2)
+    assert.equal(record.schedule.finalRequired, false)
+    assert.equal(record.report?.cycle?.kind, 'final_full')
+  })
+}
+
+test('persistent evidence gaps defer human review until other repairs and the final full pass finish', async t => {
+  const f = await fixture(t, 1)
+  await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
+  f.record.criteria.unshift({ id: 'T1:AC0', text: 'Unmeasurable behavior' })
+  f.record.plan = { ...f.plan, criteria: f.record.criteria, obligations: [
+    { id: 'gap', criterionId: 'T1:AC0', expected: 'Unmeasurable behavior', method: 'static' },
+    ...f.plan.obligations,
+  ] }
+  await f.store.write(f.record)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.deepEqual(record.cycles.map(c => [c.kind, c.target?.id]), [
+    ['initial_full', undefined], ['targeted', 'T1:AC0'], ['targeted', 'T1:AC1'], ['final_full', undefined],
+  ])
+  assert.equal(record.report?.readiness, 'needs_manual_confirmation')
+  assert.deepEqual(record.report?.unresolved, ['gap'])
+  assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.equal(record.manualReviews.length, 1)
+})
+
+for (const gap of ['missing', 'inconclusive'] as const) {
+  test(`${gap} evidence is rechecked without a repair or redundant full pass`, async t => {
+    const f = await fixture(t)
+    const fixtureReview = f.dependencies.review
+    f.dependencies.review = async (state, cycle, operation) => {
+      if (gap === 'missing') cycle.evidence = []
+      else {
+        cycle.evidence[0].outcome = 'inconclusive'
+        cycle.evidence[0].gap = 'inconclusive'
+      }
+      return fixtureReview(state, cycle, operation)
+    }
+    await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+    const record = await f.store.read()
+    assert.deepEqual(record.cycles.map(c => c.kind), ['initial_full', 'targeted'])
+    assert.equal(record.invocations.length, 0)
+    assert.equal(record.report?.readiness, 'verified')
+    assert.equal(record.report?.criteria[0].evidence[0].identity, record.cycles[1].identity)
+  })
+}
+
+test('old verification ledgers fail explicitly without being rewritten', async t => {
+  const f = await fixture(t)
+  const legacy = { ...f.record, formatVersion: 1 }
+  const serialized = JSON.stringify(legacy)
+  await fs.writeFile(f.store.file, serialized)
+  await assert.rejects(f.store.read(), /Incompatible task verification ledger format.*No migration/)
+  assert.equal(await fs.readFile(f.store.file, 'utf8'), serialized)
+})
+
+
+test('resume verifies a completed repair without invoking the implementer again', async t => {
+  const f = await fixture(t, 1)
+  await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
+  const controller = new AbortController()
+  const checks = f.dependencies.checks
+  f.dependencies.checks = async (...args) => {
+    const record = await f.store.read()
+    if (record.cycles.at(-1)?.kind === 'targeted') {
+      controller.abort(new Error('Interrupted after repair'))
+      throw controller.signal.reason
+    }
+    return checks(...args)
+  }
+  await runTaskVerification(f.state, controller.signal, f.dependencies)
+  const interrupted = await f.store.read()
+  assert.equal(interrupted.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.equal(interrupted.invocations.find(i => i.kind === 'repair')?.completed, true)
+  assert.equal(interrupted.schedule.finalRequired, true)
+  assert.notEqual(interrupted.report?.readiness, 'verified')
+  f.dependencies.checks = checks
+  f.calls.length = 0
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const resumed = await f.store.read()
+  assert.equal(resumed.report?.readiness, 'verified')
+  assert.equal(resumed.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.ok(!f.calls.includes('repair'))
+  assert.equal(resumed.cycles.at(-1)?.kind, 'final_full')
+})
+
+test('resume processes a completed final cycle without repeating verification after a persistence interruption', async t => {
+  const f = await fixture(t, 1)
+  await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  record.schedule.phase = 'final_full'
+  record.schedule.processedCycleId = record.cycles.at(-2)?.id
+  await f.store.write(record)
+  f.calls.length = 0
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const resumed = await f.store.read()
+  assert.deepEqual(f.calls, [])
+  assert.equal(resumed.cycles.length, record.cycles.length)
+  assert.equal(resumed.report?.readiness, 'verified')
+  assert.equal(resumed.schedule.phase, 'done')
+})
+
+for (const blockage of ['exception', 'exit127'] as const) {
+  test(`blocked prerequisites (${blockage}) stop with the completed repair preserved for resume`, async t => {
+    const f = await fixture(t, 1)
+    await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
+    const checks = f.dependencies.checks
+    let blockedCalls = 0
+    f.dependencies.checks = async (...args) => {
+      const saved = await f.store.read()
+      if (saved.schedule.repairInvocationId) {
+        blockedCalls++
+        if (blockage === 'exception') throw new Error('Prerequisite infrastructure unavailable')
+        return { state: args[0], result: {
+          suite: args[1], passed: false, introducedFindings: [], preExistingFindings: [], deferredChecks: [],
+          checks: [{ name: 'typecheck', command: 'tsc', required: true, passed: false, exitCode: 127,
+            durationMs: 0, outputTruncated: false, stdoutPreview: '', stderrPreview: 'Missing executable', findings: [] }],
+        } }
+      }
+      return checks(...args)
+    }
+    const state = await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+    const blocked = await f.store.read()
+    assert.equal(blockedCalls, blockage === 'exception' ? 2 : 1)
+    assert.equal(blocked.schedule.phase, 'targeted')
+    assert.equal(blocked.schedule.queue[0]?.id, 'T1:AC1')
+    assert.equal(blocked.schedule.finalRequired, true)
+    assert.equal(blocked.cycles.at(-1)?.completed, false)
+    assert.equal(blocked.invocations.find(i => i.id === blocked.schedule.repairInvocationId)?.completed, true)
+    assert.notEqual(blocked.report?.readiness, 'verified')
+    f.dependencies.checks = checks
+    f.calls.length = 0
+    await runTaskVerification(state, new AbortController().signal, f.dependencies)
+    const resumed = await f.store.read()
+    assert.equal(resumed.report?.readiness, 'verified')
+    assert.equal(resumed.invocations.filter(i => i.kind === 'repair').length, 1)
+    assert.ok(!f.calls.includes('repair'))
+  })
+}
+
+test('scoped retry problems resolve chronologically without clearing unrelated or unverified obligations', async t => {
+  const f = await fixture(t)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const full = (await f.store.read()).cycles[0]
+  const baseline = { ...full, problems: [
+    { stage: 'browser_setup' as const, obligationIds: [], message: 'Browser unavailable' },
+    { stage: 'browser_exploration' as const, obligationIds: ['good', 'other'], message: 'Exploration blocked' },
+    { stage: 'semantic_review' as const, obligationIds: [], message: 'Reviewer unavailable' },
+  ] }
+  const retry = { ...full, id: 'retry', identity: 'retry', kind: 'targeted' as const,
+    review: undefined, browserOpened: true as const, problems: [], evidence: [{ ...full.evidence[0], method: 'agent_browser' as const }] }
+  const before = JSON.stringify(baseline)
+  const problems = currentVerificationProblems([baseline, retry])
+  assert.deepEqual(problems, [
+    { stage: 'browser_exploration', obligationIds: ['other'], message: 'Exploration blocked' },
+    { stage: 'semantic_review', obligationIds: [], message: 'Reviewer unavailable' },
+  ])
+  assert.equal(JSON.stringify(baseline), before)
+})
+
+test('composed retries retain full review, earlier probes, and evidence review provenance', async t => {
+  const f = await fixture(t)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  const full = record.cycles[0]
+  assert.ok(full.review)
+  // Probe payloads are irrelevant to composition; distinct IDs prove neither set is dropped.
+  const firstProbes = [{ id: 'baseline-probe' }] as BrowserProbe[]
+  const nextProbes = [{ id: 'retry-probe' }] as BrowserProbe[]
+  full.probes = firstProbes
+  const evidenceReview = { identity: 'retry', obligationIds: ['good'], result: full.review, limitations: [] }
+  const retry = { ...full, id: 'retry', identity: 'retry', kind: 'targeted' as const,
+    review: undefined, probes: nextProbes, evidenceReviews: [evidenceReview], problems: [] }
+  record.cycles.push(retry)
+  const merged = reportVerificationCycle(record, retry.identity)
+  assert.equal(merged?.review, full.review)
+  assert.deepEqual(merged?.probes, [...firstProbes, ...nextProbes])
+  assert.deepEqual(merged?.evidenceReviews, [evidenceReview])
+})
+
+for (const outcome of ['pass', 'unavailable', 'uninspected', 'unsupported', 'defect'] as const) {
+  test(`real browser: recovered evidence receives independent review (${outcome})`, async t => {
+    const f = await fixture(t, outcome === 'defect' ? 1 : 0)
+    const port = await availablePort()
+    await fs.writeFile(path.join(f.root, 'counter.html'), '<main>Expected content</main>')
+    const state = { ...f.state, devServer: {
+      command: process.execPath,
+      args: [path.resolve('tests/fixtures/acceptance-server.mjs'), String(port)],
+      url: `http://127.0.0.1:${port}/`, readySelector: 'main',
+    } }
+    const obligation = { id: 'layout', criterionId: 'T1:AC1', expected: 'Main has expected content', method: 'agent_browser' as const }
+    f.record.plan = { ...f.plan, obligations: [obligation] }
+    f.record.infrastructureLimit = 0
+    await f.store.write(f.record)
+    const originalOpen = BrowserExecution.open
+    let opens = 0
+    t.mock.method(BrowserExecution, 'open', async (input: Parameters<typeof BrowserExecution.open>[0]) => {
+      if (++opens === 1) throw new Error('Temporary browser setup outage')
+      return originalOpen.call(BrowserExecution, input)
+    })
+    f.dependencies.explore = async (_state, _plan, operation) => {
+      assert.ok(operation.bridge)
+      const headers = { authorization: `Bearer ${operation.bridge.token}` }
+      const response = await fetch(operation.bridge.url, { method: 'POST', headers,
+        body: JSON.stringify({ obligationId: obligation.id, steps: [{ action: 'inspect', expression: "document.querySelector('main').textContent === 'Expected content'" }] }),
+      })
+      assert.equal(response.status, 200)
+      const { probe } = await response.json() as BrowserProbeResponse
+      const evidenceId = probe.observations[0].id
+      const concluded = await fetch(new URL('/conclude', operation.bridge.url), { method: 'POST', headers,
+        body: JSON.stringify({ obligationId: obligation.id, conclusion: {
+          obligationId: obligation.id, outcome: 'pass', basis: 'observations', evidenceIds: [evidenceId],
+          explanation: 'Main has expected text', limitations: [],
+          observations: [{ target: 'main', targetIdentity: 'main element', evidenceId, property: 'text matches', value: 'true' }],
+          selfCheck: { alternativeExplanation: 'Another element might match', counterEvidence: 'The main element was selected explicitly', wouldPassIfBroken: false, reasoning: 'Different main text fails the check' },
+        } }),
+      })
+      assert.equal(concluded.status, 200, await concluded.text())
+    }
+    const review = f.dependencies.reviewEvidence
+    let reviews = 0
+    f.dependencies.reviewEvidence = async (...args) => {
+      reviews++
+      assert.equal(args[1].probes?.length, 1)
+      assert.equal(args[1].evidence[0].obligationId, 'layout')
+      assert.equal((await f.store.read()).cycles.at(-1)?.review, undefined)
+      if (outcome === 'unavailable') throw new Error('Reviewer unavailable')
+      const assessed = await review(...args)
+      assert.doesNotThrow(() => validateBrowserEvidenceAssessment(assessed, args[1]))
+      assert.throws(() => validateBrowserEvidenceAssessment({ ...assessed, inspectedObligationIds: ['unknown'] }, args[1]), /inspection coverage/)
+      assert.throws(() => validateBrowserEvidenceAssessment({ ...assessed, inspectedObligationIds: ['layout', 'layout'] }, args[1]), /inspection coverage/)
+      if (outcome === 'uninspected') return { ...assessed, inspectedObligationIds: [], limitations: ['Cannot open cited image'] }
+      if (outcome === 'unsupported') return { ...assessed, limitations: ['The cited observation does not establish the claim'] }
+      if (outcome === 'defect') return { ...assessed, result: { ...assessed.result, passed: false, findings: [{
+        severity: 'major', category: 'correctness', file: 'counter.html', affectedPaths: ['counter.html'], repairPaths: ['counter.html'],
+        message: 'Related code defect', failureScenario: 'Independent inspection found a defect', requiredFix: 'Fix related markup',
+      }] } }
+      return assessed
+    }
+    await runTaskVerification(state, new AbortController().signal, f.dependencies)
+    const record = await f.store.read()
+    assert.equal(reviews, 1)
+    assert.equal(record.cycles[0].problems.some(p => p.stage === 'browser_setup'), true)
+    assert.equal(record.report?.readiness, outcome === 'unavailable' || outcome === 'uninspected' || outcome === 'unsupported' ? 'needs_manual_confirmation' : 'verified')
+    if (outcome === 'pass') {
+      assert.deepEqual(record.cycles.map(c => c.kind), ['initial_full', 'targeted'])
+      assert.deepEqual(record.report?.problems, [])
+      assert.equal(record.report?.cycle?.review?.summary, 'No defects')
+      assert.equal(record.report?.cycle?.evidenceReviews.length, 1)
+    }
+    if (outcome === 'defect') {
+      assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 1)
+      assert.equal(record.cycles[2].target?.kind, 'semantic')
+      assert.equal(record.cycles.at(-1)?.kind, 'final_full')
+    } else assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 0)
+  })
+}
+
+test('format 2 scoped ledger rejects malformed diagnostics and inspection coverage', async t => {
+  const f = await fixture(t)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.equal(record.formatVersion, 2)
+  assert.ok(record.cycles[0].review)
+  record.cycles[0].problems = [{ stage: 'obligation', obligationIds: ['unknown'], message: 'Invalid scope' }]
+  await f.store.write(record)
+  await assert.rejects(f.store.read(), /problem scope/)
+  record.cycles[0].problems = []
+  record.cycles[0].evidenceReviews = [{ identity: record.cycles[0].identity, obligationIds: ['good'], result: record.cycles[0].review, limitations: [] }]
+  await f.store.write(record)
+  await assert.rejects(f.store.read(), /evidence review scope/)
+})
+
+test('resuming a blocked evidence-only retry still composes the unchanged full baseline', async t => {
+  const f = await fixture(t, 0)
+  const review = f.dependencies.review
+  f.dependencies.review = async (state, cycle, operation) => {
+    cycle.evidence = []
+    return review(state, cycle, operation)
+  }
+  const checks = f.dependencies.checks
+  f.dependencies.checks = async (...args) => {
+    if ((await f.store.read()).cycles.at(-1)?.kind === 'targeted')
+      throw new Error('Temporary prerequisite outage')
+    return checks(...args)
+  }
+  const state = await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const blocked = await f.store.read()
+  assert.equal(blocked.cycles.at(-1)?.completed, false)
+  assert.equal(blocked.schedule.queue[0]?.action, 'verify')
+  f.dependencies.checks = checks
+  await runTaskVerification(state, new AbortController().signal, f.dependencies)
+  const resumed = await f.store.read()
+  assert.deepEqual(resumed.cycles.map(c => c.kind), ['initial_full', 'targeted', 'targeted'])
+  assert.equal(resumed.report?.readiness, 'verified')
+  assert.deepEqual(resumed.report?.problems, [])
+  assert.equal(resumed.invocations.filter(i => i.kind === 'repair').length, 0)
 })

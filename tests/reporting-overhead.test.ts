@@ -101,6 +101,7 @@ test('agent summaries omit duplicated logs and domain state while retaining fail
     preExistingFindings: [],
   }
   const cycle: VerificationCycle = {
+    kind: 'initial_full', completed: true, candidateRevision: 0, evidenceReviews: [],
     id: 'cycle',
     identity: 'attempt',
     attempt: 1,
@@ -120,7 +121,7 @@ test('agent summaries omit duplicated logs and domain state while retaining fail
         reproduction: 'npm run build',
       },
     ],
-    problems: ['Another check is blocked'],
+    problems: [{ stage: 'full', obligationIds: [], message: 'Another check is blocked' }],
     artifacts: ['checks.json'],
   }
   const summary = summarizeVerificationCycle(cycle)

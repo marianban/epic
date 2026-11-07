@@ -11,6 +11,7 @@ import { prepareAcceptancePlan } from './acceptance-planning.ts'
 import { finalizeReviewReport } from './verification-report.ts'
 import { runTaskVerification } from './verification-runner.ts'
 import { browserVerificationPrompt } from './browser-verification-prompt.ts'
+import { browserEvidenceReviewInstructions, validateBrowserEvidenceAssessment } from './browser-evidence-review.ts'
 import { decideTask, assertAcceptedReport } from './verification-decisions.ts'
 import type {
   VerificationOperation,
@@ -783,6 +784,23 @@ export function createEpicServices(
               operation,
               cycle
             ),
+          reviewEvidence: async (current, cycle, operation) => {
+            if (!current.taskBaselineSha) throw new Error('Cannot review evidence without a task baseline.')
+            const plan = await readApprovedPlan(current)
+            const diff = await getTaskDiff(current.repositoryRoot, current.taskBaselineSha)
+            const changes = await inspectTaskChanges(current.repositoryRoot, current.taskBaselineSha)
+            const artifact = await fs.readFile(currentTaskArtifactPath(current), 'utf8')
+            const prompt = reviewerTask(current, plan, diff,
+              JSON.stringify({ acceptanceVerification: summarizeVerificationCycle(cycle) }),
+              artifact, changes.changes.map(change => change.path)) + '\n\n' + browserEvidenceReviewInstructions(cycle)
+            const run = await runRole(current, 'reviewer', prompt,
+              'browser evidence review', current.tasks?.[current.currentTaskIndex]?.id, operation)
+            if (run.exitCode !== 0) throw new Error(`Evidence reviewer failed: ${agentFailure(run)}`)
+            const assessment = validateBrowserEvidenceAssessment(parseJsonResponse<unknown>(run.output, 'reviewer'), cycle)
+            const file = await persistImmutableJsonArtifact(current,
+              `reviews/${cycle.id}-${randomUUID()}-browser-evidence-review.json`, assessment)
+            return { state: { ...current, lastReviewResultPath: file }, ...assessment }
+          },
           repair: (current, feedback, operation) =>
             this.implement(current, feedback, operation),
           explore: async (current, plan, operation, errors) => {
@@ -819,14 +837,17 @@ export function createEpicServices(
       const record = await store.initialize(state)
       const latest = record.cycles.at(-1)
       const identity = latest?.identity ?? randomUUID()
-      if (latest && latest.identity === identity) latest.problems.push(reason)
+      if (latest && latest.identity === identity) latest.problems.push({ stage: 'interruption', obligationIds: [], message: reason })
       else
         record.cycles.push({
           id: randomUUID(),
           identity,
           attempt: record.cycles.length + 1,
+          kind: 'initial_full', completed: false,
+          candidateRevision: record.invocations.filter(i => i.kind === 'repair').length,
           evidence: [],
-          problems: [reason],
+          evidenceReviews: [],
+          problems: [{ stage: 'interruption', obligationIds: [], message: reason }],
           artifacts: [],
           state,
         })
@@ -1033,7 +1054,9 @@ export function createEpicServices(
       const run = await runRole(
         state,
         'reviewer',
-        reviewerTask(
+        (cycle?.kind === 'targeted' && cycle.target?.kind === 'semantic'
+          ? `Focused repair verification: check whether this specific finding is resolved. Report related defects discovered while checking it; defer unrelated full review to the final full pass.\n${cycle.target.feedback}\n\n`
+          : '') + reviewerTask(
           state,
           plan,
           diff,

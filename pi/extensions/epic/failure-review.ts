@@ -39,7 +39,7 @@ export function reviewFailures(record: TaskVerificationRecord): ReviewFailure[] 
       id, expected: id,
       actual: id.startsWith('problem:') ? report.problems[Number(id.slice(8)) - 1] ?? id
         : check ? check.stderrPreview || check.stdoutPreview || 'Check did not pass.'
-        : id === 'review:findings' ? report.cycle?.review?.findings.map(f => f.message).join('\n') ?? id
+        : id === 'review:findings' ? [...(report.cycle?.review?.findings ?? []), ...(report.cycle?.evidenceReviews.flatMap(r => r.result.findings) ?? [])].map(f => f.message).join('\n') || id
         : id === 'check:browser-smoke' ? report.cycle?.smoke?.findings.map(f => f.message).join('\n') ?? id
         : id === 'check:fast' || id === 'check:full' ? 'Check suite did not pass or was not completed.' : 'Verification did not complete.',
       likely: false,

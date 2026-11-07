@@ -56,6 +56,9 @@ export function summarizeVerificationCycle(cycle: VerificationCycle) {
     id: cycle.id,
     identity: cycle.identity,
     attempt: cycle.attempt,
+    kind: cycle.kind,
+    target: cycle.target,
+    candidateRevision: cycle.candidateRevision,
     checks: [cycle.fast, cycle.full]
       .filter((s) => s !== undefined)
       .map(summarizeCheckSuite),
@@ -69,6 +72,7 @@ export function summarizeVerificationCycle(cycle: VerificationCycle) {
     })),
     probes: cycle.probes,
     review: cycle.review,
+    evidenceReviews: cycle.evidenceReviews,
     problems: cycle.problems,
     artifacts: cycle.artifacts,
   }

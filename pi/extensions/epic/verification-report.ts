@@ -1,3 +1,4 @@
+import { reportVerificationCycle } from './verification-report-cycle.ts'
 import { createManualReview } from './manual-review.ts'
 import { canRepairTask } from './task-review-policy.ts'
 import { hasLikelyFailure } from './evidence-outcome.ts'
@@ -18,9 +19,7 @@ export function constructReviewReport(
   identity: string,
   remainingMs: number
 ): HumanReviewReport {
-  const cycle = [...record.cycles]
-    .reverse()
-    .find((c) => c.identity === identity && !c.invalidated)
+  const cycle = reportVerificationCycle(record, identity)
   const criteria = record.criteria.map((criterion) => {
     const obligations =
       record.plan?.obligations.filter((o) => o.criterionId === criterion.id) ??
@@ -87,6 +86,10 @@ export function constructReviewReport(
     ...(cycle?.fast?.checks ?? []),
     ...(cycle?.full?.checks ?? []),
   ]
+  const reviewFindings = [
+    ...(cycle?.review?.findings ?? []),
+    ...(cycle?.evidenceReviews.flatMap(r => r.result.findings) ?? []),
+  ]
   const mandatoryMissing =
     !cycle?.fast ||
     !cycle.full ||
@@ -103,21 +106,33 @@ export function constructReviewReport(
   if (!cycle?.fast) unresolved.push('check:fast')
   if (!cycle?.full) unresolved.push('check:full')
   if (!cycle?.review) unresolved.push('review:semantic')
+  if (cycle && !cycle.completed) unresolved.push('verification:incomplete')
   if (cycle?.smoke && !cycle.smoke.passed)
     unresolved.push('check:browser-smoke')
+  for (const entry of cycle?.evidence ?? []) {
+    if (entry.method !== 'agent_browser' || !entry.conclusion) continue
+    const fullReview = record.cycles.some(c => c.kind !== 'targeted' && c.identity === entry.identity && c.review)
+    const focusedReview = cycle?.evidenceReviews.some(r =>
+      r.identity === entry.identity && r.obligationIds.includes(entry.obligationId) && !r.limitations.length)
+    if (!fullReview && !focusedReview) unresolved.push(`review:evidence:${entry.obligationId}`)
+  }
+  const pendingRepair = record.schedule.queue.some(item => item.action === 'repair')
+  const fullPending = record.schedule.finalRequired
+  if (fullPending) unresolved.push('verification:final_full')
   const productFailure =
+    pendingRepair ||
     criteria.some((c) => c.status === 'not_met') ||
     checks.some(
       (c) => c.required && !c.passed && ![124, 127].includes(c.exitCode)
     ) ||
     !!cycle?.smoke?.findings.some((f) => f.category !== 'infrastructure') ||
-    !!cycle?.review?.findings.some((f) => f.severity !== 'suggestion')
-  if (cycle?.review?.findings.some((f) => f.severity !== 'suggestion'))
+    reviewFindings.some((f) => f.severity !== 'suggestion')
+  if (reviewFindings.some((f) => f.severity !== 'suggestion'))
     unresolved.push('review:findings')
-  const problems = cycle?.problems ?? [
+  const problems = [...(cycle?.problems.map(p => p.message) ?? [
     'No current verification cycle.',
-    ...(record.cycles.at(-1)?.problems ?? []),
-  ]
+    ...(record.cycles.at(-1)?.problems.map(p => p.message) ?? []),
+  ]), ...record.schedule.queue.map(item => `Pending ${item.action}: ${item.id}. ${item.feedback}`), ...(fullPending ? ['Final full verification remains incomplete.'] : [])]
   for (const [i] of problems.entries()) unresolved.push(`problem:${i + 1}`)
   if (cycle?.fast && !cycle.fast.passed) unresolved.push('check:fast')
   if (cycle?.full && !cycle.full.passed) unresolved.push('check:full')
@@ -174,6 +189,7 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
     '',
     `Readiness: **${report.readiness}**`,
     `Verification attempt: ${report.identity}`,
+    `Cycle: ${report.cycle?.kind ?? 'not completed'}${report.cycle?.target ? `; target ${report.cycle.target.id}` : ''}`,
     `Report: ${report.id}`,
     '',
     '## Acceptance criteria',
@@ -217,6 +233,11 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
     ),
     `Browser smoke: ${report.cycle?.smoke ? (report.cycle.smoke.passed ? 'passed' : `failed: ${report.cycle.smoke.findings.map((f) => f.message).join('; ')}`) : 'not attempted or blocked'}`,
     `Semantic review: ${report.cycle?.review ? report.cycle.review.summary : 'not attempted or blocked'}`,
+    ...(report.cycle?.evidenceReviews.flatMap(r => [
+      `Browser evidence review (${r.identity}; ${r.obligationIds.join(', ')}): ${r.result.summary}`,
+      ...r.limitations.map(message => `- Evidence review limitation: ${message}`),
+      ...r.result.findings.map(f => `- ${f.severity}: ${f.message}; fix: ${f.requiredFix}`),
+    ]) ?? []),
     ...(report.cycle?.review?.findings.map(
       (f) =>
         `- ${f.severity}: ${f.message}; ${f.file ?? f.affectedPaths.join(', ')}; reproduce: ${f.failureScenario}; fix: ${f.requiredFix}`
@@ -238,7 +259,7 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
     '',
     ...report.history.map(
       (c) =>
-        `- Cycle ${c.attempt}: ${c.identity}; criteria version ${c.plan?.criterionVersion ?? 'unknown'}, scenario version ${c.plan?.version ?? 'unknown'}; ${c.invalidated ?? ''}; ${c.problems.join('; ')}; ${c.artifacts.map((p) => artifactLink('artifact', p)).join(' ')}`
+        `- Cycle ${c.attempt}: ${c.kind}; ${c.target ? `target ${c.target.id}; ` : ''}${c.identity}; criteria version ${c.plan?.criterionVersion ?? 'unknown'}, scenario version ${c.plan?.version ?? 'unknown'}; ${c.invalidated ?? ''}; ${c.problems.map(p => p.message).join('; ')}; ${c.artifacts.map((p) => artifactLink('artifact', p)).join(' ')}`
     ),
     '',
     '## Human decisions',

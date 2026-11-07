@@ -2,6 +2,7 @@ import { assertConclusionReview } from './browser-conclusion-review.ts'
 import { validateManualReviews } from './manual-review.ts'
 import { validateFailureDecisions } from './failure-review.ts'
 import { assertSuspectedFailure } from './evidence-outcome.ts'
+import { validateReviewResult } from './review-validation.ts'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -34,6 +35,12 @@ export class VerificationStore {
     const value = JSON.parse(
       await fs.readFile(this.file, 'utf8')
     ) as TaskVerificationRecord
+    if (value?.formatVersion !== 2)
+      throw new Error(`Incompatible task verification ledger format: ${String(value?.formatVersion)}; required 2. No migration was applied.`)
+    if (!value.schedule || !['initial_full', 'targeted', 'final_full', 'done'].includes(value.schedule.phase) ||
+        !Array.isArray(value.schedule.queue) || !Array.isArray(value.schedule.deferred) ||
+        typeof value.schedule.finalRequired !== 'boolean')
+      throw new Error('Invalid task verification schedule.')
     if (
       !value ||
       typeof value.taskId !== 'string' ||
@@ -47,7 +54,34 @@ export class VerificationStore {
       throw new Error('Invalid task verification ledger.')
     validateManualReviews(value)
     validateFailureDecisions(value)
+    for (const item of [...value.schedule.queue, ...value.schedule.deferred]) {
+      if (!item || typeof item.id !== 'string' || !item.id ||
+          !['criterion', 'check', 'smoke', 'semantic'].includes(item.kind) ||
+          !['repair', 'verify'].includes(item.action) || typeof item.feedback !== 'string' ||
+          (item.kind === 'criterion' && !value.criteria.some(c => c.id === item.criterionId)))
+        throw new Error('Invalid persisted verification work item.')
+    }
     for (const cycle of value.cycles) {
+      if (!['initial_full', 'targeted', 'final_full'].includes(cycle.kind) ||
+          typeof cycle.completed !== 'boolean' || !Number.isSafeInteger(cycle.candidateRevision) || cycle.candidateRevision < 0 ||
+          (cycle.kind === 'targeted' && !cycle.target))
+        throw new Error('Invalid persisted verification cycle scope.')
+      if (!Array.isArray(cycle.problems) || cycle.problems.some(p =>
+        !p || !['fast', 'full', 'browser_setup', 'browser_smoke', 'browser_exploration', 'obligation', 'semantic_review', 'evidence_review', 'interruption'].includes(p.stage) ||
+        typeof p.message !== 'string' || !p.message.trim() ||
+        !Array.isArray(p.obligationIds) || p.obligationIds.some(id => typeof id !== 'string' || !cycle.plan?.obligations.some(o => o.id === id))
+      )) throw new Error('Invalid persisted verification problem scope.')
+      if (cycle.browserOpened !== undefined && cycle.browserOpened !== true)
+        throw new Error('Invalid persisted browser setup result.')
+      if (!Array.isArray(cycle.evidenceReviews)) throw new Error('Invalid persisted browser evidence reviews.')
+      for (const review of cycle.evidenceReviews) {
+        if (!review || review.identity !== cycle.identity || !Array.isArray(review.obligationIds) ||
+            new Set(review.obligationIds).size !== review.obligationIds.length ||
+            review.obligationIds.some(id => !cycle.evidence.some(e => e.obligationId === id && e.method === 'agent_browser' && e.conclusion)) ||
+            !Array.isArray(review.limitations) || review.limitations.some(s => typeof s !== 'string' || !s.trim()))
+          throw new Error('Invalid persisted browser evidence review scope.')
+        validateReviewResult(review.result)
+      }
       for (const evidence of cycle.evidence) {
         if (!['pass', 'fail', 'likely-fail', 'inconclusive'].includes(evidence.outcome))
           throw new Error(`Incompatible task verification evidence outcome: ${String(evidence.outcome)}. Required pass/fail/likely-fail/inconclusive; no migration was applied.`)
@@ -112,6 +146,8 @@ export class VerificationStore {
     const task = state.tasks?.[state.currentTaskIndex]
     if (!task) throw new Error('Cannot freeze criteria without a task.')
     const record: TaskVerificationRecord = {
+      formatVersion: 2,
+      schedule: { phase: 'initial_full', queue: [], deferred: [], finalRequired: false },
       taskId: task.id,
       criteria: task.acceptanceCriteria.map((text, i) => ({
         id: `${task.id}:AC${i + 1}`,

@@ -68,7 +68,38 @@ export interface AcceptanceEvidence {
   reproduction?: string
   conclusion?: RecordedBrowserConclusion
 }
+export interface VerificationWorkItem {
+  id: string
+  kind: 'criterion' | 'check' | 'smoke' | 'semantic'
+  criterionId?: string
+  feedback: string
+  action: 'repair' | 'verify'
+}
+export interface VerificationSchedule {
+  phase: 'initial_full' | 'targeted' | 'final_full' | 'done'
+  queue: VerificationWorkItem[]
+  deferred: VerificationWorkItem[]
+  finalRequired: boolean
+  processedCycleId?: string
+  repairInvocationId?: string
+}
+export interface VerificationProblem {
+  stage: 'fast' | 'full' | 'browser_setup' | 'browser_smoke' | 'browser_exploration' | 'obligation' | 'semantic_review' | 'evidence_review' | 'interruption'
+  obligationIds: string[]
+  message: string
+}
+export interface BrowserEvidenceReview {
+  identity: string
+  obligationIds: string[]
+  result: ReviewResult
+  limitations: string[]
+}
 export interface VerificationCycle {
+  kind: 'initial_full' | 'targeted' | 'final_full'
+  target?: VerificationWorkItem
+  repairInvocationId?: string
+  completed: boolean
+  candidateRevision: number
   id: string
   /** Verification attempt identifier, independent of candidate file contents. */
   identity: string
@@ -77,8 +108,10 @@ export interface VerificationCycle {
   full?: CheckSuiteResult
   smoke?: BrowserSmokeResult
   review?: ReviewResult
+  evidenceReviews: BrowserEvidenceReview[]
+  browserOpened?: true
   evidence: AcceptanceEvidence[]
-  problems: string[]
+  problems: VerificationProblem[]
   artifacts: string[]
   state: EpicDomainState
   plan?: VerificationPlan
@@ -134,6 +167,8 @@ export interface HumanRepairRequest {
   completed: boolean
 }
 export interface TaskVerificationRecord {
+  formatVersion: 2
+  schedule: VerificationSchedule
   manualReviews: ManualReview[]
   humanRepairRequests: HumanRepairRequest[]
   taskId: string

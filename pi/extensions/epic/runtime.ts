@@ -123,14 +123,17 @@ export async function createEpicRuntime(
         const identity = latest?.identity ?? randomUUID()
         const reason =
           'Task interrupted. Completed artifacts and charged invocations are retained; explicit resume verifies without repeating an interrupted repair.'
-        if (latest?.identity === identity) latest.problems.push(reason)
+        if (latest?.identity === identity) latest.problems.push({ stage: 'interruption', obligationIds: [], message: reason })
         else
           record.cycles.push({
             id: randomUUID(),
             identity,
             attempt: record.cycles.length + 1,
+            kind: 'initial_full', completed: false,
+            candidateRevision: record.invocations.filter(i => i.kind === 'repair').length,
             evidence: [],
-            problems: [reason],
+            evidenceReviews: [],
+            problems: [{ stage: 'interruption', obligationIds: [], message: reason }],
             artifacts: [],
             state,
             plan: record.plan,
