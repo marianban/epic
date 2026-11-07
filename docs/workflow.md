@@ -75,14 +75,27 @@ flowchart TD
 | 17. Final verification | Run repository-wide checks, including checks deferred by individual tasks; failures require recovery approval. |
 | 18. Complete epic | Mark the epic completed after final verification passes. |
 
-Repair attempts and infrastructure retries have separate task-wide counters and share a verification deadline across cycles and resumes. Acceptance planning has its own bounded correction batches and does not consume these verification allowances; initial implementation also precedes the verification deadline. Human review pauses the deadline. At the results checkpoint, `/epic-resume` reruns verification with the remaining allowance; `/task-repair` takes no arguments and explicitly adds one repair attempt and five minutes. Failed manual steps, their observations, and finding decisions are sent to the Implementer before reverification. If the current report contains dismissed or accepted findings, a grant runs the requested repair and one fresh verification cycle without automatic follow-up repairs. An interrupted repair requires an explicit additional grant before another repair can run. Acceptance criteria remain frozen through the normal workflow.
+## Commands by workflow state
 
-Each report has its own manual checklist, initially unchecked. Failed steps require a nonblank observation and take priority over unchecked steps in the dashboard's Continue action. Every manual step must pass before approval. In **Review failures**, each finding can be marked as a real issue requiring a fix, a false positive to skip, or a noncritical issue accepted without a fix; each decision requires a reason. Dismissed and accepted findings no longer block approval for that report. A `likely-fail` result records a suspected contradiction, uncertainty, and a confirmation check. It blocks approval until reviewed, but alone does not trigger an automatic implementation repair; marking it as a real issue authorizes a repair grant. Missing evidence alone calls for manual confirmation rather than an implementation repair.
-
-Completed manual review can resolve gaps in automated evidence without extra prompts. Reports preserve their original findings; manual results and finding decisions are recorded separately in the verification ledger and dashboard review history. Rerunning verification creates a new report and checklist requiring fresh review and acceptance; previous finding decisions do not carry over to the new report.
-
-Browser exploration uses a fresh page for each probe and records observations, images, runtime errors, and probe artifacts. The Verifier's conclusions must cite evidence from its own invocation. Inconclusive evidence and likely failures remain distinct from confirmed failures.
-
-The diagram shows the main path and key loops. Operational errors elsewhere also pause with diagnostics or a task report instead of silently advancing. State, events, evidence, and reports persist under `.pi/epics/runs/<epic-id>/`; `/epic-status` shows the pending action, and `/epic-exit` only hides the dashboard.
+| Workflow state | Command or dashboard action | Purpose |
+| --- | --- | --- |
+| No active epic | `/epic <epic>` | Start a new epic from the request. |
+| Plan review | `/plan-review` | Revise the plan using its `R:` comments. |
+| Plan review | `/plan-revise` | Request another plan revision. |
+| Plan review | `/plan-approve` | Approve the plan, or request revision if `R:` findings remain. |
+| Prerequisite approval | `/epic-approve-prerequisites` | Apply the proposed repository setup commands. |
+| Task planning review | `/task-review` | Revise the task using its `R:` findings. |
+| Task planning review | `/task-approve` | Approve the task for implementation, or request revision if findings remain. |
+| Acceptance planning paused | `/epic-resume` | Retry acceptance planning. |
+| Results review | Manual checklist; **Review failures** | Record manual results and decide which findings need fixes. |
+| Results review | **Continue** | Approve a completed review, or request repairs for recorded failures. |
+| Results review | `/task-approve` | Approve after the manual checklist passes and blocking findings are resolved. |
+| Results review | `/task-repair` | Grant one repair attempt and five additional minutes for recorded failures; takes no arguments. |
+| Results review | `/epic-resume` | Rerun verification with the remaining allowance. |
+| Recovery approval | `/epic-approve-recovery` | Approve the proposed recovery and retry the affected step. |
+| Escalated run | `/epic-resume` | Retry task execution after addressing the reported problem. |
+| Any persisted run | `/epic-status` | Show the current state and pending action. |
+| Any persisted run | `/epic-resume` | Resume the saved run and show the dashboard; behavior depends on the current state. |
+| Dashboard visible | `/epic-exit` | Hide the dashboard without changing the run state. |
 
 Source: [epic orchestration](../pi/extensions/epic/machines/epic-machine.ts), [task execution](../pi/extensions/epic/machines/task-execution-machine.ts), [services](../pi/extensions/epic/services.ts), [acceptance planning](../pi/extensions/epic/acceptance-planning.ts), [verification loop](../pi/extensions/epic/verification-runner.ts), [human decisions](../pi/extensions/epic/verification-decisions.ts), [finding decisions](../pi/extensions/epic/failure-review.ts), [approval policy](../pi/extensions/epic/task-review-policy.ts), and [dashboard submission](../pi/extensions/epic/dashboard/manual-review-submission.ts).

@@ -157,7 +157,18 @@ export function constructReviewReport(
   }
 }
 
-export function reviewReportMarkdown(report: HumanReviewReport): string {
+export function reviewReportMarkdown(report: HumanReviewReport, reportPath: string): string {
+  if (!path.isAbsolute(reportPath))
+    throw new Error('Review report Markdown requires an absolute output path.')
+  const artifactLink = (label: string, target: string): string => {
+    const relative = path.relative(path.dirname(reportPath), target)
+    const href = relative.split(path.sep).map(segment =>
+      encodeURIComponent(segment).replace(/[!'()*]/g, char =>
+        `%${char.charCodeAt(0).toString(16).toUpperCase()}`
+      )
+    ).join('/')
+    return `[${label}](${href})`
+  }
   return [
     `# Task ${report.taskId} human review`,
     '',
@@ -171,7 +182,7 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
       `- **${c.id}: ${c.status}** — ${c.text}`,
       ...c.evidence.map(
         (e) =>
-          `  - ${e.obligationId}: ${e.outcome}${e.gap ? ` (${e.gap})` : ''}. Expected: ${e.expected}. Observed: ${e.actual}${e.reproduction ? ` Reproduce: ${e.reproduction}` : ''}. ${e.artifacts.map((p) => `[evidence](${p})`).join(' ')}`
+          `  - ${e.obligationId}: ${e.outcome}${e.gap ? ` (${e.gap})` : ''}. Expected: ${e.expected}. Observed: ${e.actual}${e.reproduction ? ` Reproduce: ${e.reproduction}` : ''}. ${e.artifacts.map((p) => artifactLink('evidence', p)).join(' ')}`
       ),
       ...c.evidence.flatMap((e) => e.suspectedFailure ? [
         `  - Suspected failure: ${e.suspectedFailure.contradiction}`,
@@ -188,9 +199,9 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
     '',
     '## Browser probes (each ran on a fresh page)',
     ...(report.cycle?.probes ?? []).flatMap(p => [
-      `- [Probe ${p.id}](${p.artifact}), obligation ${p.obligationId}, invocation ${p.invocationId}, ${p.startedAt}–${p.completedAt}.`,
+      `- ${artifactLink(`Probe ${p.id}`, p.artifact)}, obligation ${p.obligationId}, invocation ${p.invocationId}, ${p.startedAt}–${p.completedAt}.`,
       ...p.observations.map(o => `  - ${o.id} at ${o.timestamp}: ${o.kind}, ${JSON.stringify(o.value)}${o.passed === undefined ? '' : ` (assertion ${o.passed ? 'passed' : 'failed'})`}`),
-      ...p.images.map(i => `  - [Image ${i.id}](${i.path}) at ${i.timestamp}, ${i.width}×${i.height}${i.selector ? `, crop ${i.selector}` : ''}.`),
+      ...p.images.map(i => `  - ${artifactLink(`Image ${i.id}`, i.path)} at ${i.timestamp}, ${i.width}×${i.height}${i.selector ? `, crop ${i.selector}` : ''}.`),
       ...p.runtimeErrors.map(e => `  - Application/runtime error: ${e}`),
       ...p.probeErrors.map(e => `  - Probe error: ${e}`),
     ]),
@@ -225,7 +236,7 @@ export function reviewReportMarkdown(report: HumanReviewReport): string {
     '',
     ...report.history.map(
       (c) =>
-        `- Cycle ${c.attempt}: ${c.identity}; criteria version ${c.plan?.criterionVersion ?? 'unknown'}, scenario version ${c.plan?.version ?? 'unknown'}; ${c.invalidated ?? ''}; ${c.problems.join('; ')}; ${c.artifacts.map((p) => `[artifact](${p})`).join(' ')}`
+        `- Cycle ${c.attempt}: ${c.identity}; criteria version ${c.plan?.criterionVersion ?? 'unknown'}, scenario version ${c.plan?.version ?? 'unknown'}; ${c.invalidated ?? ''}; ${c.problems.join('; ')}; ${c.artifacts.map((p) => artifactLink('artifact', p)).join(' ')}`
     ),
     '',
     '## Human decisions',
@@ -265,9 +276,10 @@ export async function finalizeReviewReport(
     `task-${state.currentTaskIndex + 1}-${report.id}-acceptance.json`
   )
   const file = await persistImmutableJsonArtifact(state, relative, report)
+  const markdownPath = file.replace(/\.json$/, '.md')
   await fs.writeFile(
-    file.replace(/\.json$/, '.md'),
-    reviewReportMarkdown(report),
+    markdownPath,
+    reviewReportMarkdown(report, markdownPath),
     { flag: 'wx' }
   )
   await appendEvent(

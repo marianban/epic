@@ -499,6 +499,43 @@ test('evidence validation preserves independent results and rejects missing, con
   assert.equal(duplicated.evidence.length, 0)
 })
 
+test('review Markdown links resolve after moving the run, including escaped filenames', async t => {
+  const f = await fixture(t)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const report = (await f.store.read()).report
+  assert.ok(report?.cycle)
+  const runRoot = path.join(f.root, 'run with spaces')
+  const reportPath = path.join(runRoot, 'reviews', 'acceptance.md')
+  const targets = ['conclusion.json', 'probe.json', 'frame (#1).png', 'trace.zip']
+    .map(name => path.join(runRoot, 'artifacts', name))
+  report.criteria[0].evidence = [{
+    obligationId: 'visual', criterionId: 'T1:AC1', expected: 'Visible', actual: 'Visible',
+    outcome: 'pass', method: 'agent_browser', artifacts: [targets[0]],
+    identity: report.identity, attempt: 1,
+  }]
+  report.cycle.probes = [{
+    id: 'probe', obligationId: 'visual', criterionId: 'T1:AC1',
+    identity: report.identity, attempt: 1, invocationId: 'invocation',
+    startedAt: 1, completedAt: 2, steps: [], observations: [],
+    images: [{ id: 'image', stepIndex: 0, timestamp: 1, width: 10, height: 10, path: targets[2] }],
+    runtimeErrors: [], probeErrors: [], artifact: targets[1], trace: targets[3],
+  }]
+  report.history = [{ ...report.cycle, artifacts: targets }]
+  const markdown = reviewReportMarkdown(report, reportPath)
+  const links = [...markdown.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)].map(match => match[1])
+  assert.equal(links.length, 7)
+  assert.match(markdown, /frame%20%28%231%29\.png/)
+  assert.ok(links.every(link => link.startsWith('../artifacts/')))
+  assert.deepEqual(new Set(links.map(link => path.resolve(path.dirname(reportPath), decodeURIComponent(link)))), new Set(targets))
+  const movedRoot = path.join(f.root, 'moved run')
+  await fs.mkdir(path.join(movedRoot, 'artifacts'), { recursive: true })
+  for (const target of targets)
+    await fs.writeFile(path.join(movedRoot, 'artifacts', path.basename(target)), '')
+  for (const link of links)
+    await fs.access(path.resolve(movedRoot, 'reviews', decodeURIComponent(link)))
+  assert.throws(() => reviewReportMarkdown(report, 'relative.md'), /absolute output path/)
+})
+
 test('incomplete evidence offers manual review and rejects removed limitations decisions', async (t) => {
   const f = await fixture(t)
   f.record.plan = {
@@ -522,7 +559,7 @@ test('incomplete evidence offers manual review and rejects removed limitations d
   const report = (await f.store.read()).report
   assert.ok(report)
   assert.equal(report.readiness, 'needs_manual_confirmation')
-  const markdown = reviewReportMarkdown(report)
+  const markdown = reviewReportMarkdown(report, '/run/reviews/acceptance.md')
   assert.doesNotMatch(markdown, /\/task-repair/)
   assert.match(markdown, /Review it manually/)
   const beforeRejectedRepair = await f.store.read()
@@ -1316,7 +1353,7 @@ test('real browser: adaptive canvas images, held keys, timed frames and explicit
   const record = await f.store.read()
   assert.equal(record.report?.readiness, 'verified', JSON.stringify(record.report?.problems))
   assert.equal(record.cycles[0].probes?.length, 2)
-  assert.match(reviewReportMarkdown(record.report as NonNullable<typeof record.report>), /Temporal comparison/)
+  assert.match(reviewReportMarkdown(record.report as NonNullable<typeof record.report>, '/run/reviews/acceptance.md'), /Temporal comparison/)
 })
 
 test('real browser: game mouse controls and simultaneous held keys deliver real input', async t => {
@@ -1585,8 +1622,8 @@ test('evidence gaps offer manual review without repair; a recorded manual defect
     assert.ok(!dashboard()?.actions.some(a => a.command === '/epic-resume'))
     assert.doesNotMatch(dashboard()?.message ?? '', /Reverify|task-accept|limitations/)
     assert.equal(dashboard()?.actions[0]?.disabled, true)
-    assert.doesNotMatch(reviewReportMarkdown(report), /\/task-repair/)
-    assert.doesNotMatch(reviewReportMarkdown(report), /Reverify/)
+    assert.doesNotMatch(reviewReportMarkdown(report, '/run/reviews/acceptance.md'), /\/task-repair/)
+    assert.doesNotMatch(reviewReportMarkdown(report, '/run/reviews/acceptance.md'), /Reverify/)
     assert.throws(() => latestTaskRepairRequest(report, { repairs: 1, timeMs: 300_000 }, false), /No actionable failure/)
     await assert.rejects(decideTask(state, {
       kind: 'grant', identity: report.identity, reportId: report.id, repairs: 1, timeMs: 300_000, reason: 'Try again',
@@ -1747,7 +1784,7 @@ test('dashboard continues after manual review without limitation dialogs', async
   await f.store.write(automatedFailure)
   assert.equal((await actions())?.[0]?.label, 'Continue (request fixes)')
   assert.ok((await actions())?.some(a => a.command === '/task-repair'))
-  assert.match(reviewReportMarkdown(automatedFailure.report), /\/task-repair/)
+  assert.match(reviewReportMarkdown(automatedFailure.report, '/run/reviews/acceptance.md'), /\/task-repair/)
   assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
   await f.update(0, 'failed', 'Rendering is broken')
   assert.equal((await actions())?.[0]?.label, 'Continue (request fixes)')
@@ -1772,7 +1809,7 @@ test('likely failures block completed manual approval without authorizing repair
   record.report = report
   assert.equal(report.readiness, 'needs_manual_confirmation')
   assert.ok(report.unresolved.length)
-  assert.match(reviewReportMarkdown(report), /Confirmation check: Focus the canvas/)
+  assert.match(reviewReportMarkdown(report, '/run/reviews/acceptance.md'), /Confirmation check: Focus the canvas/)
   await f.store.write(record)
   await f.update(0, 'passed')
   await f.update(1, 'passed')
