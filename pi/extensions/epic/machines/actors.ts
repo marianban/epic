@@ -31,17 +31,17 @@ export async function runAgentActor(
   const actor = createActor(agentActor, { input })
   return new Promise<AgentRunResult>((resolve, reject) => {
     actor.subscribe({
+      next: (snapshot) => {
+        if (snapshot.status === 'done') {
+          resolve(snapshot.output)
+          actor.stop()
+        }
+      },
       complete: () => actor.stop(),
       error: (error) => {
         actor.stop()
         reject(error)
       },
-    })
-    actor.subscribe((snapshot) => {
-      if (snapshot.status === 'done') {
-        resolve(snapshot.output)
-        actor.stop()
-      }
     })
     actor.start()
   })
