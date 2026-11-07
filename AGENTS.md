@@ -7,3 +7,4 @@
 - Use fail-fast behavior. Surface errors explicitly instead of silently ignoring invalid states.
 - Provide required constructor/service/function parameters explicitly; avoid hidden defaults for clocks, timeouts, and operational dependencies.
 - Compute or inject operational values at composition/call sites; avoid conditional fallback initialization inside application code.
+- After every code change, check `docs/workflow.md` against the implementation and update any affected workflow descriptions, diagrams, commands, and review or recovery behavior in the same change. Code is the source of truth.
