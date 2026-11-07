@@ -1063,6 +1063,8 @@ test('real browser: verifier corrects a CSS probe without spending an implementa
         obligationId: obligation.id, outcome: 'pass', basis: 'observations',
         evidenceIds: [attempts[2].observations[0].id],
         explanation: 'All four computed margin sides are zero pixels.', limitations: [],
+        observations: [{ target: 'main', targetIdentity: 'main element computed styles', evidenceId: attempts[2].observations[0].id, property: 'all margin sides equal zero', value: 'true' }],
+        selfCheck: { alternativeExplanation: 'A shorthand margin could hide nonzero sides.', counterEvidence: 'All four sides were checked individually.', wouldPassIfBroken: false, reasoning: 'Any nonzero side would fail the recorded assertion.' },
       } }),
     })
     assert.equal(response.status, 200, await response.text())
@@ -1195,6 +1197,8 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
         body: JSON.stringify({ obligationId: 'counter', conclusion: {
           obligationId: 'counter', outcome: 'pass', basis: 'observations',
           evidenceIds: [probe.observations[0].id], explanation: 'One real click produced count 1 from a fresh page.', limitations: [],
+          observations: [{ target: 'counter', targetIdentity: 'fresh page counter output', evidenceId: probe.observations[0].id, property: 'count after click', value: '1' }],
+          selfCheck: { alternativeExplanation: 'Count may start at 1.', counterEvidence: 'Fresh page initializes to 0 before the real click.', wouldPassIfBroken: false, reasoning: 'A broken click would leave count at 0.' },
         } }),
       })
       assert.equal(concluded.status, 200)
@@ -1248,6 +1252,8 @@ test('real browser: smoke misses interaction defect, acceptance repairs it, and 
               body: JSON.stringify({ obligationId: 'counter', conclusion: {
                 obligationId: 'counter', outcome: 'pass', basis: 'observations', evidenceIds: [probe.observations[0].id],
                 explanation: 'Click increments count to 1 on a fresh page.', limitations: [],
+                observations: [{ target: 'counter', targetIdentity: 'fresh page counter output', evidenceId: probe.observations[0].id, property: 'count after click', value: '1' }],
+                selfCheck: { alternativeExplanation: 'Count may start at 1.', counterEvidence: 'Fresh page initializes to 0 before the real click.', wouldPassIfBroken: false, reasoning: 'A broken click would leave count at 0.' },
               } }),
             })
             assert.equal(conclusion.status, 200)
@@ -1340,6 +1346,11 @@ test('real browser: adaptive canvas images, held keys, timed frames and explicit
         evidenceIds: [...probe.observations.map(o => o.id), ...probe.images.map(i => i.id)],
         explanation: 'The real ArrowRight input moved x from 20 to 50, confirmed by the red paddle shifting right in the captured canvas.',
         temporalComparison: 'Before and after input on the same fresh page, x increased by 30 and the red paddle moved right.', limitations: [],
+        observations: [
+          ...probe.observations.map(o => ({ target: 'paddle', targetIdentity: 'red rectangle in canvas; window.x', evidenceId: o.id, property: 'x', value: `${o.value} canvas pixels` })),
+          ...probe.images.map((i, n) => ({ target: 'paddle', targetIdentity: 'red rectangle in canvas; window.x', evidenceId: i.id, property: 'x', value: `${n === 0 ? 20 : 50} canvas pixels` })),
+        ],
+        selfCheck: { alternativeExplanation: 'A different canvas object could move.', counterEvidence: 'The red paddle and its state coordinate both move from 20 to 50.', wouldPassIfBroken: false, reasoning: 'A stationary paddle would contradict both state and images.' },
       } as never, operation.signal, undefined, ctx)
       assert.equal((conclusion.details as AcceptanceEvidence).outcome, 'pass')
     } finally {

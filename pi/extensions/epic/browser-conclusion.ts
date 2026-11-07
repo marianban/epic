@@ -1,3 +1,4 @@
+import { assertConclusionReview, assertConclusionObservations } from './browser-conclusion-review.ts'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -143,6 +144,8 @@ export async function concludeBrowserProbe(input: {
         'Motion conclusions require temporalComparison and at least two timed observations/images from the same probe.'
       )
   }
+  assertConclusionReview(c)
+  assertConclusionObservations(c, cited)
   const conclusion = {
     ...c,
     id: randomUUID(),

@@ -1,3 +1,4 @@
+import { assertConclusionReview } from './browser-conclusion-review.ts'
 import { validateManualReviews } from './manual-review.ts'
 import { validateFailureDecisions } from './failure-review.ts'
 import { assertSuspectedFailure } from './evidence-outcome.ts'
@@ -51,6 +52,7 @@ export class VerificationStore {
         if (!['pass', 'fail', 'likely-fail', 'inconclusive'].includes(evidence.outcome))
           throw new Error(`Incompatible task verification evidence outcome: ${String(evidence.outcome)}. Required pass/fail/likely-fail/inconclusive; no migration was applied.`)
         assertSuspectedFailure(evidence.outcome, evidence.suspectedFailure)
+        if (evidence.conclusion) assertConclusionReview(evidence.conclusion)
       }
     }
     for (const n of [

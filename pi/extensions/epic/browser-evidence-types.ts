@@ -42,6 +42,24 @@ export interface BrowserProbe {
   trace: string
 }
 
+export interface ConclusionObservation {
+  /** Stable subject name shared by observations of the same target. */
+  target: string
+  /** Distinguishing appearance/location, selector, or state path. */
+  targetIdentity: string
+  evidenceId: string
+  property: string
+  /** Observed value, including units/coordinate frame where applicable. */
+  value: string
+}
+
+export interface ConclusionSelfCheck {
+  alternativeExplanation: string
+  counterEvidence: string
+  wouldPassIfBroken: boolean
+  reasoning: string
+}
+
 export interface BrowserConclusion {
   obligationId: string
   outcome: EvidenceOutcome
@@ -49,6 +67,8 @@ export interface BrowserConclusion {
   gap?: EvidenceGap
   evidenceIds: string[]
   explanation: string
+  observations: ConclusionObservation[]
+  selfCheck: ConclusionSelfCheck
   limitations: string[]
   basis: 'observations' | 'visual' | 'motion'
   /** Required when citing more than one fresh-page probe. */

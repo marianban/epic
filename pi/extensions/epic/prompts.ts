@@ -83,6 +83,7 @@ export function reviewerTask(
       : 'No separate task artifact was supplied.',
     `Current task delta paths:\n${changedPaths.length ? changedPaths.map((path) => `- ${path}`).join('\n') : '- None'}`,
     `Implementation diff:\n${diff}`,
+    'For browser evidence, independently inspect raw observations and open cited images with the read tool, identify the intended target, then compare your observations with the verifier’s structured claims and self-check. Report unsupported claims and evidence IDs in acceptance-criterion feedback. If images cannot be inspected, state that limitation. Do not infer correctness from the pass label or self-check.',
     `Deterministic check summary:\n${checks}`,
   ].join('\n\n')
 }

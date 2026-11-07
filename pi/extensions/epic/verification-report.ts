@@ -192,6 +192,8 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
       ...c.evidence.flatMap(e => e.conclusion ? [
         `  - Conclusion ${e.conclusion.id} (${e.conclusion.basis}): ${e.conclusion.explanation}`,
         `  - Cited evidence: ${e.conclusion.evidenceIds.join(', ') || 'none'}. Limitations: ${e.conclusion.limitations.join('; ') || 'none'}.`,
+        ...e.conclusion.observations.map(o => `  - Observation ${o.evidenceId}: ${o.target} (${o.targetIdentity}), ${o.property}: ${o.value}.`),
+        `  - Self-check: alternative explanation: ${e.conclusion.selfCheck.alternativeExplanation}; counter-evidence: ${e.conclusion.selfCheck.counterEvidence}; would pass if broken: ${e.conclusion.selfCheck.wouldPassIfBroken}; ${e.conclusion.selfCheck.reasoning}`,
         ...(e.conclusion.temporalComparison ? [`  - Temporal comparison: ${e.conclusion.temporalComparison}`] : []),
         ...(e.conclusion.separateExecutions ? [`  - Separate executions: ${e.conclusion.separateExecutions}`] : []),
       ] : []),

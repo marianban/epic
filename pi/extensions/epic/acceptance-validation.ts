@@ -1,3 +1,4 @@
+import { assertConclusionReview } from './browser-conclusion-review.ts'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { assertSuspectedFailure } from './evidence-outcome.ts'
@@ -65,6 +66,8 @@ export async function validateAcceptanceEvidence(
       assertSuspectedFailure(result.outcome, result.suspectedFailure)
       if (result.method === 'agent_browser' && !result.conclusion)
         throw new Error('Browser acceptance requires an explicit recorded conclusion.')
+      if (result.method === 'agent_browser' && result.conclusion)
+        assertConclusionReview(result.conclusion)
       for (const artifact of result.artifacts) {
         if (typeof artifact !== 'string')
           throw new Error('Invalid artifact reference.')

@@ -76,7 +76,7 @@ export default function verifierTools(pi: ExtensionAPI): void {
     executionMode: 'sequential',
     label: 'Conclude browser verification',
     description:
-      'Conclude one obligation using recorded evidence IDs from this invocation. Explain why observations establish the expectation, and list limitations honestly. Pass/fail/likely-fail needs cited evidence; inconclusive needs gap. Use likely-fail for an observed contradiction with a specific uncertainty, and provide suspectedFailure containing contradiction, uncertainty, and confirmationCheck. Use inconclusive when evidence cannot judge behavior. basis is observations, visual (cite images), or motion (cite two timed records in one probe and explain temporalComparison). When combining independent fresh-page probes, explain separateExecutions. Runtime errors prevent pass. Invalid conclusions return feedback; correct them or report inconclusive. Prose outside this tool cannot establish acceptance.',
+      'Conclude one obligation using recorded evidence IDs from this invocation. Supply structured observations identifying the target, its distinguishing identity, evidenceId, property, and observed value for every cited measurement/image. Record an explicit selfCheck: alternativeExplanation, counterEvidence, wouldPassIfBroken, reasoning. A pass requires wouldPassIfBroken=false. Motion observations must track the same target identity/property at different times in one probe. Explain why observations establish the expectation, and list limitations honestly. Pass/fail/likely-fail needs cited evidence; inconclusive needs gap. Use likely-fail for an observed contradiction with a specific uncertainty, and provide suspectedFailure containing contradiction, uncertainty, and confirmationCheck. Use inconclusive when evidence cannot judge behavior. basis is observations, visual (cite images), or motion (cite two timed records in one probe and explain temporalComparison). When combining independent fresh-page probes, explain separateExecutions. Runtime errors prevent pass. Invalid conclusions return feedback; correct them or report inconclusive. Prose outside this tool cannot establish acceptance.',
     parameters: {
       type: 'object',
       properties: {
@@ -88,6 +88,32 @@ export default function verifierTools(pi: ExtensionAPI): void {
         },
         evidenceIds: { type: 'array', items: { type: 'string' } },
         explanation: { type: 'string' },
+        observations: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              target: { type: 'string' },
+              targetIdentity: { type: 'string' },
+              evidenceId: { type: 'string' },
+              property: { type: 'string' },
+              value: { type: 'string' },
+            },
+            required: ['target', 'targetIdentity', 'evidenceId', 'property', 'value'],
+            additionalProperties: false,
+          },
+        },
+        selfCheck: {
+          type: 'object',
+          properties: {
+            alternativeExplanation: { type: 'string' },
+            counterEvidence: { type: 'string' },
+            wouldPassIfBroken: { type: 'boolean' },
+            reasoning: { type: 'string' },
+          },
+          required: ['alternativeExplanation', 'counterEvidence', 'wouldPassIfBroken', 'reasoning'],
+          additionalProperties: false,
+        },
         suspectedFailure: {
           type: 'object',
           properties: {
@@ -108,6 +134,8 @@ export default function verifierTools(pi: ExtensionAPI): void {
         'outcome',
         'evidenceIds',
         'explanation',
+        'observations',
+        'selfCheck',
         'limitations',
         'basis',
       ],

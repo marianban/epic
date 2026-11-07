@@ -69,6 +69,16 @@ async function fixture(t: TestContext) {
     basis: 'motion',
     evidenceIds: ['before', 'after'],
     explanation: 'After Right, paddle x increased from 40 to 80.',
+    observations: [
+      { target: 'paddle', targetIdentity: 'window.paddle', evidenceId: 'before', property: 'x', value: '40 CSS pixels' },
+      { target: 'paddle', targetIdentity: 'window.paddle', evidenceId: 'after', property: 'x', value: '80 CSS pixels' },
+    ],
+    selfCheck: {
+      alternativeExplanation: 'Another object could move while the paddle stays still.',
+      counterEvidence: 'Both reads select window.paddle.x, not another object.',
+      wouldPassIfBroken: false,
+      reasoning: 'The same paddle property increased after Right; a stationary paddle would not satisfy this comparison.',
+    },
     temporalComparison: 'The same page was measured before and after Right.',
     limitations: [],
   }
@@ -131,6 +141,49 @@ test('conclusions preserve runtime evidence and reject altered persisted interpr
     ).problems.join(' '),
     /explicit recorded conclusion/
   )
+})
+
+test('structured observations and a discriminating self-check are required before passing', async t => {
+  const f = await fixture(t)
+  for (const missing of ['observations', 'selfCheck'] as const) {
+    const legacy = { ...f.conclusion, [missing]: undefined } as unknown as BrowserConclusion
+    await assert.rejects(f.conclude(legacy), /Incompatible browser conclusion/)
+  }
+  await assert.rejects(f.conclude({ ...f.conclusion, observations: [] }), /structured observations/)
+  for (const field of ['target', 'targetIdentity', 'evidenceId', 'property', 'value'] as const)
+    await assert.rejects(f.conclude({
+      ...f.conclusion,
+      observations: [{ ...f.conclusion.observations[0], [field]: ' ' }],
+    }), /Structured observations require/)
+  for (const field of ['alternativeExplanation', 'counterEvidence', 'reasoning'] as const)
+    await assert.rejects(f.conclude({
+      ...f.conclusion, selfCheck: { ...f.conclusion.selfCheck, [field]: ' ' },
+    }), /Self-check requires/)
+  await assert.rejects(f.conclude({
+    ...f.conclusion, selfCheck: { ...f.conclusion.selfCheck, wouldPassIfBroken: true },
+  }), /cannot establish a pass/)
+  await assert.rejects(f.conclude({
+    ...f.conclusion,
+    observations: [{ ...f.conclusion.observations[0], evidenceId: 'uncited-image' }],
+  }), /must reference cited evidence/)
+  await assert.rejects(f.conclude({ ...f.conclusion, observations: f.conclusion.observations.slice(0, 1) }), /every cited/)
+  const result = await f.conclude(f.conclusion)
+  assert.deepEqual(result.conclusion?.observations, f.conclusion.observations)
+  assert.deepEqual(result.conclusion?.selfCheck, f.conclusion.selfCheck)
+})
+
+test('motion cannot compare different target identities or unrelated properties', async t => {
+  const f = await fixture(t)
+  for (const change of [
+    { target: 'ball', targetIdentity: 'white circle' },
+    { targetIdentity: 'another paddle' },
+    { property: 'y' },
+  ]) {
+    await assert.rejects(f.conclude({
+      ...f.conclusion,
+      observations: [f.conclusion.observations[0], { ...f.conclusion.observations[1], ...change }],
+    }), /same target identity and property/)
+  }
 })
 
 test('foreign/stale IDs and motion from separate executions cannot establish acceptance', async (t) => {
@@ -257,6 +310,7 @@ test('runtime errors survive corrected probes while probe failures can be correc
     ...f.conclusion,
     outcome: 'inconclusive',
     evidenceIds: [],
+    observations: [],
     gap: 'inconclusive',
     limitations: ['Trajectory not measurable.'],
   })
