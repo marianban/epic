@@ -61,7 +61,7 @@ export function cycleWork(
     const evidence = cycle.evidence.filter(
       (e) => e.criterionId === criterion.id
     )
-    const failed = evidence.some((e) => e.outcome === 'fail')
+    const failed = evidence.some((e) => e.outcome === 'fail' || e.outcome === 'likely-fail')
     const pending = obligations.some(
       (o) =>
         !evidence.some((e) => e.obligationId === o.id && e.outcome === 'pass')
@@ -151,7 +151,7 @@ export function processVerificationCycle(
       (w) => !schedule.queue.some((q) => q.id === w.id)
     )
     for (const item of remaining) {
-      // One evidence-only attempt per item per round. Uncertainty never authorizes repair.
+      // One evidence-only attempt per gap per round. Observed contradictions enter repair.
       if (item.action === 'verify') {
         schedule.deferred = schedule.deferred.filter((d) => d.id !== item.id)
         schedule.deferred.push(item)
@@ -171,5 +171,5 @@ export function processVerificationCycle(
 }
 
 export function repairInstructions(item: VerificationWorkItem): string {
-  return `Repair only this work item: ${item.id} (${item.kind}). Related changes necessary for this fix are allowed. Do not repair other criteria or weaken acceptance requirements.\n${item.feedback}`
+  return `Repair only this work item: ${item.id} (${item.kind}). Related changes necessary for this fix are allowed. Do not repair other criteria or weaken acceptance requirements. Diagnose and fix the observed behavior using the expected result, contradiction, reproduction steps, and artifacts below, then demonstrate the expected behavior. Investigate the application first; uncertainty about the cause does not defer repair. An infrastructure explanation requires concrete evidence of a tool or delivery failure.\n${item.feedback}`
 }

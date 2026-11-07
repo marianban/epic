@@ -1,5 +1,5 @@
-import { canRepairReviewedTask, reviewFailures, failureDispositionLabels, isFailureDismissed } from '../failure-review.ts'
-import type { FailureDisposition } from '../verification-types.ts'
+import { canRepairReviewedTask, reviewFailures } from '../failure-review.ts'
+import { failureReviewItems } from './failure-review-items.ts'
 import { currentManualReview } from '../manual-review.ts'
 import { canApproveTask, canRepairTask } from '../task-review-policy.ts'
 import { manualReviewSubmission } from './manual-review-submission.ts'
@@ -288,7 +288,6 @@ function actionRequired(
           : []
         const reviewActions: DashboardAction[] | undefined = manualReview && verificationRecord?.report ? [
           { id: 'manual-review-submit', label: manualReviewSubmission(verificationRecord).label, kind: 'primary', manualReview, disabled: manualReviewSubmission(verificationRecord).kind === 'incomplete' },
-          ...(reviewFailures(verificationRecord).length ? [{ id: 'manual-review-failures', label: 'Review failures', manualReview }] : []),
           ...repairActions,
           { id: 'manual-review-history', label: 'Review history', manualReview },
           action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
@@ -297,18 +296,13 @@ function actionRequired(
           id: 'task-action-required',
           severity: 'warning',
           title: 'Task awaits human review',
-          message: manualApprovalReady
-            ? 'All manual review steps passed. Recorded findings have been reviewed. Continue to approve the task.'
-            : verificationRecord?.report && reviewFailures(verificationRecord).some(f => f.likely && !isFailureDismissed(f) && f.decision?.kind !== 'request_fix') && !manualFailures
-            ? 'Likely failure blocks approval. Investigate the contradiction, uncertainty, and confirmation check in the verification report. Record a confirmed manual defect to request fixes; suspicion alone does not authorize repair.'
+          message: verificationRecord?.report && reviewFailures(verificationRecord).length
+            ? 'Review the flagged behavior. Pass: works correctly · Fail: needs a fix · Ignored: accept without a fix.'
+            : manualApprovalReady
+            ? 'All manual review steps passed. Continue to approve the task.'
             : taskReviewMessage(state, readiness, manualFailures, manualApprovalReady, repairActions.length > 0),
           manualReview,
-          failureReviewLines: verificationRecord?.report ? reviewFailures(verificationRecord).flatMap(f => [
-            `${f.id}: ${f.expected}`,
-            `Observed: ${f.actual}`,
-            `Decision: ${f.decision ? failureDispositionLabels[f.decision.kind as FailureDisposition] : 'Not reviewed'}`,
-            ...(f.decision ? [`Reason: ${f.decision.reason}`] : []),
-          ]) : undefined,
+          failureReviewItems: verificationRecord?.report ? failureReviewItems(verificationRecord) : undefined,
           manualReviewSteps: task.manualReviewSteps,
           verificationReportLink: state.lastVerificationReportPath
             ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'Verification report')

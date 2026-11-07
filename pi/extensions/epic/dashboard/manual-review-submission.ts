@@ -1,4 +1,4 @@
-import { canRepairReviewedTask, reviewFailures, isFailureDismissed } from '../failure-review.ts'
+import { canRepairReviewedTask, reviewFailures } from '../failure-review.ts'
 import { currentManualReview } from '../manual-review.ts'
 import { canApproveTask } from '../task-review-policy.ts'
 import type { TaskVerificationRecord } from '../verification-types.ts'
@@ -13,8 +13,8 @@ export function manualReviewSubmission(record: TaskVerificationRecord): {
     return { kind: 'grant', label: 'Continue (request fixes)' }
   }
   if (!canApproveTask(record)) {
-    if (reviewFailures(record).some(f => f.likely && !isFailureDismissed(f)))
-      return { kind: 'incomplete', label: 'Continue (resolve likely failure)' }
+    if (reviewFailures(record).length)
+      return { kind: 'incomplete', label: 'Continue (complete failure review)' }
     return { kind: 'incomplete', label: 'Continue (complete manual review)' }
   }
   return { kind: 'approve', label: 'Continue (approve task)' }

@@ -43,9 +43,8 @@ async function execute(
     throw new Error(
       'This review action belongs to a stale report. Refresh the dashboard.'
     )
-  if (action.id === 'manual-review-failures') {
-    const request = await editFailureReview(record,
-      (title, options) => ctx.ui.select(title, options),
+  if (action.id === 'failure-review-update') {
+    const request = await editFailureReview(record, action.itemId, action.failureStatus,
       (title, value) => ctx.ui.editor(title, value))
     if (request) await submitTaskDecision(ctx, request)
     return

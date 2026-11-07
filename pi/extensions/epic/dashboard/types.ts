@@ -107,10 +107,20 @@ export interface CurrentTaskDashboardState {
   readonly diff?: TaskDiffDashboardState
 }
 
+export type FailureReviewStatus = 'not_checked' | 'passed' | 'failed' | 'ignored'
+
+export interface FailureReviewItem {
+  readonly id: string
+  readonly text: string
+  readonly status: FailureReviewStatus
+  readonly observation: string
+}
+
 export interface DashboardAction {
   readonly disabled?: boolean
   readonly manualReview?: ManualReview
   readonly itemId?: string
+  readonly failureStatus?: FailureReviewStatus
   readonly status?: ManualReviewStatus
   readonly id: string
   readonly label: string
@@ -124,7 +134,7 @@ export interface DashboardActionRequest {
   readonly title: string
   readonly message?: string
   readonly manualReview?: ManualReview
-  readonly failureReviewLines?: readonly string[]
+  readonly failureReviewItems?: readonly FailureReviewItem[]
   readonly manualReviewSteps?: readonly string[]
   readonly verificationReportLink?: string
   readonly actions: readonly DashboardAction[]

@@ -8,8 +8,10 @@ export function canApproveTask(record: TaskVerificationRecord): boolean {
   const failures = reviewFailures(record)
   if (failures.some(f => !isFailureDismissed(f) && (f.likely || report.readiness === 'issues_remaining' || f.decision?.kind === 'request_fix'))) return false
   const items = currentManualReview(record).items
+  if (items.some((item) => item.status === 'failed')) return false
+  if (failures.length > 0 && failures.every(isFailureDismissed)) return true
   if (items.some((item) => item.status !== 'passed')) return false
-  return (report.readiness === 'issues_remaining' && failures.length > 0 && failures.every(isFailureDismissed)) || report.readiness === 'verified' ||
+  return report.readiness === 'verified' ||
     (report.readiness === 'needs_manual_confirmation' && items.length > 0)
 }
 

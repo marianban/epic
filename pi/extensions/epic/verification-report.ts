@@ -63,7 +63,7 @@ export function constructReviewReport(
         } satisfies AcceptanceEvidence)
       )
     })
-    const status = evidence.some((e) => e.outcome === 'fail')
+    const status = evidence.some((e) => e.outcome === 'fail' || e.outcome === 'likely-fail')
       ? 'not_met'
       : evidence.length && evidence.every((e) => e.outcome === 'pass')
         ? 'met'
@@ -264,9 +264,9 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
     '',
     '## Human decisions',
     '',
-    'Complete the manual review checklist in the dashboard, then choose Continue. When every manual step passes and no confirmed or likely failure remains, the task is approved without additional prompts, including when automated evidence is incomplete. Use Review failures to mark each finding as a real issue, false positive, or accepted noncritical issue, with a reason. Dismissed or explicitly accepted findings no longer block approval for this report. The report retains its original findings and evidence; decisions are recorded separately in the verification ledger and dashboard review history.',
+    'Complete the checklist in the dashboard, then choose Continue. Failure Review Steps replace the manual checklist when findings are present: Pass confirms the behavior works, Fail requests a fix, and Ignored accepts the finding without a fix. Enter adds an optional observation. Approval requires every failure step to be Pass or Ignored, or every manual step to pass when no failures are listed. Recorded failed manual steps still block approval. The report retains its original findings and evidence; decisions are recorded separately in the verification ledger and dashboard review history.',
     ...(hasLikelyFailure(report)
-      ? ['Likely failure blocks approval. Investigate the recorded contradiction and perform its confirmation check before obtaining a new verification result. A likely failure alone does not authorize an implementation repair.']
+      ? ['Observed contradictions, including likely failures, require repair and block approval. Use the recorded evidence to diagnose and fix the behavior; uncertainty about the cause does not require human confirmation before repair.']
       : []),
     ...(canRepairTask(report.readiness, false)
       ? ['Use /task-repair to grant one additional repair attempt and five additional minutes for the recorded failures.']

@@ -1,3 +1,4 @@
+import { failureChecklistLines, nextFailureStatus } from './failure-checklist.ts'
 import { checklistLines, nextReviewStatus } from './manual-checklist.ts'
 import type { Theme } from '@earendil-works/pi-coding-agent'
 import {
@@ -121,7 +122,9 @@ export class ActionRequired implements Component {
 
     const review = this.state.manualReview
     const key = parseKey(data)
-    if (review?.items.length) {
+    const failures = this.state.failureReviewItems
+    const items = failures?.length ? failures : review?.items
+    if (items?.length) {
       if (key === 'tab' || key === 'shift+tab') {
         if (this.checklistFocused) {
           this.checklistFocused = false
@@ -148,21 +151,26 @@ export class ActionRequired implements Component {
           this.selectedItem =
             (this.selectedItem +
               (key === 'up' ? -1 : 1) +
-              review.items.length) %
-            review.items.length
+              items.length) %
+            items.length
           this.invalidate()
           return true
         }
         if (key === 'space' || key === 'enter') {
-          const item = review.items[this.selectedItem]
+          const failureItem = failures?.[this.selectedItem]
+          const manualItem = review?.items[this.selectedItem]
+          const item = failures?.length ? failureItem : manualItem
+          if (failures?.length && key === 'enter' && item?.status === 'not_checked') return true
           if (item)
             this.runAction({
-              id: 'manual-review-update',
+              id: failures?.length ? 'failure-review-update' : 'manual-review-update',
               label: 'Update review item',
               manualReview: review,
               itemId: item.id,
-              ...(key === 'space'
-                ? { status: nextReviewStatus(item.status) }
+              ...(key === 'space' && failureItem
+                ? { failureStatus: nextFailureStatus(failureItem.status) }
+                : key === 'space' && manualItem
+                ? { status: nextReviewStatus(manualItem.status) }
                 : {}),
             })
           return true
@@ -234,16 +242,15 @@ export class ActionRequired implements Component {
             this.theme.fg('text', state.message),
             Math.max(1, innerWidth)
           )
-    const manualReviewLines = state.manualReview
+    const manualReviewLines = state.failureReviewItems?.length
+      ? failureChecklistLines(state.failureReviewItems, this.checklistFocused ? this.selectedItem : undefined)
+          .flatMap((line) => wrapTextWithAnsi(line, Math.max(1, innerWidth)))
+      : state.manualReview
       ? checklistLines(
           state.manualReview,
           this.checklistFocused ? this.selectedItem : undefined
         ).flatMap((line) => wrapTextWithAnsi(line, Math.max(1, innerWidth)))
       : this.renderManualReviewSteps(state.manualReviewSteps, innerWidth)
-    const failureReviewLines = state.failureReviewLines?.length
-      ? ['Failures — use Review failures to classify', ...state.failureReviewLines]
-          .flatMap((line) => wrapTextWithAnsi(line, Math.max(1, innerWidth)))
-      : []
     const actionLines = this.renderActions(state.actions, innerWidth)
     const reportLines =
       state.verificationReportLink === undefined
@@ -256,7 +263,6 @@ export class ActionRequired implements Component {
       ...titleLines,
       ...(messageLines.length > 0 ? ['', ...messageLines] : []),
       ...(manualReviewLines.length > 0 ? ['', ...manualReviewLines] : []),
-      ...(failureReviewLines.length > 0 ? ['', ...failureReviewLines] : []),
       ...(reportLines.length > 0 ? ['', ...reportLines] : []),
       ...(actionLines.length > 0 ? ['', ...actionLines] : []),
     ]
@@ -346,7 +352,7 @@ export class ActionRequired implements Component {
   private renderButton(action: DashboardAction, label: string): string {
     const focused =
       action.id === this.focusedActionId &&
-      !(this.state?.manualReview?.items.length && this.checklistFocused)
+      !((this.state?.failureReviewItems?.length || this.state?.manualReview?.items.length) && this.checklistFocused)
     const button = `${focused ? '▸' : ' '}[ ${label} ]`
     const colored = this.theme.fg(
       action.disabled ? 'dim' : actionColor(action),

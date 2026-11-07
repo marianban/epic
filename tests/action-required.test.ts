@@ -324,3 +324,32 @@ test('failure editor requires feedback, cancellation preserves the saved item, a
   assert.equal(edited?.observation, 'Confirmed twice')
   assert.deepEqual(manualReview, before)
 })
+
+test('failure checklist replaces manual steps and cycles Pass, Fail, Ignored inline', async () => {
+  const selected: DashboardAction[] = []
+  const items = [
+    { id: 'T1:AC2:O1', text: 'Holding Left moves the paddle left.', status: 'not_checked' as const, observation: '' },
+  ]
+  const state = request({ manualReview, failureReviewItems: items, actions: [{ id: 'submit', label: 'Continue', manualReview }] })
+  const component = new ActionRequired(state, identityTheme, async action => { selected.push(action) })
+  const output = component.render(100).join('\n')
+  assert.match(output, /Failure Review Steps/)
+  assert.match(output, /Holding Left moves/)
+  assert.doesNotMatch(output, /Manual Review Steps|Inspect rendering|AC2:O1|Observed:|Decision:|Review failures/)
+  for (const status of ['passed', 'failed', 'ignored', 'passed'] as const) {
+    component.handleInput(' ')
+    await nextInput()
+    assert.equal(selected.at(-1)?.id, 'failure-review-update')
+    assert.equal(selected.at(-1)?.failureStatus, status)
+    component.setState({ ...state, failureReviewItems: [{ ...items[0], status }] })
+  }
+  component.handleInput('\r')
+  await nextInput()
+  assert.equal(selected.at(-1)?.failureStatus, undefined)
+  assert.equal(selected.at(-1)?.itemId, 'T1:AC2:O1')
+  assert.ok(component.render(32).every(line => visibleWidth(line) <= 32))
+  component.handleInput('\t')
+  component.handleInput('\r')
+  await nextInput()
+  assert.equal(selected.at(-1)?.id, 'submit')
+})

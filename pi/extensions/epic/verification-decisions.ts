@@ -77,7 +77,7 @@ export async function decideTask(
     !canApproveTask(record)
   )
     throw new Error(
-      `Ordinary approval is unavailable: ${report.readiness}. Complete all manual steps and resolve actionable failures and likely failures.`
+      `Ordinary approval is unavailable: ${report.readiness}. Complete the review checklist and resolve actionable failures and likely failures.`
     )
   if (request.kind === 'grant') {
     const manualFeedback = humanRepairFeedback(record)
@@ -132,7 +132,7 @@ export async function decideTask(
     reportId: report.id,
     obligations: report.unresolved,
     reason: reviewFailures(record).some(f => f.decision && f.decision.kind !== 'request_fix')
-      ? 'User reviewed and dismissed or accepted the recorded findings; all manual review steps passed.'
+      ? 'User completed failure review: all recorded findings passed or were accepted without a fix.'
       : report.readiness === 'verified'
       ? 'All requirements verified.'
       : 'All manual review steps passed; the user verified the task despite incomplete automated evidence.',
@@ -169,7 +169,7 @@ export async function assertAcceptedReport(
   assertManualReviewTask(state, currentManualReview(record))
   if (!canApproveTask(record))
     throw new Error(
-      'Checkpoint requires all manual review items to pass and no actionable failures or likely failures.'
+      'Checkpoint requires a completed review checklist and no actionable failures or likely failures.'
     )
   return report
 }

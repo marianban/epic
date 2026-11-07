@@ -34,14 +34,29 @@ export function reviewFailures(record: TaskVerificationRecord): ReviewFailure[] 
   // These IDs also represent failed checks, semantic findings and verifier errors.
   for (const id of unresolvedFailures) {
     if (failures.has(id) || (!id.startsWith('check:') && !id.startsWith('review:') && !id.startsWith('problem:'))) continue
+    if (id.startsWith('review:evidence:')) {
+      const obligationId = id.slice('review:evidence:'.length)
+      const reviews = report.cycle?.evidenceReviews.filter(r => r.obligationIds.includes(obligationId)) ?? []
+      if (!reviews.some(r => r.result.findings.length > 0)) continue
+    }
+    const findings = id.startsWith('review:evidence:')
+      ? (report.cycle?.evidenceReviews.filter(r => r.obligationIds.includes(id.slice('review:evidence:'.length))).flatMap(r => r.result.findings) ?? [])
+      : [...(report.cycle?.review?.findings ?? []), ...(report.cycle?.evidenceReviews.flatMap(r => r.result.findings) ?? [])]
+    const findingText = findings.map(f => f.message).join('\n')
+    const problem = id.startsWith('problem:') ? report.problems[Number(id.slice(8)) - 1] : undefined
+    if (problem?.startsWith('Browser evidence review incomplete:')) continue
     const check = [...(report.cycle?.fast?.checks ?? []), ...(report.cycle?.full?.checks ?? [])].find(c => `check:${c.name}` === id)
     failures.set(id, {
-      id, expected: id,
+      id, expected: check ? `Check ${check.name} must pass.`
+        : id.startsWith('problem:') ? `Resolve: ${problem ?? 'Verification reported a problem; inspect the report.'}`
+        : id.startsWith('review:') ? `Resolve: ${findingText || 'Review reported a finding; inspect the report.'}`
+        : id === 'check:browser-smoke' ? 'Browser smoke checks must pass.'
+        : id === 'check:fast' ? 'Fast checks must pass.' : 'Full checks must pass.',
       actual: id.startsWith('problem:') ? report.problems[Number(id.slice(8)) - 1] ?? id
         : check ? check.stderrPreview || check.stdoutPreview || 'Check did not pass.'
-        : id === 'review:findings' ? [...(report.cycle?.review?.findings ?? []), ...(report.cycle?.evidenceReviews.flatMap(r => r.result.findings) ?? [])].map(f => f.message).join('\n') || id
+        : id.startsWith('review:') ? findingText || 'Review reported a finding; inspect the report.'
         : id === 'check:browser-smoke' ? report.cycle?.smoke?.findings.map(f => f.message).join('\n') ?? id
-        : id === 'check:fast' || id === 'check:full' ? 'Check suite did not pass or was not completed.' : 'Verification did not complete.',
+        : id === 'check:fast' || id === 'check:full' ? 'Check suite did not pass or was not completed.' : 'Review the verification report for the failed check.',
       likely: false,
     })
   }
@@ -61,13 +76,13 @@ export function isFailureDismissed(failure: ReviewFailure): boolean {
 export function canRepairReviewedTask(record: TaskVerificationRecord): boolean {
   const report = record.report
   if (!report) throw new Error('No human-review report is available.')
-  return reviewFailures(record).some(f => !isFailureDismissed(f) && ((!f.likely && report.readiness === 'issues_remaining') || f.decision?.kind === 'request_fix')) ||
+  return reviewFailures(record).some(f => !isFailureDismissed(f) && (report.readiness === 'issues_remaining' || f.decision?.kind === 'request_fix')) ||
     (report.readiness === 'issues_remaining' && reviewFailures(record).length === 0)
 }
 
 export function failureRepairFeedback(record: TaskVerificationRecord): string {
   const instructions = reviewFailures(record).map(f =>
-    `${f.id}: ${f.expected}\nObserved: ${f.actual}\nHuman decision: ${f.decision ? failureDispositionLabels[f.decision.kind as FailureDisposition] : f.likely ? 'Unconfirmed suspicion; investigate before changing code.' : 'Unresolved issue'}${f.decision ? `\nReason: ${f.decision.reason}` : ''}`
+    `${f.id}: ${f.expected}\nObserved: ${f.actual}\nHuman decision: ${f.decision ? failureDispositionLabels[f.decision.kind as FailureDisposition] : 'Unresolved issue; diagnose and fix the observed behavior.'}${f.decision ? `\nReason: ${f.decision.reason}` : ''}`
   ).join('\n\n')
   return instructions ? `Honor the human decisions below. Do not change implementation to satisfy findings marked skip fix or accept without fix.\n\n${instructions}` : ''
 }

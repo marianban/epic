@@ -582,7 +582,7 @@ test('incomplete evidence offers manual review and rejects removed limitations d
     kind: 'accept_unresolved', identity: report.identity, reportId: report.id,
     obligations: report.unresolved, reason: 'Bypass manual review',
   })), realClock), /Unsupported task decision: accept_unresolved/)
-  await assert.rejects(decideTask(state, { kind: 'approve' }, realClock), /Complete all manual steps/)
+  await assert.rejects(decideTask(state, { kind: 'approve' }, realClock), /Complete the review checklist/)
   assert.deepEqual(await f.store.read(), beforeRejectedRepair)
 })
 
@@ -1569,7 +1569,7 @@ test('manual checklist persists edits, blocks ordinary approval, and resets only
   const accepted = await decideTask(f.state, { kind: 'approve' }, realClock)
   await assertAcceptedReport(accepted, realClock)
   await f.update(1, 'not_checked')
-  await assert.rejects(assertAcceptedReport(accepted, realClock), /manual review/)
+  await assert.rejects(assertAcceptedReport(accepted, realClock), /review checklist/)
   await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
   const next = await f.store.read()
   assert.equal(next.manualReviews.length, 2)
@@ -1701,7 +1701,7 @@ test('completed manual review approves evidence gaps directly and checkpoints th
   const report = structuredClone(record.report)
   assert.equal(report.readiness, 'needs_manual_confirmation')
   await f.store.write(record)
-  await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /Complete all manual steps/)
+  await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /Complete the review checklist/)
   await f.update(0, 'passed')
   assert.equal(manualReviewSubmission(await f.store.read()).kind, 'incomplete')
   await f.update(1, 'passed')
@@ -1724,7 +1724,7 @@ test('completed manual review approves evidence gaps directly and checkpoints th
   assert.deepEqual(saved.decisions.at(-1)?.obligations, report.unresolved)
   assert.match(saved.decisions.at(-1)?.reason ?? '', /manual review steps passed/)
   await f.update(0, 'not_checked')
-  await assert.rejects(assertAcceptedReport(approved, realClock), /all manual review items/)
+  await assert.rejects(assertAcceptedReport(approved, realClock), /completed review checklist/)
   await f.update(0, 'passed')
   saved.report = { ...report, readiness: 'issues_remaining' }
   saved.manualReviews = (await f.store.read()).manualReviews
@@ -1814,7 +1814,7 @@ test('dashboard continues after manual review without limitation dialogs', async
 })
 
 
-test('likely failures block completed manual approval without authorizing repair', async t => {
+test('likely failures block approval and allow repair without human confirmation', async t => {
   const f = await manualFixture(t)
   const record = await f.store.read()
   const cycle = record.cycles.at(-1)
@@ -1829,42 +1829,69 @@ test('likely failures block completed manual approval without authorizing repair
   }))
   const report = { ...constructReviewReport(record, f.review.identity, f.store.remaining(record)), id: f.review.reportId }
   record.report = report
-  assert.equal(report.readiness, 'needs_manual_confirmation')
+  assert.equal(report.readiness, 'issues_remaining')
+  assert.equal(report.criteria[0].status, 'not_met')
+  assert.equal(canRepairReviewedTask(record), true)
   assert.ok(report.unresolved.length)
   assert.match(reviewReportMarkdown(report, '/run/reviews/acceptance.md'), /Confirmation check: Focus the canvas/)
   await f.store.write(record)
   await f.update(0, 'passed')
   await f.update(1, 'passed')
-  assert.deepEqual(manualReviewSubmission(await f.store.read()), { kind: 'incomplete', label: 'Continue (resolve likely failure)' })
+  assert.deepEqual(manualReviewSubmission(await f.store.read()), { kind: 'grant', label: 'Continue (request fixes)' })
   await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /likely failures/)
-  await assert.rejects(decideTask(f.state, {
-    kind: 'grant', identity: report.identity, reportId: report.id, repairs: 1, timeMs: 300_000, reason: 'Suspected defect',
-  }, realClock), /No actionable failure/)
-  await f.update(1, 'failed', 'Confirmed: paddle does not respond with canvas focused.')
-  assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
+  await decideTask(f.state, {
+    kind: 'grant', identity: report.identity, reportId: report.id, repairs: 1, timeMs: 300_000, reason: 'Fix observed paddle failure',
+  }, realClock)
+  assert.match((await f.store.read()).humanRepairRequests[0].feedback, /diagnose and fix/)
 })
 
-test('likely failure gets a targeted confirmation without consuming a repair attempt', async t => {
-  const f = await fixture(t)
-  await runTaskVerification(f.state, new AbortController().signal, {
-    ...f.dependencies,
-    review: async (state, cycle) => {
-      const evidence = cycle.evidence[0]
-      evidence.outcome = 'likely-fail'
-      evidence.suspectedFailure = {
-        contradiction: 'Observed behavior contradicts the expectation.',
-        uncertainty: 'Input delivery is uncertain.',
-        confirmationCheck: 'Measure received input and resulting state together.',
+for (const persistent of [false, true]) {
+  test(`observed paddle failure ${persistent ? 'exhausts repair allowance' : 'is repaired and fully verified'} despite a passing static review`, async t => {
+    const f = await fixture(t, 1)
+    const reproduction = JSON.stringify([{ action: 'hold', keys: ['ArrowLeft'], durationMs: 300 }])
+    const artifact = '/run/artifacts/paddle-before-after.png'
+    const review = f.dependencies.review
+    f.dependencies.review = async (state, cycle, operation) => {
+      const result = await review(state, cycle, operation)
+      if (persistent || cycle.kind === 'initial_full') {
+        const evidence = cycle.evidence[0]
+        evidence.outcome = 'likely-fail'
+        evidence.actual = 'Paddle remained centered after held ArrowLeft input.'
+        evidence.reproduction = reproduction
+        evidence.attachments = [artifact]
+        evidence.suspectedFailure = {
+          contradiction: evidence.actual,
+          uncertainty: 'Input delivery is uncertain.',
+          confirmationCheck: 'Measure received input and resulting state together.',
+        }
       }
-      return f.dependencies.review(state, cycle, { signal: new AbortController().signal, remainingMs: () => 30_000 })
-    },
+      return result
+    }
+    if (persistent) await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
+    const repair = f.dependencies.repair
+    f.dependencies.repair = async (state, feedback, operation) => {
+      assert.match(feedback, /Paddle remained centered/)
+      assert.ok(feedback.includes(artifact))
+      assert.ok(feedback.includes('ArrowLeft'))
+      assert.match(feedback, /Diagnose and fix/)
+      assert.match(feedback, /demonstrate the expected behavior/)
+      return persistent ? state : repair(state, feedback, operation)
+    }
+    await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+    const saved = await f.store.read()
+    assert.equal(saved.invocations.filter(i => i.kind === 'repair').length, 1)
+    assert.equal(saved.cycles[1].target?.action, 'repair')
+    assert.equal(saved.cycles[1].target?.criterionId, 'T1:AC1')
+    assert.ok(saved.cycles[0].review?.passed)
+    if (persistent) {
+      assert.equal(saved.report?.readiness, 'issues_remaining')
+      assert.equal(saved.report?.criteria[0].status, 'not_met')
+    } else {
+      assert.equal(saved.report?.readiness, 'verified')
+      assert.deepEqual(saved.cycles.map(c => c.kind), ['initial_full', 'targeted', 'final_full'])
+    }
   })
-  const record = await f.store.read()
-  assert.equal(record.report?.readiness, 'verified')
-  assert.equal(record.cycles.length, 2)
-  assert.ok(!f.calls.includes('repair'))
-  assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 0)
-})
+}
 
 
 test('legacy unverified ledger evidence is rejected without conversion', async t => {
@@ -1898,7 +1925,7 @@ for (const disposition of ['false_positive', 'accepted_noncritical'] as const) {
     await assert.rejects(decideTask(f.state, { ...request, reportId: 'stale' }, realClock), /current attempt/)
     await decideTask(f.state, request, realClock)
     assert.deepEqual(manualReviewSubmission(await f.store.read()), {
-      kind: 'incomplete', label: 'Continue (complete manual review)',
+      kind: 'approve', label: 'Continue (approve task)',
     })
     await f.update(0, 'passed')
     await f.update(1, 'passed')
@@ -1912,11 +1939,12 @@ for (const disposition of ['false_positive', 'accepted_noncritical'] as const) {
       domain: f.state, metadata: { epicId: f.state.epicId, createdAt: realClock.now(), updatedAt: realClock.now() },
       boundary: { stage: 'awaiting_task_review', wait: 'awaiting-human' }, events: [], agentProfiles: [], verificationRecord: reviewed,
     }).actionRequired
-    assert.ok(dashboard?.actions.some(a => a.id === 'manual-review-failures'))
+    assert.ok(!dashboard?.actions.some(a => a.id === 'manual-review-failures'))
+    assert.equal(dashboard?.failureReviewItems?.[0]?.status, disposition === 'false_positive' ? 'passed' : 'ignored')
     assert.equal(dashboard?.actions[0].label, 'Continue (approve task)')
     assert.equal(dashboard?.actions[0].disabled, false)
     assert.ok(!dashboard?.actions.some(a => a.command === '/task-repair'))
-    assert.match(dashboard?.failureReviewLines?.join('\n') ?? '', /Embedded SVG needs no external resource/)
+    assert.match(dashboard?.failureReviewItems?.map(i => i.observation).join('\n') ?? '', /Embedded SVG needs no external resource/)
     const approved = await decideTask(f.state, { kind: 'approve' }, realClock)
     await assertAcceptedReport(approved, realClock)
     await assert.rejects(decideTask(f.state, { kind: 'grant', identity: request.identity,
@@ -1958,19 +1986,22 @@ test('mixed finding decisions keep real issues blocking and include all human in
   assert.match(feedback, /Paddle must stay inside board/)
 })
 
-test('failure editor shows observations, requires a reason, and supports cancellation', async t => {
+test('failure checklist editor marks statuses directly and supports observation cancellation', async t => {
   const f = await manualFixture(t)
   const record = await f.store.read()
   assert.ok(record.report)
   record.report.criteria[0].evidence[0].outcome = 'fail'
-  const request = await editFailureReview(record, async (title, options) => {
-    if (title.startsWith('Select')) return options[0]
-    assert.match(title, /Observed:/)
-    return options[1]
-  }, async () => 'Inline asset, no external request.')
-  assert.equal(request?.disposition, 'false_positive')
-  assert.equal(await editFailureReview(record, async () => undefined, async () => { throw Error('Must not open') }), undefined)
-  await assert.rejects(editFailureReview(record, async (_, options) => options[0], async () => ' '), /explicit reason/)
+  const failure = reviewFailures(record)[0]
+  for (const [status, disposition] of [['passed', 'false_positive'], ['failed', 'request_fix'], ['ignored', 'accepted_noncritical']] as const) {
+    const request = await editFailureReview(record, failure.id, status, async () => { throw Error('Must not open') })
+    assert.equal(request?.disposition, disposition)
+    assert.ok(request?.reason.trim())
+  }
+  record.decisions.push({ kind: 'false_positive', identity: record.report.identity, reportId: record.report.id,
+    obligations: [failure.id], reason: 'Works correctly.', at: 1 })
+  assert.equal(await editFailureReview(record, failure.id, undefined, async () => undefined), undefined)
+  await assert.rejects(editFailureReview(record, failure.id, undefined, async () => ' '), /explicit reason/)
+  await assert.rejects(editFailureReview(record, 'unknown', 'passed', async () => ''), /Unknown failure review step/)
 })
 
 
@@ -2358,4 +2389,26 @@ test('resuming a blocked evidence-only retry still composes the unchanged full b
   assert.equal(resumed.report?.readiness, 'verified')
   assert.deepEqual(resumed.report?.problems, [])
   assert.equal(resumed.invocations.filter(i => i.kind === 'repair').length, 0)
+})
+
+test('evidence-review gaps do not become duplicate failure steps', async t => {
+  const f = await manualFixture(t)
+  const record = await f.store.read()
+  assert.ok(record.report)
+  const report = record.report
+  const evidence = report.criteria[0].evidence[0]
+  evidence.outcome = 'likely-fail'
+  evidence.expected = 'Holding Left moves the paddle left.'
+  report.readiness = 'needs_manual_confirmation'
+  report.unresolved = [evidence.obligationId, `review:evidence:${evidence.obligationId}`, 'problem:1']
+  report.problems = ['Browser evidence review incomplete: Keyboard delivery could not be confirmed.']
+  const original = structuredClone(report)
+  assert.deepEqual(reviewFailures(record).map(f => f.id), [evidence.obligationId])
+  const dashboard = projectDashboardState({ domain: f.state,
+    metadata: { epicId: f.state.epicId, createdAt: realClock.now(), updatedAt: realClock.now() },
+    boundary: { stage: 'awaiting_task_review', wait: 'awaiting-human' }, events: [], agentProfiles: [], verificationRecord: record,
+  }).actionRequired
+  assert.deepEqual(dashboard?.failureReviewItems?.map(i => i.text), ['Holding Left moves the paddle left.'])
+  assert.doesNotMatch(dashboard?.message ?? '', /contradiction|suspicion/)
+  assert.deepEqual(report, original)
 })
