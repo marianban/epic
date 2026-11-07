@@ -32,9 +32,11 @@ export async function executeBrowserStep(
   else if (step.action === 'click_at') await page.mouse.click(step.x, step.y, { button: step.button })
   else if (step.action === 'hold') await holdBrowserKeys(page, step, operation)
   else if (step.action === 'resize') {
-    const before = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+    // Browser code stays in strings so coverage instrumentation cannot inject Node-only helpers.
+    const viewportExpression = '({ width: innerWidth, height: innerHeight })'
+    const before = await page.evaluate<{ width: number; height: number }>(viewportExpression)
     await page.setViewportSize({ width: step.width, height: step.height })
-    const after = await page.evaluate(() => ({ width: innerWidth, height: innerHeight }))
+    const after = await page.evaluate<{ width: number; height: number }>(viewportExpression)
     if (after.width !== step.width || after.height !== step.height)
       throw new Error(`Viewport resize was not applied: requested ${step.width}×${step.height}, observed ${after.width}×${after.height}.`)
     return { kind: 'observation', value: { before, after } }
@@ -49,8 +51,7 @@ export async function executeBrowserStep(
     return { kind: 'assertion', value: true, passed: true }
   } else if (step.action === 'text') {
     await page.waitForFunction(
-      ({ selector, value }) =>
-        document.querySelector(selector)?.textContent === value,
+      '({ selector, value }) => document.querySelector(selector)?.textContent === value',
       step,
       { timeout }
     )
