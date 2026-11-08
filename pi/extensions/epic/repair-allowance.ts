@@ -1,7 +1,7 @@
 import type { TaskVerificationRecord } from './verification-types.ts'
 
 /** Stable work-item IDs keep retries charged across cycles and resume. */
-export function repairUsage(record: TaskVerificationRecord, itemId: string): number {
+function repairUsage(record: TaskVerificationRecord, itemId: string): number {
   return record.invocations.filter(i => i.kind === 'repair' && i.repairItemId === itemId).length
 }
 

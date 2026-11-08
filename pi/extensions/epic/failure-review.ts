@@ -1,6 +1,6 @@
 import type { FailureDisposition, HumanDecision, TaskVerificationRecord } from './verification-types.ts'
 
-export const failureDispositionLabels: Record<FailureDisposition, string> = {
+const failureDispositionLabels: Record<FailureDisposition, string> = {
   request_fix: 'Real issue — request fix',
   false_positive: 'False positive — skip fix',
   accepted_noncritical: 'Noncritical — accept without fix',

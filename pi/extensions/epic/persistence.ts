@@ -220,7 +220,7 @@ export function parsePersistedEpicEnvelope(value: unknown): PersistedEpicEnvelop
   return typed
 }
 
-export async function persistJsonArtifact(
+async function persistJsonArtifact(
   state: EpicRunIdentity,
   relativePath: string,
   value: unknown

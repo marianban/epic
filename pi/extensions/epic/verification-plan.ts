@@ -325,7 +325,7 @@ mouse_down/mouse_up require an explicit button (left, middle, or right) at the c
 Automated browser scenarios require an assertion: text asserts exact text; visible asserts visibility; inspect must return true. observe returns diagnostic values without asserting success. The agent_browser verifier chooses assertions at execution time and may inspect observations and correct probes while preserving expected behavior. Fixtures may establish state, never bypass the interaction under test. {"inspect":"..."} is INVALID; use {"action":"inspect","expression":"..."}.`
 }
 
-export const verificationMethods: readonly VerificationMethod[] = [
+const verificationMethods: readonly VerificationMethod[] = [
   'automated',
   'agent_browser',
   'static',

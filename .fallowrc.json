@@ -2,7 +2,8 @@
   "$schema": "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json",
   "entry": [
     "pi/extensions/epic/index.ts",
-    "pi/extensions/epic/tools.ts"
+    "pi/extensions/epic/tools.ts",
+    "tests/fixtures/acceptance-server.mjs"
   ],
   "ignorePatterns":[],
   "health": {

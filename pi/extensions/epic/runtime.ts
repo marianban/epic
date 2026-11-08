@@ -331,7 +331,6 @@ export class EpicRuntime {
       }
     })
   }
-  // fallow-ignore-next-line unused-class-member -- consumed by epic lifecycle persistence.
   envelope(now: string): PersistedEpicEnvelope {
     const snapshot = this.persistedSnapshot()
     if ('context' in snapshot)

@@ -23,7 +23,7 @@ export function hasBlockedPrerequisites(cycle: VerificationCycle): boolean {
 }
 
 /** Queue progress is provisional; only a full cycle establishes acceptance. */
-export function cycleWork(
+function cycleWork(
   cycle: VerificationCycle,
   plan: VerificationPlan
 ): VerificationWorkItem[] {

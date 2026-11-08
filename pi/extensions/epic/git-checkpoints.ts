@@ -2,7 +2,7 @@ import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import type { EpicDomainState, RecoveryAction } from './types.ts'
+import type { ApplicationChange, EpicDomainState, RecoveryAction } from './types.ts'
 
 const exec = promisify(execFile)
 const MANAGED_BEGIN = '# >>> Pi epic managed ignores >>>'
@@ -40,12 +40,7 @@ async function git(root: string, args: string[]): Promise<string> {
   }
 }
 
-export type TaskDeltaKind = 'create' | 'modify' | 'delete'
-
-export interface ApplicationChange {
-  readonly path: string
-  readonly kind: TaskDeltaKind
-}
+type TaskDeltaKind = ApplicationChange['kind']
 
 export interface ApplicationWorktreeStatus {
   readonly headSha: string
