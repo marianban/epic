@@ -12,6 +12,7 @@ import type {
   PipelineAgentStatus,
   PipelineDashboardState,
   PipelineModelDashboardState,
+  PipelineTokenUsage,
   TokenUsage,
 } from './types.ts'
 
@@ -503,17 +504,18 @@ function metadataValue<T extends string>(
 
 function aggregateTokenUsage(
   invocations: readonly Invocation[]
-): TokenUsage | undefined {
+): PipelineTokenUsage | undefined {
   const finished = invocations.filter(
     (invocation) => invocation.active === undefined && invocation.finishAtMs !== undefined
   )
-  if (finished.length === 0 || finished.some((invocation) => !invocation.usageReliable)) return undefined
+  const measured = finished.filter((invocation) => invocation.usageReliable && invocation.usage !== undefined)
+  if (measured.length === 0) return undefined
   let total = 0
   let input: number | undefined
   let output: number | undefined
   let cached: number | undefined
   let reasoning: number | undefined
-  for (const invocation of finished) {
+  for (const invocation of measured) {
     const usage = invocation.usage
     if (usage === undefined) return undefined
     total += usage.total
@@ -524,6 +526,7 @@ function aggregateTokenUsage(
   }
   return {
     total,
+    ...(measured.length === finished.length ? {} : { incomplete: true as const }),
     ...(input === undefined ? {} : { input }),
     ...(output === undefined ? {} : { output }),
     ...(cached === undefined ? {} : { cached }),

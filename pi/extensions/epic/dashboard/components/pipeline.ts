@@ -93,9 +93,11 @@ function metricTime(runCount: number, durationMs: number): string {
 
 function metricTokens(
   runCount: number,
-  tokens: { readonly total: number } | undefined
+  tokens: { readonly total: number; readonly incomplete?: true } | undefined
 ): string {
-  return runCount === 0 || tokens === undefined ? '--' : formatTokens(tokens.total)
+  return runCount === 0 || tokens === undefined
+    ? '--'
+    : `${tokens.incomplete ? '≥' : ''}${formatTokens(tokens.total)}`
 }
 
 function agentCells(state: PipelineAgentDashboardState): Record<string, string> {

@@ -47,6 +47,11 @@ export type PipelineAgentStatus =
   | 'running'
   | 'failed'
 
+export interface PipelineTokenUsage extends TokenUsage {
+  /** Some finished invocations did not report usage; total is a measured subtotal. */
+  readonly incomplete?: true
+}
+
 export interface PipelineAgentDashboardState {
   readonly role: string
   readonly provider?: string
@@ -55,7 +60,7 @@ export interface PipelineAgentDashboardState {
   readonly status: PipelineAgentStatus
   readonly runCount: number
   readonly agentTimeMs: number
-  readonly tokens?: TokenUsage
+  readonly tokens?: PipelineTokenUsage
 }
 
 export interface PipelineModelDashboardState {
@@ -67,7 +72,7 @@ export interface PipelineModelDashboardState {
   readonly status: PipelineAgentStatus
   readonly runCount: number
   readonly agentTimeMs: number
-  readonly tokens?: TokenUsage
+  readonly tokens?: PipelineTokenUsage
 }
 
 export interface PipelineDashboardState {

@@ -105,6 +105,21 @@ test('missing telemetry, idle rows, and empty state are explicit', () => {
   assert.match(empty, /No agent pipeline data available\./)
 })
 
+test('incomplete token subtotals are marked in both pipeline tabs', () => {
+  const data = state()
+  const component = new Pipeline({
+    agents: data.agents.map((agent) => agent.tokens === undefined ? agent : {
+      ...agent, tokens: { ...agent.tokens, incomplete: true },
+    }),
+    models: data.models.map((model) => ({
+      ...model, tokens: { total: 12_300, incomplete: true },
+    })),
+  }, identityTheme)
+  assert.match(component.render(120).join('\n'), /Implementor.*≥12\.3k/)
+  component.handleInput('\t')
+  assert.match(component.render(120).join('\n'), /gpt-long-model-name.*≥12\.3k/)
+})
+
 test('narrow rendering removes optional columns and never exceeds width', () => {
   const component = new Pipeline(state(), identityTheme)
   const lines = component.render(50)

@@ -179,6 +179,39 @@ test('missing usage makes an aggregate unavailable but does not erase known dura
   assert.equal(state.agents[0]?.agentTimeMs, 1_000)
 })
 
+test('an aborted review preserves measured subtotals for agents and models across retries', () => {
+  const events = [
+    ...lifecycle('measured', 'reviewer', 'semantic review', 1_000, 2_000, {
+      usage: { input: 10, output: 2, totalTokens: 12 },
+    }),
+    ...lifecycle('aborted', 'reviewer', 'semantic review', 3_000, 4_000, {
+      exitCode: 1,
+      failureReason: 'The operation was aborted',
+    }),
+    ...lifecycle('retry', 'reviewer', 'semantic review', 5_000, 6_000, {
+      usage: { totalTokens: 7 },
+    }),
+    ...lifecycle('other-role', 'scout', 'discovery', 7_000, 8_000, {
+      usage: { totalTokens: 3 },
+    }),
+  ]
+  const state = projectPipelineState(events, [], [profile('reviewer'), profile('scout')], baseMs + 10_000)
+  const reviewer = state.agents.find((agent) => agent.role === 'reviewer')
+  assert.deepEqual(reviewer?.tokens, { total: 19, input: 10, output: 2, incomplete: true })
+  assert.equal(reviewer?.status, 'idle')
+  assert.equal(reviewer?.agentTimeMs, 3_000)
+  assert.deepEqual(state.models[0]?.tokens, { total: 22, input: 10, output: 2, incomplete: true })
+  assert.deepEqual(state.agents.find((agent) => agent.role === 'scout')?.tokens, { total: 3 })
+})
+
+test('measured zero usage remains visible when another invocation has no usage', () => {
+  const state = projectPipelineState([
+    ...lifecycle('zero', 'reviewer', 'semantic review', 1_000, 2_000, { usage: { totalTokens: 0 } }),
+    ...lifecycle('missing', 'reviewer', 'semantic review', 3_000, 4_000),
+  ], [], [profile('reviewer')], baseMs + 10_000)
+  assert.deepEqual(state.agents[0]?.tokens, { total: 0, incomplete: true })
+})
+
 test('model identity is collision-safe and historical attribution survives profile changes', () => {
   const events = [
     ...lifecycle('old', 'scout', 'discovery', 1_000, 2_000, {
