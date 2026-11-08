@@ -1,4 +1,5 @@
 import { reviewFailures, failureRepairFeedback, canRepairReviewedTask } from './failure-review.ts'
+import { hasPendingFinalVerification } from './final-verification-status.ts'
 import {
   assertManualReviewTask,
   currentManualReview,
@@ -24,6 +25,7 @@ export async function decideTask(
     ![
       'approve',
       'grant',
+      'verify',
       'revise_criteria',
       'update_manual_review',
       'review_failure',
@@ -72,6 +74,8 @@ export async function decideTask(
     await store.write(record)
     return { ...state, failureReason: undefined }
   }
+  if (request.kind === 'approve' && hasPendingFinalVerification(record))
+    throw new Error('Ordinary approval is unavailable: required final verification is pending. Choose Continue to finish verification.')
   if (
     request.kind === 'approve' &&
     !canApproveTask(record)
@@ -79,6 +83,14 @@ export async function decideTask(
     throw new Error(
       `Ordinary approval is unavailable: ${report.readiness}. Complete the review checklist and resolve actionable failures and likely failures.`
     )
+  if (request.kind === 'verify') {
+    if (!hasPendingFinalVerification(record) && record.schedule.phase === 'done')
+      throw new Error('No unfinished verification workflow is pending.')
+    await store.grant(record, {
+      repairs: 0, timeMs: request.timeMs, reason: request.reason, at: clock.nowMs(),
+    })
+    return { ...state, failureReason: undefined }
+  }
   if (request.kind === 'grant') {
     const manualFeedback = humanRepairFeedback(record)
     assertTaskRepairAvailable(canRepairReviewedTask(record) ? 'issues_remaining' : report.readiness === 'verified' ? 'verified' : 'needs_manual_confirmation', !!manualFeedback)

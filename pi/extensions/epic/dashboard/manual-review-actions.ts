@@ -10,7 +10,7 @@ import {
   taskVerificationPath,
 } from '../verification-store.ts'
 import { currentManualReview } from '../manual-review.ts'
-import { approveTask, submitTaskDecision, repairTaskCommand } from '../epic.ts'
+import { approveTask, submitTaskDecision, requestTaskRepairs } from '../epic.ts'
 
 let updateQueue: Promise<void> = Promise.resolve()
 
@@ -74,8 +74,15 @@ async function execute(
   }
   if (action.id === 'manual-review-submit') {
     const submission = manualReviewSubmission(record)
+    if (submission.kind === 'verify') {
+      await submitTaskDecision(ctx, {
+        kind: 'verify', identity: review.identity, reportId: review.reportId,
+        timeMs: 900_000, reason: 'Continue the task verification and repair workflow with fifteen additional minutes.',
+      })
+      return
+    }
     if (submission.kind === 'grant') {
-      await repairTaskCommand(ctx, '')
+      await requestTaskRepairs(ctx)
       return
     }
     if (submission.kind === 'approve') {

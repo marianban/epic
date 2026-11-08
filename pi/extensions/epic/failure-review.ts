@@ -39,25 +39,32 @@ export function reviewFailures(record: TaskVerificationRecord): ReviewFailure[] 
   // Missing evidence alone is not a failure and must not create a failure section.
   const unresolvedFailures = report.readiness === 'issues_remaining' || failures.size > 0
     ? report.unresolved : []
-  // These IDs also represent failed checks, semantic findings and verifier errors.
+  // Only observed application/check failures belong in the checklist. Workflow
+  // problems, missing checks and interrupted verification remain report status.
   for (const id of unresolvedFailures) {
-    if (failures.has(id) || (!id.startsWith('check:') && !id.startsWith('review:') && !id.startsWith('problem:'))) continue
-    // Semantic failures are represented individually by the registry above.
-    if (id.startsWith('review:')) continue
-    const problem = id.startsWith('problem:') ? report.problems[Number(id.slice(8)) - 1] : undefined
-    if (problem?.startsWith('Browser evidence review incomplete:')) continue
-    const check = [...(report.cycle?.fast?.checks ?? []), ...(report.cycle?.full?.checks ?? [])].find(c => `check:${c.name}` === id)
+    if (failures.has(id) || !id.startsWith('check:')) continue
+    const check = [...(report.cycle?.fast?.checks ?? []), ...(report.cycle?.full?.checks ?? [])].find(c =>
+      `check:${c.name}` === id && !c.passed && !c.skipped && ![124, 127].includes(c.exitCode))
+    const suite = id === 'check:fast' ? report.cycle?.fast : id === 'check:full' ? report.cycle?.full : undefined
+    const failedChecks = suite?.checks.filter(c => c.required && !c.passed && !c.skipped && ![124, 127].includes(c.exitCode)) ?? []
+    const smoke = id === 'check:browser-smoke' ? report.cycle?.smoke : undefined
+    if (!check &&
+        !failedChecks.length && !smoke?.findings.some(f => f.category !== 'infrastructure')) continue
     failures.set(id, {
       id, expected: check ? `Check ${check.name} must pass.`
-        : id.startsWith('problem:') ? `Resolve: ${problem ?? 'Verification reported a problem; inspect the report.'}`
         : id === 'check:browser-smoke' ? 'Browser smoke checks must pass.'
         : id === 'check:fast' ? 'Fast checks must pass.' : 'Full checks must pass.',
-      actual: id.startsWith('problem:') ? report.problems[Number(id.slice(8)) - 1] ?? id
-        : check ? check.stderrPreview || check.stdoutPreview || 'Check did not pass.'
+      actual: check ? check.stderrPreview || check.stdoutPreview || 'Check did not pass.'
         : id === 'check:browser-smoke' ? report.cycle?.smoke?.findings.map(f => f.message).join('\n') ?? id
         : id === 'check:fast' || id === 'check:full' ? 'Check suite did not pass or was not completed.' : 'Review the verification report for the failed check.',
       likely: false,
     })
+  }
+  // Deduplicate only after individual failures have been collected, regardless of report order.
+  for (const suite of [report.cycle?.fast, report.cycle?.full]) {
+    const failedChecks = suite?.checks.filter(c => c.required && !c.passed && !c.skipped && ![124, 127].includes(c.exitCode)) ?? []
+    if (suite && failedChecks.length && failedChecks.every(c => failures.has(`check:${c.name}`)))
+      failures.delete(`check:${suite.suite}`)
   }
   for (const failure of failures.values()) {
     failure.decision = [...record.decisions].reverse().find(d =>
@@ -72,11 +79,29 @@ export function isFailureDismissed(failure: ReviewFailure): boolean {
   return failure.decision?.kind === 'false_positive' || failure.decision?.kind === 'accepted_noncritical'
 }
 
+/** Human dispositions also apply to the scheduler's criterion and check identities. */
+export function dismissedRepairItemIds(record: TaskVerificationRecord): Set<string> {
+  const report = record.report
+  if (!report) throw new Error('No human-review report is available.')
+  const dismissed = reviewFailures(record).filter(isFailureDismissed)
+  const ids = new Set(dismissed.map(f => f.id))
+  for (const criterion of report.criteria) {
+    if (criterion.evidence.some(e => ids.has(e.obligationId))) ids.add(criterion.id)
+  }
+  for (const suite of [report.cycle?.fast, report.cycle?.full]) {
+    if (suite && ids.has(`check:${suite.suite}`)) {
+      for (const check of suite.checks) {
+        if (check.required && !check.passed) ids.add(`check:${check.name}`)
+      }
+    }
+  }
+  return ids
+}
+
 export function canRepairReviewedTask(record: TaskVerificationRecord): boolean {
   const report = record.report
   if (!report) throw new Error('No human-review report is available.')
-  return reviewFailures(record).some(f => !isFailureDismissed(f) && (report.readiness === 'issues_remaining' || f.decision?.kind === 'request_fix')) ||
-    (report.readiness === 'issues_remaining' && reviewFailures(record).length === 0)
+  return reviewFailures(record).some(f => !isFailureDismissed(f) && (report.readiness === 'issues_remaining' || f.decision?.kind === 'request_fix'))
 }
 
 export function failureRepairFeedback(record: TaskVerificationRecord): string {

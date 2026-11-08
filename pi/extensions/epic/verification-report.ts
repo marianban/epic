@@ -188,6 +188,9 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
     `# Task ${report.taskId} human review`,
     '',
     `Readiness: **${report.readiness}**`,
+    ...(report.unresolved.includes('verification:final_full')
+      ? ['', 'Final verification is pending and blocks approval regardless of finding decisions. Continue requests any remaining fixes, or grants fifteen additional minutes to continue verification and repairs within the existing attempt limits.']
+      : []),
     `Verification attempt: ${report.identity}`,
     `Cycle: ${report.cycle?.kind ?? 'not completed'}${report.cycle?.target ? `; target ${report.cycle.target.id}` : ''}`,
     `Report: ${report.id}`,
@@ -269,7 +272,7 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
       ? ['Observed contradictions, including likely failures, require repair and block approval. Use the recorded evidence to diagnose and fix the behavior; uncertainty about the cause does not require human confirmation before repair.']
       : []),
     ...(canRepairTask(report.readiness, false)
-      ? ['Use /task-repair to grant one additional repair attempt and five additional minutes for the recorded failures.']
+      ? ['Choose Continue (request fixes) in the dashboard to grant one additional attempt per repair item and fifteen additional minutes for the recorded failures.']
       : report.readiness === 'needs_manual_confirmation' && !hasLikelyFailure(report)
         ? ['Verification has unresolved evidence, with no actionable failure recorded. Review it manually.']
         : []),

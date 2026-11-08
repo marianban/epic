@@ -1,10 +1,12 @@
 import { currentManualReview } from './manual-review.ts'
+import { hasPendingFinalVerification } from './final-verification-status.ts'
 import { reviewFailures, isFailureDismissed } from './failure-review.ts'
 import type { HumanReviewReport, TaskVerificationRecord } from './verification-types.ts'
 
 export function canApproveTask(record: TaskVerificationRecord): boolean {
   const report = record.report
   if (!report) throw new Error('No human-review report is available.')
+  if (hasPendingFinalVerification(record)) return false
   const failures = reviewFailures(record)
   if (failures.some(f => !isFailureDismissed(f) && (f.likely || report.readiness === 'issues_remaining' || f.decision?.kind === 'request_fix'))) return false
   const items = currentManualReview(record).items

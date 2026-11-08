@@ -1,4 +1,4 @@
-import { reviewFailures, isFailureDismissed } from './failure-review.ts'
+import { dismissedRepairItemIds } from './failure-review.ts'
 import { canRepairItem } from './repair-allowance.ts'
 import type { BrowserProbeLimits } from './browser-evidence-types.ts'
 import { appendEvent } from './persistence.ts'
@@ -77,10 +77,8 @@ export async function runTaskVerification(
     dependencies.clock
   )
   const record = await store.read()
-  // A mixed human decision authorizes the requested repair, then a fresh report.
-  // Do not let automatic retries undo findings the user explicitly accepted.
-  const hasDismissedFindings =
-    !!record.report && reviewFailures(record).some(isFailureDismissed)
+  // Keep accepted findings out of automatic repairs while other work continues.
+  const dismissedRepairs = record.report ? dismissedRepairItemIds(record) : new Set<string>()
   const interruptedRepair = [...record.invocations]
     .reverse()
     .find((i) => i.kind === 'repair')
@@ -199,12 +197,25 @@ export async function runTaskVerification(
       if (schedule.phase === 'targeted' && !target)
         throw new Error('Targeted verification requires a queued item.')
       if (target?.action === 'repair') {
+        if (dismissedRepairs.has(target.id)) {
+          schedule.deferred.push(...schedule.queue.splice(0, 1))
+          schedule.phase = schedule.queue.length ? 'targeted' : schedule.finalRequired ? 'final_full' : 'done'
+          delete schedule.repairInvocationId
+          await store.write(record)
+          continue
+        }
+        if (!repairAfterInterruptionGranted) {
+          if (schedule.finalRequired) {
+            schedule.deferred.push(...schedule.queue)
+            schedule.queue = []
+            schedule.phase = 'final_full'
+            delete schedule.repairInvocationId
+            await store.write(record)
+            continue
+          }
+          break
+        }
         if (!schedule.repairInvocationId) {
-          if (
-            hasDismissedFindings ||
-            !repairAfterInterruptionGranted
-          )
-            break
           if (!canRepairItem(record, target.id)) {
             deferExhaustedRepair(record, target)
             await store.write(record)

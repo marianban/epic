@@ -439,6 +439,26 @@ test('task decisions are validated before completing the actor', async () => {
   actor.stop()
 })
 
+test('workflow time extension returns to the verification and repair runner', async () => {
+  const mocked = services()
+  let implementations = 0
+  let verifications = 0
+  mocked.implement = async state => { implementations++; return state }
+  mocked.verifyTask = async state => { verifications++; return state }
+  mocked.taskDecision = async (state, request) => {
+    assert.equal(request.kind, 'verify')
+    return state
+  }
+  const actor = createActor(createTaskExecutionMachine(mocked), { input: { domain: domain() } }).start()
+  actor.send({ type: 'TASK.APPROVE' }); await nextTurn()
+  actor.send({ type: 'TASK.DECIDE', request: { kind: 'verify', identity: 'candidate',
+    reportId: 'report', timeMs: 900_000, reason: 'Continue the workflow.' } }); await nextTurn()
+  assert.equal(implementations, 1)
+  assert.equal(verifications, 2)
+  assert.equal(actor.getSnapshot().value, 'awaitingReview')
+  actor.stop()
+})
+
 test('manual-review approval delegates to the decision service despite incomplete automated evidence', async () => {
   const mocked = services()
   mocked.verifyTask = async state => ({ ...state, verificationReadiness: 'needs_manual_confirmation' })

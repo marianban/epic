@@ -232,6 +232,13 @@ export interface VerificationOperation {
 export type TaskDecisionRequest =
   | { kind: 'approve' }
   | {
+      kind: 'verify'
+      identity: string
+      reportId: string
+      timeMs: number
+      reason: string
+    }
+  | {
       kind: 'review_failure'
       identity: string
       reportId: string

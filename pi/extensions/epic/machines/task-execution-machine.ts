@@ -204,7 +204,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
             target: 'awaitingReview',
             actions: assign({
               failureReason:
-                'Use /task-repair without arguments to grant one additional repair attempt and five additional minutes for the latest issues.',
+                'Choose Continue (request fixes) in the dashboard to grant one additional attempt per repair item and fifteen additional minutes for the latest issues.',
             }),
           },
           'TASK.REVISE': 'revisingCompletedTask',
@@ -223,7 +223,7 @@ export function createTaskExecutionMachine(services: EpicServices) {
               actions: 'captureState',
             },
             {
-              guard: ({ context }) => context.decision?.kind === 'grant',
+              guard: ({ context }) => context.decision?.kind === 'grant' || context.decision?.kind === 'verify',
               target: 'verifying',
               actions: 'captureState',
             },

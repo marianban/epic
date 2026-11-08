@@ -13,7 +13,6 @@ import {
   approveTask,
   reviseTask,
   approveRecovery,
-  repairTaskCommand,
 } from './epic.ts'
 import {
   EPIC_STATUS_REFRESH_INTERVAL_MS,
@@ -42,9 +41,6 @@ export async function executeEpicDashboardAction(
       return
     case EPIC_COMMANDS.approveTask:
       await approveTask(ctx)
-      return
-    case EPIC_COMMANDS.repairTask:
-      await repairTaskCommand(ctx, '')
       return
     case EPIC_COMMANDS.resume:
       await resumeEpic(ctx)
@@ -100,10 +96,6 @@ export default function epicExtension(pi: ExtensionAPI): void {
   pi.registerCommand(EPIC_COMMANDS.approveTask, {
     description: 'Continue task planning review, or approve only after automated and manual review pass',
     handler: async (_args, ctx) => approveTask(ctx),
-  })
-  pi.registerCommand(EPIC_COMMANDS.repairTask, {
-    description: 'Repair current automated issues or failed manual steps (one attempt, five additional minutes; no arguments)',
-    handler: async (args, ctx) => repairTaskCommand(ctx, args),
   })
   pi.registerCommand(EPIC_COMMANDS.reviewTask, {
     description: 'Fix R: findings from the current task review',

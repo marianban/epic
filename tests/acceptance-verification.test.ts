@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { reviewFailures, canRepairReviewedTask } from '../pi/extensions/epic/failure-review.ts'
 import { editFailureReview } from '../pi/extensions/epic/dashboard/failure-review-editor.ts'
 import { manualReviewSubmission } from '../pi/extensions/epic/dashboard/manual-review-submission.ts'
+import { finalVerificationStatus } from '../pi/extensions/epic/final-verification-status.ts'
 import { projectDashboardState } from '../pi/extensions/epic/dashboard/projection.ts'
 import assert from 'node:assert/strict'
 import test, { type TestContext } from 'node:test'
@@ -1561,6 +1562,191 @@ async function manualFixture(t: TestContext) {
   return { ...f, state, review, update }
 }
 
+async function pendingFinalFixture(t: TestContext) {
+  const f = await fixture(t, 3)
+  f.record.plan = { ...f.plan, obligations: [{
+    id: 'good', criterionId: 'T1:AC1', expected: 'Candidate is good',
+    method: 'human_only', reason: 'Inspect the candidate manually.',
+  }] }
+  await f.store.write(f.record)
+  const state = await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.ok(record.report)
+  record.schedule.finalRequired = true
+  record.schedule.phase = 'targeted'
+  record.schedule.queue = [{ id: 'T1:AC1', criterionId: 'T1:AC1', kind: 'criterion', action: 'repair', feedback: 'Observed defect' }]
+  record.report.criteria[0].evidence[0].outcome = 'fail'
+  record.report.readiness = 'issues_remaining'
+  record.report.unresolved = ['good', 'problem:1', 'problem:2', 'check:full', 'verification:final_full']
+  record.report.problems = ['Pending repair: T1:AC1. Internal queue details.', 'Final full verification remains incomplete.']
+  assert.notEqual(record.pausedAt, undefined)
+  record.deadline = record.pausedAt
+  record.report.usage.remainingMs = 0
+  await f.store.write(record)
+  f.calls.length = 0
+  return { ...f, state, report: record.report }
+}
+
+for (const disposition of ['false_positive', 'accepted_noncritical'] as const) {
+  test(`pending final verification survives ${disposition} and continues with existing repair allowance`, async t => {
+    const f = await pendingFinalFixture(t)
+    assert.deepEqual(reviewFailures(await f.store.read()).map(f => f.id), ['good'])
+    await decideTask(f.state, { kind: 'review_failure', identity: f.report.identity,
+      reportId: f.report.id, failureId: 'good', disposition, reason: 'Inspected the application.' }, realClock)
+    const before = await f.store.read()
+    assert.equal(canRepairReviewedTask(before), false)
+    assert.deepEqual(manualReviewSubmission(before), { kind: 'verify', label: 'Continue (+15 minutes)' })
+    assert.match(finalVerificationStatus(before) ?? '', /time allowance was exhausted/)
+    const dashboard = projectDashboardState({ domain: f.state,
+      metadata: { epicId: f.state.epicId, createdAt: realClock.now(), updatedAt: realClock.now() },
+      boundary: { stage: 'awaiting_task_review', wait: 'awaiting-human' }, events: [], agentProfiles: [], verificationRecord: before,
+    }).actionRequired
+    assert.match(dashboard?.verificationStatus ?? '', /Final verification pending/)
+    assert.equal(dashboard?.failureReviewItems?.length, 1)
+    await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /Ordinary approval/)
+    await decideTask(f.state, { kind: 'verify', identity: f.report.identity,
+      reportId: f.report.id, timeMs: 300_000, reason: 'Finish required verification.' }, realClock)
+    // Reopen the ledger to exercise continuation after restart.
+    const granted = await new VerificationStore(f.store.file, realClock).read()
+    assert.equal(granted.repairsPerItemLimit, before.repairsPerItemLimit)
+    assert.equal(granted.timeAllowanceMs, before.timeAllowanceMs + 300_000)
+    assert.equal(granted.grants.at(-1)?.repairs, 0)
+    assert.equal(granted.humanRepairRequests.length, 0)
+    await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+    const after = await f.store.read()
+    assert.deepEqual(f.calls, ['fast', 'full', 'review'])
+    assert.equal(after.cycles.at(-1)?.kind, 'final_full')
+    assert.equal(after.schedule.finalRequired, false)
+    assert.equal(after.invocations.filter(i => i.kind === 'repair').length, 0)
+    assert.equal(finalVerificationStatus(after), undefined)
+    assert.ok(after.report)
+    await assert.rejects(decideTask(f.state, { kind: 'verify', identity: after.report.identity,
+      reportId: after.report.id, timeMs: 300_000, reason: 'No pending final pass.' }, realClock), /No unfinished verification workflow/)
+  })
+}
+
+for (const phase of ['initial_full', 'targeted', 'dismissed'] as const) {
+  test(`additional time resumes ${phase} and repairs newly discovered check failures`, async t => {
+    const f = await pendingFinalFixture(t)
+    let before = await f.store.read()
+    if (phase === 'dismissed') {
+      await decideTask(f.state, { kind: 'review_failure', identity: f.report.identity,
+        reportId: f.report.id, failureId: 'good', disposition: 'false_positive', reason: 'Inspected behavior.' }, realClock)
+      before = await f.store.read()
+    }
+    if (phase === 'initial_full') {
+      before.schedule.phase = 'initial_full'
+      before.schedule.queue = []
+      before.schedule.finalRequired = false
+      await f.store.write(before)
+    }
+    assert.deepEqual(manualReviewSubmission(before), { kind: 'verify', label: 'Continue (+15 minutes)' })
+    await decideTask(f.state, { kind: 'verify', identity: f.report.identity,
+      reportId: f.report.id, timeMs: 900_000, reason: 'Continue the workflow.' }, realClock)
+    const granted = await new VerificationStore(f.store.file, realClock).read()
+    assert.deepEqual(granted.schedule, before.schedule)
+    assert.equal(granted.repairsPerItemLimit, before.repairsPerItemLimit)
+    assert.equal(granted.timeAllowanceMs, before.timeAllowanceMs + 900_000)
+    const checks = f.dependencies.checks
+    let buildBroken = true
+    f.dependencies.checks = async (...args) => {
+      const checked = await checks(...args)
+      if (!buildBroken) return checked
+      return { ...checked, result: { ...checked.result, passed: false, checks: [{
+        name: 'build', command: 'build', required: true, passed: false, skipped: false,
+        exitCode: 1, durationMs: 0, outputTruncated: false,
+        stdoutPreview: '', stderrPreview: 'Build defect', findings: [],
+      }] } }
+    }
+    const repair = f.dependencies.repair
+    f.dependencies.repair = async (state, feedback, operation) => {
+      if (feedback.includes('check:build')) buildBroken = false
+      return repair(state, feedback, operation)
+    }
+    await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+    const after = await f.store.read()
+    assert.equal(after.schedule.finalRequired, false)
+    assert.equal(after.schedule.phase, 'done')
+    assert.deepEqual(after.invocations.filter(i => i.kind === 'repair').map(i => i.repairItemId),
+      phase === 'targeted' ? ['T1:AC1', 'check:build'] : ['check:build'])
+    assert.equal(after.cycles.at(-1)?.kind, 'final_full')
+    assert.equal(after.report?.readiness, 'needs_manual_confirmation')
+  })
+}
+
+test('additional time explicitly resumes an interrupted repair within its existing attempt limit', async t => {
+  const f = await pendingFinalFixture(t)
+  const record = await f.store.read()
+  assert.notEqual(record.pausedAt, undefined)
+  record.deadline = (record.pausedAt as number) + 30_000
+  await f.store.write(record)
+  const repair = f.dependencies.repair
+  const controller = new AbortController()
+  f.dependencies.repair = async () => {
+    controller.abort(new Error('Deadline interrupted repair'))
+    throw controller.signal.reason
+  }
+  await runTaskVerification(f.state, controller.signal, f.dependencies)
+  const interrupted = await f.store.read()
+  assert.equal(interrupted.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.equal(interrupted.invocations.at(-1)?.completed, false)
+  assert.ok(interrupted.report)
+  await decideTask(f.state, { kind: 'verify', identity: interrupted.report.identity,
+    reportId: interrupted.report.id, timeMs: 900_000, reason: 'Continue the interrupted workflow.' }, realClock)
+  f.dependencies.repair = repair
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const after = await f.store.read()
+  const repairs = after.invocations.filter(i => i.kind === 'repair')
+  assert.equal(repairs.length, 2)
+  assert.equal(repairs[1].completed, true)
+  assert.equal(after.repairsPerItemLimit, interrupted.repairsPerItemLimit)
+  assert.equal(after.schedule.phase, 'done')
+  assert.equal(after.schedule.finalRequired, false)
+})
+
+test('ordinary resume runs pending final verification after finding dismissal', async t => {
+  const f = await pendingFinalFixture(t)
+  await decideTask(f.state, { kind: 'review_failure', identity: f.report.identity,
+    reportId: f.report.id, failureId: 'good', disposition: 'false_positive', reason: 'Inspected behavior.' }, realClock)
+  const record = await f.store.read()
+  assert.notEqual(record.pausedAt, undefined)
+  record.deadline = (record.pausedAt as number) + 30_000
+  await f.store.write(record)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  assert.deepEqual(f.calls, ['fast', 'full', 'review'])
+  const after = await f.store.read()
+  assert.equal(after.schedule.finalRequired, false)
+  assert.equal(after.cycles.at(-1)?.kind, 'final_full')
+  assert.equal(after.invocations.filter(i => i.kind === 'repair').length, 0)
+})
+
+test('expired final verification waits for a time grant without becoming a repair item', async t => {
+  const f = await pendingFinalFixture(t)
+  await decideTask(f.state, { kind: 'review_failure', identity: f.report.identity,
+    reportId: f.report.id, failureId: 'good', disposition: 'false_positive', reason: 'Confirmed behavior.' }, realClock)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const after = await f.store.read()
+  assert.deepEqual(f.calls, [])
+  assert.equal(after.schedule.finalRequired, true)
+  assert.equal(after.report?.usage.remainingMs, 0)
+  assert.ok(!reviewFailures(after).some(f => f.id.startsWith('problem:')))
+  assert.equal(manualReviewSubmission(after).kind, 'verify')
+})
+
+test('requesting a real fix still repairs once before required final verification', async t => {
+  const f = await pendingFinalFixture(t)
+  await decideTask(f.state, { kind: 'review_failure', identity: f.report.identity,
+    reportId: f.report.id, failureId: 'good', disposition: 'request_fix', reason: 'Observed application defect.' }, realClock)
+  assert.equal(manualReviewSubmission(await f.store.read()).kind, 'verify')
+  await decideTask(f.state, latestTaskRepairRequest(f.report, { repairs: 1, timeMs: 300_000 }, false), realClock)
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const after = await f.store.read()
+  assert.deepEqual(f.calls, ['repair', 'fast', 'full', 'review'])
+  assert.equal(after.schedule.finalRequired, false)
+  assert.equal(after.cycles.at(-1)?.kind, 'final_full')
+  assert.equal(after.invocations.filter(i => i.kind === 'repair').length, 1)
+})
+
 test('manual checklist persists edits, blocks ordinary approval, and resets only for a new report', async t => {
   const f = await manualFixture(t)
   assert.deepEqual(f.review.items.map(i => i.status), ['not_checked', 'not_checked'])
@@ -1670,7 +1856,7 @@ test('evidence gaps offer manual review without repair; a recorded manual defect
     metadata: { epicId: f.state.epicId, createdAt: realClock.now(), updatedAt: realClock.now() },
     boundary: { stage: 'awaiting_task_review', wait: 'awaiting-human' }, events: [], agentProfiles: [], verificationRecord: record,
   }).actionRequired
-  assert.ok(dashboard?.actions.some(a => a.command === '/task-repair'))
+  assert.equal(dashboard?.actions[0]?.label, 'Continue (request fixes)')
   assert.match(dashboard?.message ?? '', /recorded observations/)
   await decideTask(f.state, latestTaskRepairRequest(report, { repairs: 1, timeMs: 300_000 }, true), realClock)
   assert.match((await f.store.read()).humanRepairRequests[0].feedback, /A\/D do not move the paddle/)
@@ -1735,7 +1921,9 @@ test('completed manual review approves evidence gaps directly and checkpoints th
   await f.update(0, 'not_checked')
   await assert.rejects(assertAcceptedReport(approved, realClock), /completed review checklist/)
   await f.update(0, 'passed')
-  saved.report = { ...report, readiness: 'issues_remaining' }
+  saved.report = { ...structuredClone(report), readiness: 'issues_remaining' }
+  saved.report.criteria[0].evidence[0].outcome = 'fail'
+  saved.report.criteria[0].evidence[0].actual = 'Observed application defect.'
   saved.manualReviews = (await f.store.read()).manualReviews
   await f.store.write(saved)
   assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
@@ -1799,7 +1987,7 @@ test('dashboard continues after manual review without limitation dialogs', async
   await f.update(0, 'not_checked')
   await f.update(1, 'failed', 'A/D do not work')
   assert.equal((await actions())?.[0]?.label, 'Continue (request fixes)')
-  assert.ok((await actions())?.some(a => a.command === '/task-repair'))
+  assert.ok(!(await actions())?.some(a => a.command === '/task-repair'))
   assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
   await f.update(0, 'passed')
   await f.update(1, 'passed')
@@ -1812,10 +2000,11 @@ test('dashboard continues after manual review without limitation dialogs', async
   assert.ok(automatedFailure.report)
   automatedFailure.report.readiness = 'issues_remaining'
   automatedFailure.report.unresolved = ['T1:AC1']
+  automatedFailure.report.criteria[0].evidence[0].outcome = 'fail'
   await f.store.write(automatedFailure)
   assert.equal((await actions())?.[0]?.label, 'Continue (request fixes)')
-  assert.ok((await actions())?.some(a => a.command === '/task-repair'))
-  assert.match(reviewReportMarkdown(automatedFailure.report, '/run/reviews/acceptance.md'), /\/task-repair/)
+  assert.ok(!(await actions())?.some(a => a.command === '/task-repair'))
+  assert.match(reviewReportMarkdown(automatedFailure.report, '/run/reviews/acceptance.md'), /Continue \(request fixes\)/)
   assert.equal(manualReviewSubmission(await f.store.read()).kind, 'grant')
   await f.update(0, 'failed', 'Rendering is broken')
   assert.equal((await actions())?.[0]?.label, 'Continue (request fixes)')
@@ -2014,6 +2203,35 @@ test('failure checklist editor marks statuses directly and supports observation 
 })
 
 
+for (const unresolved of [
+  ['check:install', 'check:full'],
+  ['check:full', 'check:install'],
+  ['check:full'],
+]) {
+  test(`a failed full check survives a passing fast check with the same name (${unresolved.join(', ')})`, async t => {
+    const f = await manualFixture(t)
+    const record = await f.store.read()
+    assert.ok(record.report?.cycle?.fast)
+    assert.ok(record.report.cycle.full)
+    record.report.readiness = 'issues_remaining'
+    record.report.unresolved = unresolved
+    const failedCheck = {
+      name: 'install', command: 'npm ls --all --json', required: true, passed: false,
+      exitCode: 1, durationMs: 0, outputTruncated: false,
+      stdoutPreview: '', stderrPreview: 'Invalid dependency', findings: [],
+    }
+    record.report.cycle.fast.checks = [{ ...failedCheck, passed: true, exitCode: 0, stderrPreview: '' }]
+    record.report.cycle.full.passed = false
+    record.report.cycle.full.checks = [failedCheck]
+    const failures = reviewFailures(record)
+    assert.deepEqual(failures.map(failure => failure.id),
+      unresolved.includes('check:install') ? ['check:install'] : ['check:full'])
+    if (unresolved.includes('check:install')) assert.equal(failures[0].actual, 'Invalid dependency')
+    assert.equal(canRepairReviewedTask(record), true)
+    assert.equal(manualReviewSubmission(record).kind, 'grant')
+  })
+}
+
 test('likely findings and check failures can be individually dismissed without hiding raw evidence', async t => {
   const f = await manualFixture(t)
   await f.update(0, 'passed')
@@ -2026,9 +2244,14 @@ test('likely findings and check failures can be individually dismissed without h
   evidence.suspectedFailure = { contradiction: 'Image URL detected', uncertainty: 'May be inline', confirmationCheck: 'Inspect URL' }
   record.report.unresolved = ['good', 'check:build', 'problem:1']
   record.report.problems = ['Validator rejected namespace URL']
+  assert.ok(record.report.cycle?.fast)
+  record.report.cycle.fast.checks.push({
+    name: 'build', command: 'build', required: true, passed: false, exitCode: 1,
+    durationMs: 0, outputTruncated: false, stdoutPreview: '', stderrPreview: 'Validator rejected namespace URL', findings: [],
+  })
   await f.store.write(record)
-  assert.deepEqual(reviewFailures(record).map(f => f.id), ['good', 'check:build', 'problem:1'])
-  for (const failureId of record.report.unresolved) {
+  assert.deepEqual(reviewFailures(record).map(f => f.id), ['good', 'check:build'])
+  for (const failureId of ['good', 'check:build']) {
     await decideTask(f.state, { kind: 'review_failure', identity: record.report.identity,
       reportId: record.report.id, failureId, disposition: 'false_positive', reason: 'Confirmed validator error.' }, realClock)
   }

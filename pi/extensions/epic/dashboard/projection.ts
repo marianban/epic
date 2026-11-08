@@ -3,6 +3,7 @@ import { failureReviewItems } from './failure-review-items.ts'
 import { currentManualReview } from '../manual-review.ts'
 import { canApproveTask, canRepairTask } from '../task-review-policy.ts'
 import { manualReviewSubmission } from './manual-review-submission.ts'
+import { finalVerificationStatus } from '../final-verification-status.ts'
 import { acceptancePlanningFailureMessage } from '../acceptance-planning-recovery.ts'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -191,16 +192,16 @@ function taskReviewMessage(
     return 'Recorded findings have been dismissed or accepted. Complete the manual review steps, then choose Continue.'
 
   const status = manualFailures
-    ? 'Manual review found incorrect behavior. Repair will use the recorded observations.'
+    ? 'Manual review found incorrect behavior. Requested fixes will use the recorded observations.'
     : readiness === 'issues_remaining'
     ? 'Verification found unresolved issues.'
     : 'Verification needs manual confirmation.'
   const instructions = state.lastVerificationReportPath
     ? [
         repairAvailable
-          ? 'Use /task-repair without arguments to grant one additional repair attempt and five minutes.'
+          ? 'Choose Continue (request fixes) to grant one additional attempt per repair item and fifteen additional minutes.'
           : 'No actionable failure is recorded. Review the unresolved evidence manually.',
-        'Complete the manual review steps, then choose Continue.',
+        ...(repairAvailable ? [] : ['Complete the manual review steps, then choose Continue.']),
       ].join(' ')
     : 'No verification report is available for this task.'
   return [status, state.failureReason, instructions].filter(Boolean).join(' ')
@@ -283,12 +284,9 @@ function actionRequired(
         const readiness = verificationRecord?.report ? verificationRecord.report.readiness : state.verificationReadiness
         const manualFailures = manualReview?.items.some((item) => item.status === 'failed') ?? false
         const manualApprovalReady = verificationRecord?.report ? canApproveTask(verificationRecord) : false
-        const repairActions = (verificationRecord?.report ? canRepairReviewedTask(verificationRecord) || manualFailures : canRepairTask(readiness, manualFailures))
-          ? [action(EPIC_COMMANDS.repairTask, 'Repair', EPIC_COMMANDS.repairTask, 'secondary')]
-          : []
+        const repairAvailable = verificationRecord?.report ? canRepairReviewedTask(verificationRecord) || manualFailures : canRepairTask(readiness, manualFailures)
         const reviewActions: DashboardAction[] | undefined = manualReview && verificationRecord?.report ? [
           { id: 'manual-review-submit', label: manualReviewSubmission(verificationRecord).label, kind: 'primary', manualReview, disabled: manualReviewSubmission(verificationRecord).kind === 'incomplete' },
-          ...repairActions,
           { id: 'manual-review-history', label: 'Review history', manualReview },
           action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary'),
         ] : undefined
@@ -300,14 +298,15 @@ function actionRequired(
             ? 'Review the flagged behavior. Pass: works correctly · Fail: needs a fix · Ignored: accept without a fix.'
             : manualApprovalReady
             ? 'All manual review steps passed. Continue to approve the task.'
-            : taskReviewMessage(state, readiness, manualFailures, manualApprovalReady, repairActions.length > 0),
+            : taskReviewMessage(state, readiness, manualFailures, manualApprovalReady, repairAvailable),
           manualReview,
+          verificationStatus: verificationRecord?.report ? finalVerificationStatus(verificationRecord) : undefined,
           failureReviewItems: verificationRecord?.report ? failureReviewItems(verificationRecord) : undefined,
           manualReviewSteps: task.manualReviewSteps,
           verificationReportLink: state.lastVerificationReportPath
             ? linkedFile(state.lastVerificationReportPath.replace(/\.json$/, '.md'), 'Verification report')
             : undefined,
-          actions: reviewActions ?? (readiness === 'verified' ? taskActions() : [...repairActions, action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')]),
+          actions: reviewActions ?? (readiness === 'verified' ? taskActions() : [action(EPIC_COMMANDS.exit, 'Exit', EPIC_COMMANDS.exit, 'secondary')]),
         }
       }
     case 'escalating': {

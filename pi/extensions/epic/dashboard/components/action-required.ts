@@ -252,6 +252,9 @@ export class ActionRequired implements Component {
         ).flatMap((line) => wrapTextWithAnsi(line, Math.max(1, innerWidth)))
       : this.renderManualReviewSteps(state.manualReviewSteps, innerWidth)
     const actionLines = this.renderActions(state.actions, innerWidth)
+    const verificationStatusLines = state.verificationStatus
+      ? wrapTextWithAnsi(this.theme.fg('warning', state.verificationStatus), Math.max(1, innerWidth))
+      : []
     const reportLines =
       state.verificationReportLink === undefined
         ? []
@@ -262,6 +265,7 @@ export class ActionRequired implements Component {
     const content = [
       ...titleLines,
       ...(messageLines.length > 0 ? ['', ...messageLines] : []),
+      ...(verificationStatusLines.length > 0 ? ['', ...verificationStatusLines] : []),
       ...(manualReviewLines.length > 0 ? ['', ...manualReviewLines] : []),
       ...(reportLines.length > 0 ? ['', ...reportLines] : []),
       ...(actionLines.length > 0 ? ['', ...actionLines] : []),

@@ -132,11 +132,14 @@ test('action-required focus owns input and no-active refresh clears Pipeline', a
     id: 'checkpoint',
     severity: 'warning',
     title: 'Checkpoint',
+    verificationStatus: 'Final verification pending. The time allowance was exhausted.',
     actions: [{ id: 'continue', label: 'Continue' }],
   })
   const created = createWidget(async () => current)
   await new Promise<void>((resolve) => setImmediate(resolve))
   const before = created.widget.render(120).join('\n')
+  assert.match(before, /Final verification pending/)
+  assert.match(before, /time allowance was exhausted/)
   assert.ok(before.indexOf('TASK') < before.indexOf('CHECKPOINT'))
   assert.ok(before.indexOf('PIPELINE') < before.indexOf('CHECKPOINT'))
   const result = created.input('\t')
