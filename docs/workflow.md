@@ -18,6 +18,23 @@ flowchart TD
     Setup --> TaskReview
     Prereqs -->|Yes| TaskReview
 
+    Classify -->|Error| EarlyRecovery["Pause with recovery diagnostics; /epic-approve-recovery"]
+    Scout -->|Error| EarlyRecovery
+    Plan -->|Error| EarlyRecovery
+    PlanRevision -->|Error| EarlyRecovery
+    PlanReview -->|Approval error| EarlyRecovery
+    Tasks -->|Error| EarlyRecovery
+    Preflight -->|Error| EarlyRecovery
+    Setup -->|Preparation error| EarlyRecovery
+    EarlyRecovery -->|Retry failed classification| Classify
+    EarlyRecovery -->|Retry failed scouting| Scout
+    EarlyRecovery -->|Retry failed planning| Plan
+    EarlyRecovery -->|Retry failed plan revision| PlanRevision
+    EarlyRecovery -->|Retry failed plan approval| PlanReview
+    EarlyRecovery -->|Retry failed decomposition| Tasks
+    EarlyRecovery -->|Retry failed prerequisite discovery or preflight| Preflight
+    EarlyRecovery -->|Retry failed prerequisite preparation| Setup
+
     subgraph TaskLoop["Repeat for each task"]
         TaskReview["8. Human task review"] -->|Revise findings| TaskRevision["Revise task artifact"]
         TaskRevision --> TaskReview
@@ -30,23 +47,26 @@ flowchart TD
         Checks -->|Fail or error| Repairable
         FullChecks -->|Pass| Smoke["12. Browser smoke when required"]
         FullChecks -->|Fail or error| Repairable
-        Smoke --> Verify["13. Verify acceptance criteria"]
-        Verify --> Review["14. Independent code review"]
-        Review --> Reconcile["Reconcile finding IDs, resolutions and duplicates"]
-        Reconcile --> Queue
+        Smoke --> Verify["13. Initial verification: check all acceptance criteria"]
+        Verify -->|More planned scenarios to check| Verify
+        Verify -->|All planned scenarios processed; results may pass, fail or lack evidence| Review["14. Independent code review"]
+        Verify -->|Deadline or interruption; retain incomplete work| Human
+        Review --> Reconcile["Update review findings: keep open, resolve or merge duplicates by ID"]
+        Reconcile --> Schedule["Update unresolved work queue from criterion evidence, required checks and open findings"]
+        Schedule --> Queue
         Reconcile -->|Invalid review; preserve queued work| Human
         Repairable{"Actionable failures and item allowance?"}
         Repairable -->|Yes| Repair["Repair implementation"]
         Repair --> TargetChecks["Required checks and applicable smoke"]
         TargetChecks --> TargetVerify["Verify repaired criterion or finding"]
         TargetVerify --> Reconcile
-        Queue{"Eligible work remains?"}
-        Queue -->|Observed failure, including likely failure| Repairable
-        Queue -->|Evidence gap; one verification-only attempt| GapCheck["Targeted evidence check; defer persistent gaps"]
+        Queue{"Unresolved criteria, checks or findings eligible for work?"}
+        Queue -->|Next observed failure, including likely failure| Repairable
+        Queue -->|Next criterion with missing or inconclusive evidence; one verification-only attempt| GapCheck["Check that criterion's planned obligations; defer persistent gaps"]
         GapCheck --> Reconcile
-        Queue -->|No eligible items; repairs occurred| TaskFinal["Full task verification: all criteria and semantic review"]
-        TaskFinal --> Reconcile
-        Queue -->|No repairs; only deferred gaps| Human
+        Queue -->|No eligible items; final pass pending| TaskFinal["Full task verification: all criteria and semantic review"]
+        TaskFinal -->|Completed; clear pending final pass| Reconcile
+        Queue -->|No eligible items; no final pass pending| Human
         Repairable -->|Item allowance exhausted| Exhausted["Defer unresolved item; continue other work"]
         Exhausted --> Queue
         Repairable -->|No actionable failure, deadline, or infrastructure blocker| Human["15. Human reviews immutable report"]
@@ -68,6 +88,10 @@ flowchart TD
     Final -->|Fail or error| Recovery["Pause with recovery diagnostics"]
     Recovery -->|/epic-approve-recovery; retry| Final
 ```
+
+Errors before task execution pause for recovery approval. `/epic-approve-recovery` retries the failed operation. Each repair requires a final full task pass; completing that pass clears the requirement, and any subsequent repair makes it pending again. When no eligible work or final pass remains, human results review begins, including when the initial verification passes without repairs or unresolved items have been deferred.
+
+Step 13 processes the planned scenarios for all acceptance criteria before independent review; a failed criterion does not end that initial pass. Finding reconciliation updates review findings, while queue scheduling separately combines those findings with criterion evidence and required-check results. Passed criteria need no targeted work. Criteria with missing or inconclusive evidence receive a targeted check, and failed criteria enter repair; each iteration then selects the next eligible unresolved item. Human-only obligations remain for human review. A deadline or interruption can stop a pass early and leave verification unfinished for resume.
 
 | Step | Description |
 | --- | --- |
