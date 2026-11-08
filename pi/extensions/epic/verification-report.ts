@@ -267,7 +267,7 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
     '',
     '## Human decisions',
     '',
-    'Complete the checklist in the dashboard, then choose Continue. Failure Review Steps replace the manual checklist when findings are present: Pass confirms the behavior works, Fail requests a fix, and Ignored accepts the finding without a fix. Enter adds an optional observation. Approval requires every failure step to be Pass or Ignored, or every manual step to pass when no failures are listed. Recorded failed manual steps still block approval. The report retains its original findings and evidence; decisions are recorded separately in the verification ledger and dashboard review history.',
+    'Complete the checklist in the dashboard, then choose Continue. Failure Review Steps replace the manual checklist when findings are present: Space cycles Unchecked → Pass → Fail → Unchecked. Pass accepts the finding without a fix; Fail requests a fix. Unchecked records no decision and leaves the finding eligible for repair. Returning to Unchecked clears that finding’s decisions on the current report. Enter adds an optional observation. Approval requires every failure step to be Pass, or every manual step to pass when no failures are listed. Recorded failed manual steps still block approval. The report retains its original findings and evidence; decisions are recorded separately in the verification ledger and dashboard review history.',
     ...(hasLikelyFailure(report)
       ? ['Observed contradictions, including likely failures, require repair and block approval. Use the recorded evidence to diagnose and fix the behavior; uncertainty about the cause does not require human confirmation before repair.']
       : []),

@@ -1,5 +1,6 @@
 # Repository Agent Rules
 
+- Run Fallow review/audit commands that compare against a Git base with elevated permissions (`sandbox_permissions: "require_escalated"`). They create temporary comparison worktrees and must write to `.git/worktrees`, which the sandbox blocks. An error creating the comparison worktree requires rerunning with elevated permissions.
 - Do not implicitly implement backward compatibility in the epic extension. If an older persisted epic state or extension version is incompatible, diagnose and report the incompatibility first. Only add a compatibility migration when the user explicitly requests it.
 - When diagnosing an issue, if it is caused by or reveals an epic/extension compatibility problem, clearly inform the user about that compatibility issue, including the affected versions or state when known, before proposing remediation.
 - avoid generic entrypoints like index.ts.

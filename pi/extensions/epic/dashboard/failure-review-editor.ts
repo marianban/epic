@@ -15,9 +15,13 @@ export async function editFailureReview(
   const item = failureReviewItems(record).find(f => f.id === itemId)
   if (!failure || !item) throw new Error('Unknown failure review step.')
   const status = targetStatus ?? item.status
-  if (status === 'not_checked') throw new Error('Mark the step Pass, Fail, or Ignored before adding an observation.')
+  if (status === 'not_checked') {
+    if (!targetStatus) throw new Error('Mark the step Pass or Fail before adding an observation.')
+    return { kind: 'review_failure', identity: report.identity, reportId: report.id,
+      failureId: failure.id, disposition: 'not_checked', reason: 'Human reset this step to Unchecked.' }
+  }
   const dispositions: Record<Exclude<FailureReviewStatus, 'not_checked'>, FailureDisposition> = {
-    passed: 'false_positive', failed: 'request_fix', ignored: 'accepted_noncritical',
+    passed: 'accepted_noncritical', failed: 'request_fix',
   }
   let reason = targetStatus ? failureReviewReasons[status] : item.observation
   if (!targetStatus) {

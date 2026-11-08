@@ -107,7 +107,7 @@ export interface CurrentTaskDashboardState {
   readonly diff?: TaskDiffDashboardState
 }
 
-export type FailureReviewStatus = 'not_checked' | 'passed' | 'failed' | 'ignored'
+export type FailureReviewStatus = 'not_checked' | 'passed' | 'failed'
 
 export interface FailureReviewItem {
   readonly id: string

@@ -243,7 +243,7 @@ export type TaskDecisionRequest =
       identity: string
       reportId: string
       failureId: string
-      disposition: FailureDisposition
+      disposition: FailureDisposition | 'not_checked'
       reason: string
     }
   | {

@@ -4,21 +4,20 @@ export function nextFailureStatus(status: FailureReviewStatus): FailureReviewSta
   switch (status) {
     case 'not_checked': return 'passed'
     case 'passed': return 'failed'
-    case 'failed': return 'ignored'
-    case 'ignored': return 'passed'
+    case 'failed': return 'not_checked'
   }
 }
 
 export function failureChecklistLines(items: readonly FailureReviewItem[], selected: number | undefined): string[] {
-  const counts = (['passed', 'failed', 'ignored', 'not_checked'] as const)
+  const counts = (['passed', 'failed', 'not_checked'] as const)
     .map(status => `${items.filter(i => i.status === status).length} ${status.replace('_', ' ')}`)
     .join(' · ')
   return [
     `Failure Review Steps — ${counts}`,
     ...items.flatMap((item, index) => [
-      `${selected === index ? '▸' : ' '}[${{ passed: '✓', failed: '✕', ignored: '−', not_checked: ' ' }[item.status]}] ${index + 1}. ${item.text}`,
+      `${selected === index ? '▸' : ' '}[${{ passed: '✓', failed: '✕', not_checked: ' ' }[item.status]}] ${index + 1}. ${item.text}`,
       ...(item.observation ? [`    Observation: ${item.observation}`] : []),
     ]),
-    `↑/↓ select · Space: Pass → Fail → Ignored · ${selected !== undefined && items[selected]?.status === 'not_checked' ? 'Mark a status before adding an observation' : 'Enter: observation'} · Tab: actions`,
+    `↑/↓ select · Space: Unchecked → Pass → Fail → Unchecked · ${selected !== undefined && items[selected]?.status === 'not_checked' ? 'Mark a status before adding an observation' : 'Enter: observation'} · Tab: actions`,
   ]
 }

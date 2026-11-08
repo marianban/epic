@@ -295,7 +295,7 @@ function actionRequired(
           severity: 'warning',
           title: 'Task awaits human review',
           message: verificationRecord?.report && reviewFailures(verificationRecord).length
-            ? 'Review the flagged behavior. Pass: works correctly · Fail: needs a fix · Ignored: accept without a fix.'
+            ? 'Review the flagged behavior. Pass: accept without a fix · Fail: request a fix · Unchecked: no decision; eligible for repair.'
             : manualApprovalReady
             ? 'All manual review steps passed. Continue to approve the task.'
             : taskReviewMessage(state, readiness, manualFailures, manualApprovalReady, repairAvailable),

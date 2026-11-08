@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { reviewFailures, canRepairReviewedTask } from '../pi/extensions/epic/failure-review.ts'
+import { reviewFailures, canRepairReviewedTask, dismissedRepairItemIds } from '../pi/extensions/epic/failure-review.ts'
+import { failureReviewItems } from '../pi/extensions/epic/dashboard/failure-review-items.ts'
 import { editFailureReview } from '../pi/extensions/epic/dashboard/failure-review-editor.ts'
 import { manualReviewSubmission } from '../pi/extensions/epic/dashboard/manual-review-submission.ts'
 import { finalVerificationStatus } from '../pi/extensions/epic/final-verification-status.ts'
@@ -2138,7 +2139,7 @@ for (const disposition of ['false_positive', 'accepted_noncritical'] as const) {
       boundary: { stage: 'awaiting_task_review', wait: 'awaiting-human' }, events: [], agentProfiles: [], verificationRecord: reviewed,
     }).actionRequired
     assert.ok(!dashboard?.actions.some(a => a.id === 'manual-review-failures'))
-    assert.equal(dashboard?.failureReviewItems?.[0]?.status, disposition === 'false_positive' ? 'passed' : 'ignored')
+    assert.equal(dashboard?.failureReviewItems?.[0]?.status, 'passed')
     assert.equal(dashboard?.actions[0].label, 'Continue (approve task)')
     assert.equal(dashboard?.actions[0].disabled, false)
     assert.ok(!dashboard?.actions.some(a => a.command === '/task-repair'))
@@ -2190,7 +2191,8 @@ test('failure checklist editor marks statuses directly and supports observation 
   assert.ok(record.report)
   record.report.criteria[0].evidence[0].outcome = 'fail'
   const failure = reviewFailures(record)[0]
-  for (const [status, disposition] of [['passed', 'false_positive'], ['failed', 'request_fix'], ['ignored', 'accepted_noncritical']] as const) {
+  await assert.rejects(editFailureReview(record, failure.id, undefined, async () => ''), /Mark the step Pass or Fail/)
+  for (const [status, disposition] of [['passed', 'accepted_noncritical'], ['failed', 'request_fix'], ['not_checked', 'not_checked']] as const) {
     const request = await editFailureReview(record, failure.id, status, async () => { throw Error('Must not open') })
     assert.equal(request?.disposition, disposition)
     assert.ok(request?.reason.trim())
@@ -2200,6 +2202,50 @@ test('failure checklist editor marks statuses directly and supports observation 
   assert.equal(await editFailureReview(record, failure.id, undefined, async () => undefined), undefined)
   await assert.rejects(editFailureReview(record, failure.id, undefined, async () => ' '), /explicit reason/)
   await assert.rejects(editFailureReview(record, 'unknown', 'passed', async () => ''), /Unknown failure review step/)
+})
+
+test('resetting a failure to Unchecked clears its current decisions and restores repair eligibility', async t => {
+  const f = await manualFixture(t)
+  const record = await f.store.read()
+  assert.ok(record.report)
+  record.report.readiness = 'issues_remaining'
+  const evidence = record.report.criteria[0].evidence[0]
+  evidence.outcome = 'fail'
+  record.report.criteria[0].evidence.push({ ...evidence, obligationId: 'other-failure' })
+  record.decisions.push({ kind: 'accepted_noncritical', identity: record.report.identity,
+    reportId: 'previous-report', obligations: ['good'], reason: 'Previous report decision.', at: 1 })
+  await f.store.write(record)
+  const originalReport = structuredClone(record.report)
+  const base = { kind: 'review_failure' as const, identity: record.report.identity, reportId: record.report.id }
+  await decideTask(f.state, { ...base, failureId: 'other-failure', disposition: 'accepted_noncritical',
+    reason: 'Accept the other issue.' }, realClock)
+
+  for (const disposition of ['accepted_noncritical', 'false_positive', 'request_fix'] as const) {
+    // Multiple decisions for this finding must not reappear after resetting it.
+    for (const choice of ['accepted_noncritical', disposition] as const)
+      await decideTask(f.state, { ...base, failureId: 'good', disposition: choice,
+        reason: 'Current finding decision.' }, realClock)
+    const before = await f.store.read()
+    assert.equal(failureReviewItems(before)[0].status, disposition === 'request_fix' ? 'failed' : 'passed')
+    const preserved = before.decisions.filter(d => d.reportId !== base.reportId || !d.obligations.includes('good'))
+    const request = await editFailureReview(before, 'good', 'not_checked', async () => { throw Error('Must not open') })
+    assert.ok(request)
+    await assert.rejects(decideTask(f.state, { ...request, reportId: 'stale' }, realClock), /current attempt/)
+    await assert.rejects(decideTask(f.state, { ...request, failureId: 'unknown' }, realClock), /current report/)
+    await decideTask(f.state, request, realClock)
+
+    const reset = await f.store.read()
+    assert.deepEqual(reset.decisions, preserved)
+    assert.deepEqual(reset.report, originalReport)
+    assert.equal(failureReviewItems(reset)[0].status, 'not_checked')
+    assert.equal(failureReviewItems(reset)[0].observation, '')
+    assert.equal(failureReviewItems(reset)[1].status, 'passed')
+    assert.equal(reviewFailures(reset)[0].decision, undefined)
+    assert.equal(dismissedRepairItemIds(reset).has('good'), false)
+    assert.equal(canRepairReviewedTask(reset), true)
+    assert.equal(manualReviewSubmission(reset).kind, 'grant')
+    await assert.rejects(decideTask(f.state, { kind: 'approve' }, realClock), /Ordinary approval/)
+  }
 })
 
 

@@ -50,10 +50,17 @@ export async function decideTask(
   assertManualReviewTask(state, manualReview)
   if (request.kind === 'review_failure') {
     if (!reviewFailures(record).some(f => f.id === request.failureId) ||
-        !['request_fix', 'false_positive', 'accepted_noncritical'].includes(request.disposition))
+        !['request_fix', 'false_positive', 'accepted_noncritical', 'not_checked'].includes(request.disposition))
       throw new Error('Failure decision requires a finding from the current report and a valid disposition.')
-    record.decisions.push({ kind: request.disposition, identity, reportId: report.id,
-      obligations: [request.failureId], reason: request.reason, at: clock.nowMs() })
+    if (request.disposition === 'not_checked') {
+      record.decisions = record.decisions.filter(decision =>
+        decision.identity !== identity || decision.reportId !== report.id ||
+        !['request_fix', 'false_positive', 'accepted_noncritical'].includes(decision.kind) ||
+        !decision.obligations.includes(request.failureId))
+    } else {
+      record.decisions.push({ kind: request.disposition, identity, reportId: report.id,
+        obligations: [request.failureId], reason: request.reason, at: clock.nowMs() })
+    }
     await store.write(record)
     return { ...state, failureReason: undefined }
   }

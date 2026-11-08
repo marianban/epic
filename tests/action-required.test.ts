@@ -325,7 +325,7 @@ test('failure editor requires feedback, cancellation preserves the saved item, a
   assert.deepEqual(manualReview, before)
 })
 
-test('failure checklist replaces manual steps and cycles Pass, Fail, Ignored inline', async () => {
+test('failure checklist replaces manual steps and cycles Unchecked, Pass, Fail inline', async () => {
   const selected: DashboardAction[] = []
   const items = [
     { id: 'T1:AC2:O1', text: 'Holding Left moves the paddle left.', status: 'not_checked' as const, observation: '' },
@@ -335,13 +335,21 @@ test('failure checklist replaces manual steps and cycles Pass, Fail, Ignored inl
   const output = component.render(100).join('\n')
   assert.match(output, /Failure Review Steps/)
   assert.match(output, /Holding Left moves/)
+  assert.match(output, /Unchecked → Pass → Fail → Unchecked/)
+  assert.doesNotMatch(output, /Ignored|ignored/)
   assert.doesNotMatch(output, /Manual Review Steps|Inspect rendering|AC2:O1|Observed:|Decision:|Review failures/)
-  for (const status of ['passed', 'failed', 'ignored', 'passed'] as const) {
+  for (const status of ['passed', 'failed', 'not_checked', 'passed'] as const) {
     component.handleInput(' ')
     await nextInput()
     assert.equal(selected.at(-1)?.id, 'failure-review-update')
     assert.equal(selected.at(-1)?.failureStatus, status)
     component.setState({ ...state, failureReviewItems: [{ ...items[0], status }] })
+    if (status === 'not_checked') {
+      const count = selected.length
+      component.handleInput('\r')
+      await nextInput()
+      assert.equal(selected.length, count)
+    }
   }
   component.handleInput('\r')
   await nextInput()
