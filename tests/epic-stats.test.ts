@@ -32,4 +32,10 @@ test('epic stats uses the concise Time label', () => {
   const output = new EpicStats(dashboard, identityTheme).render(100).join('\n')
   assert.match(output, /Time/)
   assert.doesNotMatch(output, /Agent time/)
+  const incomplete: DashboardState = { ...dashboard, epic: { ...dashboard.epic, tokens: { total: 1_000, incomplete: true } } }
+  for (const width of [60, 100]) {
+    assert.match(new EpicStats(incomplete, identityTheme).render(width).join('\n'), /Tokens\s+≥1k/)
+  }
+  const unavailable = { ...dashboard, epic: { ...dashboard.epic, tokens: undefined } }
+  assert.match(new EpicStats(unavailable, identityTheme).render(100).join('\n'), /Tokens\s+--/)
 })

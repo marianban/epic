@@ -1,3 +1,4 @@
+import { AgentRunFailure } from './agent-run-failure.ts'
 import { findingReviewInstructions } from './finding-reconciliation.ts'
 import type { FindingReviewContext } from './verification-types.ts'
 import {
@@ -409,6 +410,7 @@ export function createEpicServices(
       }
       const durationMs = Math.max(0, clock.nowMs() - runStartedAt)
       if (failure !== undefined) {
+        const telemetry = failure instanceof AgentRunFailure ? failure.telemetry : undefined
         await appendEvent(
           state,
           getBoundary().stage,
@@ -429,6 +431,7 @@ export function createEpicServices(
             exitCode: 1,
             failureReason:
               failure instanceof Error ? failure.message : String(failure),
+            ...telemetry,
             durationMs,
           }
         )

@@ -36,6 +36,7 @@ import { createEpicRuntime } from '../pi/extensions/epic/runtime.ts'
 import { projectDashboardState } from '../pi/extensions/epic/dashboard/projection.ts'
 import { formatEscalationMessage } from '../pi/extensions/epic/epic.ts'
 import type { AgentRunResult } from '../pi/extensions/epic/agents.ts'
+import { AgentRunFailure } from '../pi/extensions/epic/agent-run-failure.ts'
 import type { EpicDomainState } from '../pi/extensions/epic/types.ts'
 import type { VerificationPlan } from '../pi/extensions/epic/verification-types.ts'
 
@@ -241,6 +242,21 @@ test('the Arkanoid browser-step shape reports an exact field path and never norm
       PlanValidationError
     )
   }
+})
+
+test('failed agent telemetry is persisted before the invocation failure propagates', async (t) => {
+  const telemetry = {
+    stdoutLogPath: '/tmp/reviewer.stdout.log',
+    provider: 'measured-provider',
+    model: 'measured-model',
+    usage: { totalTokens: 15, incomplete: true },
+  }
+  const f = await fixture(t, [new AgentRunFailure(new Error('Agent timed out'), telemetry)])
+  await assert.rejects(f.services.prepareVerification(f.state), /Agent timed out/)
+  const finished = (await loadEpicEvents(f.state)).find((event) => event.type === 'agent_finished')
+  assert.ok(finished)
+  assert.equal(finished.payload.exitCode, 1)
+  for (const [key, value] of Object.entries(telemetry)) assert.deepEqual(finished.payload[key], value)
 })
 
 test('first-attempt success freezes a plan before implementation without charging verification', async (t) => {

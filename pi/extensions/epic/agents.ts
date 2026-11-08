@@ -1,3 +1,5 @@
+import { AgentUsageCollector } from './agent-usage.ts'
+import { AgentRunFailure } from './agent-run-failure.ts'
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import * as fs from 'node:fs/promises'
@@ -51,35 +53,6 @@ function appendTail(
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
-}
-
-function mergeUsage(
-  current: Record<string, unknown> | undefined,
-  incoming: Record<string, unknown>
-): Record<string, unknown> {
-  if (current === undefined) return { ...incoming }
-
-  const merged = { ...current }
-  for (const [key, value] of Object.entries(incoming)) {
-    const existing = merged[key]
-    if (typeof existing === 'number' && typeof value === 'number') {
-      merged[key] = existing + value
-    } else if (!(key in merged)) {
-      merged[key] = value
-    }
-  }
-  return merged
-}
-
-function usageRecords(
-  event: Record<string, unknown>
-): Record<string, unknown>[] {
-  if (isRecord(event.usage)) return [event.usage]
-  if (event.type !== 'agent_end' || !Array.isArray(event.messages)) return []
-
-  return event.messages.flatMap((message) =>
-    isRecord(message) && isRecord(message.usage) ? [message.usage] : []
-  )
 }
 
 function assistantText(event: Record<string, unknown>): string | undefined {
@@ -167,7 +140,7 @@ export class AgentOutputCollector {
   private latestAssistantText = ''
   private diagnosticTail = ''
   private failureReason: string | undefined
-  private usage: Record<string, unknown> | undefined
+  private readonly usage = new AgentUsageCollector()
   private provider: string | undefined
   private model: string | undefined
 
@@ -181,11 +154,15 @@ export class AgentOutputCollector {
       this.processLine(this.pendingLine)
       this.pendingLine = ''
     }
+    return this.snapshot()
+  }
+
+  snapshot(): AgentOutputSummary {
     return {
       output: this.latestAssistantText,
       diagnosticTail: this.diagnosticTail,
       failureReason: this.failureReason,
-      usage: this.usage,
+      usage: this.usage.snapshot(),
       provider: this.provider,
       model: this.model,
     }
@@ -229,8 +206,7 @@ export class AgentOutputCollector {
       // A later successful retry supersedes an earlier provider error.
       this.failureReason = undefined
     }
-    for (const usage of usageRecords(event))
-      this.usage = mergeUsage(this.usage, usage)
+    this.usage.observe(event)
 
     for (const message of assistantMessages(event)) {
       const identity = assistantIdentity(message)
@@ -399,10 +375,17 @@ export async function runAgent(
     const fail = (error: Error) => {
       if (settled) return
       settled = true
+      const output = outputCollector.snapshot()
       cleanup()
-      reject(error)
+      reject(new AgentRunFailure(error, {
+        stdoutLogPath: stdoutLog.filePath,
+        ...(output.provider === undefined ? {} : { provider: output.provider }),
+        ...(output.model === undefined ? {} : { model: output.model }),
+        ...(output.usage === undefined ? {} : { usage: { ...output.usage, incomplete: true } }),
+      }))
     }
     child.stdout.on('data', (chunk: Buffer) => {
+      if (settled) return
       try {
         stdoutLog.append(chunk)
         outputCollector.append(chunk)
@@ -441,15 +424,14 @@ export async function runAgent(
     child.on('error', (error) => fail(error))
     child.on('close', (exitCode) => {
       if (settled) return
-      settled = true
       let output: AgentOutputSummary
       try {
         output = outputCollector.finish()
       } catch (error) {
-        cleanup()
-        reject(error instanceof Error ? error : new Error(String(error)))
+        fail(error instanceof Error ? error : new Error(String(error)))
         return
       }
+      settled = true
       cleanup()
       const failureReason = output.failureReason
       resolve({

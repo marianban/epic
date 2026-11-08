@@ -8,7 +8,7 @@ import type { Theme } from '@earendil-works/pi-coding-agent'
 import { pathToFileURL } from 'node:url'
 import { DashboardState } from '../state.ts'
 import type { EpicDashboardState, ProgressMetric } from '../types.ts'
-import { formatDuration, formatTokens } from '../formatting.ts'
+import { formatDuration, formatTokenUsage } from '../formatting.ts'
 import { framedBottom, framedLine, framedTop } from './panel.ts'
 
 const COMPACT_BREAKPOINT = 80
@@ -175,7 +175,7 @@ export class EpicStats implements Component {
           label: 'Time',
           value: formatDuration(epic.agentTimeMs),
         },
-        { label: 'Tokens', value: formatTokens(epic.tokens.total) },
+        { label: 'Tokens', value: formatTokenUsage(epic.tokens) },
       ]
     )
     return [
@@ -207,7 +207,7 @@ export class EpicStats implements Component {
           label: 'Time',
           value: formatDuration(epic.agentTimeMs),
         },
-        { label: 'Tokens', value: formatTokens(epic.tokens.total) },
+        { label: 'Tokens', value: formatTokenUsage(epic.tokens) },
       ]
     )
     return [

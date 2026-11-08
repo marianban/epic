@@ -35,6 +35,8 @@ export interface ProgressMetric {
 }
 
 export interface TokenUsage {
+  /** Some finished invocations did not report full usage; total is a measured subtotal. */
+  readonly incomplete?: true
   readonly total: number
   readonly input?: number
   readonly output?: number
@@ -47,11 +49,6 @@ export type PipelineAgentStatus =
   | 'running'
   | 'failed'
 
-export interface PipelineTokenUsage extends TokenUsage {
-  /** Some finished invocations did not report usage; total is a measured subtotal. */
-  readonly incomplete?: true
-}
-
 export interface PipelineAgentDashboardState {
   readonly role: string
   readonly provider?: string
@@ -60,7 +57,7 @@ export interface PipelineAgentDashboardState {
   readonly status: PipelineAgentStatus
   readonly runCount: number
   readonly agentTimeMs: number
-  readonly tokens?: PipelineTokenUsage
+  readonly tokens?: TokenUsage
 }
 
 export interface PipelineModelDashboardState {
@@ -72,7 +69,7 @@ export interface PipelineModelDashboardState {
   readonly status: PipelineAgentStatus
   readonly runCount: number
   readonly agentTimeMs: number
-  readonly tokens?: PipelineTokenUsage
+  readonly tokens?: TokenUsage
 }
 
 export interface PipelineDashboardState {
@@ -156,7 +153,7 @@ export interface EpicDashboardState {
   readonly agentTimeMs: number
   readonly tasks: ProgressMetric
   readonly criteria: ProgressMetric
-  readonly tokens: TokenUsage
+  readonly tokens?: TokenUsage
 }
 
 export interface DashboardProjectionInput {

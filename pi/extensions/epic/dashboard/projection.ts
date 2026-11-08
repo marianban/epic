@@ -1,3 +1,4 @@
+import { normalizeTokenUsage, aggregateTokenUsage } from './token-usage.ts'
 import { canRepairReviewedTask, reviewFailures } from '../failure-review.ts'
 import { failureReviewItems } from './failure-review-items.ts'
 import { currentManualReview } from '../manual-review.ts'
@@ -480,87 +481,9 @@ function agentTimeMs(
   return total
 }
 
-function usageValue(
-  usage: Record<string, unknown>,
-  keys: readonly string[],
-  event: EpicEvent
-): number | undefined {
-  const key = keys.find((candidate) => candidate in usage)
-  if (key === undefined) return undefined
-  const value = usage[key]
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 0) {
-    throw new Error(`Event ${event.id} has an invalid ${key} token count.`)
-  }
-  return value
-}
-
-function tokenUsageForEvent(event: EpicEvent): TokenUsage {
-  const usage = event.payload.usage
-  if (usage === undefined) return { total: 0 }
-  if (typeof usage !== 'object' || usage === null || Array.isArray(usage)) {
-    throw new Error(`Event ${event.id} has invalid token usage.`)
-  }
-  const record = usage as Record<string, unknown>
-  const input = usageValue(
-    record,
-    ['input', 'inputTokens', 'promptTokens'],
-    event
-  )
-  const output = usageValue(
-    record,
-    ['output', 'outputTokens', 'completionTokens'],
-    event
-  )
-  const cached = usageValue(
-    record,
-    ['cached', 'cachedTokens', 'cacheRead', 'cacheReadTokens'],
-    event
-  )
-  const reasoning = usageValue(record, ['reasoning', 'reasoningTokens'], event)
-  const explicitTotal = usageValue(
-    record,
-    ['total', 'totalTokens', 'tokens'],
-    event
-  )
-
-  return {
-    total:
-      explicitTotal ??
-      (input ?? 0) + (output ?? 0) + (cached ?? 0) + (reasoning ?? 0),
-    ...(input === undefined ? {} : { input }),
-    ...(output === undefined ? {} : { output }),
-    ...(cached === undefined ? {} : { cached }),
-    ...(reasoning === undefined ? {} : { reasoning }),
-  }
-}
-
-function addOptional(
-  left: number | undefined,
-  right: number | undefined
-): number | undefined {
-  if (left === undefined && right === undefined) return undefined
-  return (left ?? 0) + (right ?? 0)
-}
-
-function addTokenUsage(left: TokenUsage, right: TokenUsage): TokenUsage {
-  const input = addOptional(left.input, right.input)
-  const output = addOptional(left.output, right.output)
-  const cached = addOptional(left.cached, right.cached)
-  const reasoning = addOptional(left.reasoning, right.reasoning)
-  return {
-    total: left.total + right.total,
-    ...(input === undefined ? {} : { input }),
-    ...(output === undefined ? {} : { output }),
-    ...(cached === undefined ? {} : { cached }),
-    ...(reasoning === undefined ? {} : { reasoning }),
-  }
-}
-
-function tokenUsage(events: readonly EpicEvent[]): TokenUsage {
-  return events
-    .filter((event) => event.type === 'agent_finished')
-    .map(tokenUsageForEvent)
-    .reduce(addTokenUsage, { total: 0 })
+function tokenUsage(events: readonly EpicEvent[]): TokenUsage | undefined {
+  const finished = events.filter((event) => event.type === 'agent_finished')
+  return finished.length === 0 ? { total: 0 } : aggregateTokenUsage(finished.map(normalizeTokenUsage))
 }
 
 function completedTaskCount(

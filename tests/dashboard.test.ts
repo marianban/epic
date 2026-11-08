@@ -6,6 +6,7 @@ import type {
   EpicDomainState,
   EpicRunMetadata,
 } from '../pi/extensions/epic/types.ts'
+import type { EpicEvent } from '../pi/extensions/epic/types.ts'
 
 const metadata: EpicRunMetadata = {
   epicId: 'run',
@@ -46,6 +47,31 @@ function boundary(stage: EpicBoundaryView['stage']): EpicBoundaryView {
       : {}),
   }
 }
+
+test('epic and pipeline share token accounting and completeness', () => {
+  const cases = [
+    { usages: [undefined], expected: undefined },
+    { usages: [{ totalTokens: 12 }, undefined], expected: { total: 12, incomplete: true } },
+    { usages: [{ totalTokens: 5, incomplete: true }], expected: { total: 5, incomplete: true } },
+    { usages: [{ input: 10, output: 5, cacheRead: 3, cacheWrite: 7, reasoning: 2 }], expected: { total: 25, input: 10, output: 5, cached: 10, reasoning: 2 } },
+    { usages: [{ totalTokens: 99, input: 10, output: 5, cached: 8, reasoning: 2 }], expected: { total: 99, input: 10, output: 5, cached: 8, reasoning: 2 } },
+    { usages: [{ totalTokens: 0 }], expected: { total: 0 } },
+    { usages: [{}], expected: undefined },
+  ]
+  for (const { usages, expected } of cases) {
+    const events: EpicEvent[] = usages.flatMap((usage, index) => [
+      { id: `start-${index}`, epicId: 'run', type: 'agent_started', stage: 'implementing', timestamp: new Date(Date.parse(metadata.createdAt) + index * 2_000).toISOString(), payload: { invocationId: String(index), role: 'reviewer', action: 'review' } },
+      { id: `finish-${index}`, epicId: 'run', type: 'agent_finished', stage: 'implementing', timestamp: new Date(Date.parse(metadata.createdAt) + index * 2_000 + 1_000).toISOString(), payload: { invocationId: String(index), role: 'reviewer', action: 'review', exitCode: 0, ...(usage === undefined ? {} : { usage }) } },
+    ])
+    const result = projectDashboardState({
+      domain: domain(), metadata, boundary: boundary('implementing'), events,
+      agentProfiles: [], now: '2026-01-01T02:00:00.000Z',
+    })
+    assert.deepEqual(result.epic.tokens, expected)
+    assert.deepEqual(result.pipeline.agents[0]?.tokens, expected)
+    assert.deepEqual(result.pipeline.models[0]?.tokens, expected)
+  }
+})
 test('dashboard projects waiting, active, and terminal boundary read models', () => {
   const waiting = projectDashboardState({
     domain: domain(),

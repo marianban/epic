@@ -6,13 +6,13 @@ import {
   CANONICAL_AGENT_ROLE_ORDER,
   compareAgentRoles,
 } from '../agent-profiles.ts'
+import { normalizeTokenUsage, aggregateTokenUsage } from './token-usage.ts'
 import type {
   ActiveAgentRun,
   PipelineAgentDashboardState,
   PipelineAgentStatus,
   PipelineDashboardState,
   PipelineModelDashboardState,
-  PipelineTokenUsage,
   TokenUsage,
 } from './types.ts'
 
@@ -34,10 +34,6 @@ interface Metadata {
   readonly thinking?: Thinking
 }
 
-interface NormalizedUsage {
-  readonly usage?: TokenUsage
-  readonly reliable: boolean
-}
 
 interface Invocation {
   readonly key: string
@@ -54,7 +50,6 @@ interface Invocation {
   exitCode?: number
   failureReason?: string
   usage?: TokenUsage
-  usageReliable: boolean
   active?: ActiveAgentRun
 }
 
@@ -140,69 +135,6 @@ function optionalNonNegativeInteger(
     : nonNegativeInteger(`event ${event.id}`, field, value)
 }
 
-function usageValue(
-  event: EpicEvent,
-  usage: Record<string, unknown>,
-  keys: readonly string[]
-): number | undefined {
-  const key = keys.find((candidate) => candidate in usage)
-  if (key === undefined) return undefined
-  return nonNegativeInteger(`event ${event.id}`, key, usage[key])
-}
-
-function normalizeUsage(event: EpicEvent): NormalizedUsage {
-  const raw = event.payload.usage
-  if (raw === undefined) return { reliable: false }
-  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    fail(`event ${event.id}`, 'has invalid token usage.')
-  }
-  const usage = raw as Record<string, unknown>
-  const input = usageValue(event, usage, [
-    'input',
-    'inputTokens',
-    'promptTokens',
-  ])
-  const output = usageValue(event, usage, [
-    'output',
-    'outputTokens',
-    'completionTokens',
-  ])
-  const directCached = usageValue(event, usage, ['cached', 'cachedTokens'])
-  const cacheRead = usageValue(event, usage, ['cacheRead', 'cacheReadTokens'])
-  const cacheWrite = usageValue(event, usage, [
-    'cacheWrite',
-    'cacheWriteTokens',
-  ])
-  const cached =
-    directCached ??
-    (cacheRead === undefined && cacheWrite === undefined
-      ? undefined
-      : (cacheRead ?? 0) + (cacheWrite ?? 0))
-  const reasoning = usageValue(event, usage, ['reasoning', 'reasoningTokens'])
-  const explicitTotal = usageValue(event, usage, [
-    'total',
-    'totalTokens',
-    'tokens',
-  ])
-  const hasKnownCounter =
-    explicitTotal !== undefined ||
-    input !== undefined ||
-    output !== undefined ||
-    cached !== undefined
-  if (!hasKnownCounter) return { reliable: false }
-  return {
-    reliable: true,
-    usage: {
-      total:
-        explicitTotal ??
-        (input ?? 0) + (output ?? 0) + (cached ?? 0),
-      ...(input === undefined ? {} : { input }),
-      ...(output === undefined ? {} : { output }),
-      ...(cached === undefined ? {} : { cached }),
-      ...(reasoning === undefined ? {} : { reasoning }),
-    },
-  }
-}
 
 function invocationKey(role: string, action: string): string {
   return `${role}\u0000${action}`
@@ -362,7 +294,6 @@ function normalizeInvocations(
         startedAtMs,
         startOrder: eventOrder,
         startMetadata: eventMetadata(event),
-        usageReliable: false,
       }
       invocations.push(invocation)
       if (id !== undefined) byId.set(id, invocation)
@@ -391,7 +322,7 @@ function normalizeInvocations(
     if (startedAtMs < candidate.startedAtMs) {
       fail(`event ${event.id}`, 'finishes before it starts.')
     }
-    const normalizedUsage = normalizeUsage(event)
+    const normalizedUsage = normalizeTokenUsage(event)
     candidate.finishAtMs = startedAtMs
     candidate.finishOrder = eventOrder
     candidate.finishMetadata = eventMetadata(event)
@@ -399,8 +330,7 @@ function normalizeInvocations(
       ? undefined
       : nonNegativeInteger(`event ${event.id}`, 'exitCode', event.payload.exitCode)
     candidate.failureReason = optionalString(event, 'failureReason')
-    candidate.usage = normalizedUsage.usage
-    candidate.usageReliable = normalizedUsage.reliable
+    candidate.usage = normalizedUsage
     if (durationMs !== undefined) candidate.finishAtMs = candidate.startedAtMs + durationMs
     open.delete(candidate)
     pendingByRoleAction.delete(roleAction)
@@ -502,36 +432,10 @@ function metadataValue<T extends string>(
   return values.find((value): value is T => value !== undefined)
 }
 
-function aggregateTokenUsage(
-  invocations: readonly Invocation[]
-): PipelineTokenUsage | undefined {
-  const finished = invocations.filter(
-    (invocation) => invocation.active === undefined && invocation.finishAtMs !== undefined
-  )
-  const measured = finished.filter((invocation) => invocation.usageReliable && invocation.usage !== undefined)
-  if (measured.length === 0) return undefined
-  let total = 0
-  let input: number | undefined
-  let output: number | undefined
-  let cached: number | undefined
-  let reasoning: number | undefined
-  for (const invocation of measured) {
-    const usage = invocation.usage
-    if (usage === undefined) return undefined
-    total += usage.total
-    input = usage.input === undefined ? input : (input ?? 0) + usage.input
-    output = usage.output === undefined ? output : (output ?? 0) + usage.output
-    cached = usage.cached === undefined ? cached : (cached ?? 0) + usage.cached
-    reasoning = usage.reasoning === undefined ? reasoning : (reasoning ?? 0) + usage.reasoning
-  }
-  return {
-    total,
-    ...(measured.length === finished.length ? {} : { incomplete: true as const }),
-    ...(input === undefined ? {} : { input }),
-    ...(output === undefined ? {} : { output }),
-    ...(cached === undefined ? {} : { cached }),
-    ...(reasoning === undefined ? {} : { reasoning }),
-  }
+function invocationTokenUsage(invocations: readonly Invocation[]): TokenUsage | undefined {
+  return aggregateTokenUsage(invocations
+    .filter((invocation) => invocation.active === undefined && invocation.finishAtMs !== undefined)
+    .map((invocation) => invocation.usage))
 }
 
 function invocationStatus(invocation: Invocation): PipelineAgentStatus {
@@ -630,7 +534,7 @@ export function projectPipelineState(
       status: statusFor(roleRuns),
       runCount: roleRuns.length,
       agentTimeMs: roleRuns.reduce((total, run) => total + durationFor(run), 0),
-      ...(aggregateTokenUsage(roleRuns) === undefined ? {} : { tokens: aggregateTokenUsage(roleRuns) }),
+      ...(invocationTokenUsage(roleRuns) === undefined ? {} : { tokens: invocationTokenUsage(roleRuns) }),
     }
   })
 
@@ -682,7 +586,7 @@ export function projectPipelineState(
         status: statusFor(model.invocations),
         runCount: model.invocations.length,
         agentTimeMs: model.invocations.reduce((total, invocation) => total + durationFor(invocation), 0),
-        ...(aggregateTokenUsage(model.invocations) === undefined ? {} : { tokens: aggregateTokenUsage(model.invocations) }),
+        ...(invocationTokenUsage(model.invocations) === undefined ? {} : { tokens: invocationTokenUsage(model.invocations) }),
       }
     })
   return { agents, models }

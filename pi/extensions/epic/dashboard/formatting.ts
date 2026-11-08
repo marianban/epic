@@ -1,3 +1,5 @@
+import type { TokenUsage } from './types.ts'
+
 export function formatDuration(durationMs: number): string {
   if (!Number.isFinite(durationMs) || durationMs < 0) {
     throw new Error(
@@ -26,4 +28,8 @@ export function formatTokens(total: number): string {
   }
   const value = total / 1_000_000
   return `${value.toFixed(value < 10 ? 1 : 0).replace(/\.0$/, '')}M`
+}
+
+export function formatTokenUsage(usage: TokenUsage | undefined): string {
+  return usage === undefined ? '--' : `${usage.incomplete ? '≥' : ''}${formatTokens(usage.total)}`
 }
