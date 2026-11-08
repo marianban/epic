@@ -2072,7 +2072,8 @@ for (const persistent of [false, true]) {
       assert.match(feedback, /Paddle remained centered/)
       assert.ok(feedback.includes(artifact))
       assert.ok(feedback.includes('ArrowLeft'))
-      assert.match(feedback, /Diagnose and fix/)
+      assert.match(feedback, /Before changing application code, identify a concrete defect/)
+      assert.match(feedback, /If no defect is established, report what you checked/)
       assert.match(feedback, /demonstrate the expected behavior/)
       return persistent ? state : repair(state, feedback, operation)
     }

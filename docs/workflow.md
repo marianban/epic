@@ -93,6 +93,8 @@ Errors before task execution pause for recovery approval. `/epic-approve-recover
 
 Step 13 processes the planned scenarios for all acceptance criteria before independent review; a failed criterion does not end that initial pass. Finding reconciliation updates review findings, while queue scheduling separately combines those findings with criterion evidence and required-check results. Passed criteria need no targeted work. Criteria with missing or inconclusive evidence receive a targeted check, and failed criteria enter repair; each iteration then selects the next eligible unresolved item. Human-only obligations remain for human review. A deadline or interruption can stop a pass early and leave verification unfinished for resume.
 
+During repair, the Implementer investigates both the application and the probe. An inconclusive result requires investigation but does not establish a code defect. Before changing application code, the Implementer must identify a concrete defect and explain how it accounts for the observed result. If no defect is established, it reports what it checked and what evidence remains missing without making speculative edits or claiming verification succeeded. Infrastructure explanations still require concrete evidence of a tool or delivery failure.
+
 | Step | Description |
 | --- | --- |
 | 1. Start epic | `/epic <epic>` creates the run and saves the request in `Epic.md`. |
