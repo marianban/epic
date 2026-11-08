@@ -1,4 +1,5 @@
 import { reviewFailures, isFailureDismissed } from './failure-review.ts'
+import { canRepairItem } from './repair-allowance.ts'
 import type { BrowserProbeLimits } from './browser-evidence-types.ts'
 import { appendEvent } from './persistence.ts'
 import { executeVerificationCycle } from './verification-cycle.ts'
@@ -6,6 +7,7 @@ import {
   processVerificationCycle,
   selectedPlan,
   repairInstructions,
+  deferExhaustedRepair,
 } from './verification-schedule.ts'
 import { randomUUID } from 'node:crypto'
 import type {
@@ -118,7 +120,7 @@ export async function runTaskVerification(
           record.infrastructureLimit
       )
         throw error
-      const id = await store.charge(record, 'infrastructure', errorText(error))
+      const id = await store.charge(record, 'infrastructure', errorText(error), undefined)
       const result = await work()
       const invocation = record.invocations.find((i) => i.id === id)
       if (!invocation)
@@ -174,6 +176,7 @@ export async function runTaskVerification(
         record,
         'repair',
         pending.feedback,
+        'human:requested',
         pending
       )
       state = await dependencies.repair(state, pending.feedback, operation)
@@ -199,15 +202,19 @@ export async function runTaskVerification(
         if (!schedule.repairInvocationId) {
           if (
             hasDismissedFindings ||
-            !repairAfterInterruptionGranted ||
-            record.invocations.filter((i) => i.kind === 'repair').length >=
-              record.repairsLimit
+            !repairAfterInterruptionGranted
           )
             break
+          if (!canRepairItem(record, target.id)) {
+            deferExhaustedRepair(record, target)
+            await store.write(record)
+            continue
+          }
           const id = await store.charge(
             record,
             'repair',
-            repairInstructions(target)
+            repairInstructions(target),
+            target.id
           )
           schedule.repairInvocationId = id
           schedule.finalRequired = true
@@ -224,7 +231,8 @@ export async function runTaskVerification(
             schedule.repairInvocationId = await store.charge(
               record,
               'repair',
-              repairInstructions(target)
+              repairInstructions(target),
+              target.id
             )
             await store.write(record)
           }

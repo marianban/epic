@@ -6,7 +6,7 @@ export function createEpicState(
   repositoryRoot: string,
   epic: string,
   now: string,
-  configuration: Pick<ResolvedEpicConfiguration, 'maxScoutRounds' | 'maxTaskRepairs' | 'maxTaskInfrastructureRetries' | 'maxAcceptancePlanRepairs' | 'taskVerificationTimeoutMs'>
+  configuration: Pick<ResolvedEpicConfiguration, 'maxScoutRounds' | 'maxRepairsPerItem' | 'maxTaskInfrastructureRetries' | 'maxAcceptancePlanRepairs' | 'taskVerificationTimeoutMs'>
 ): { domain: EpicDomainState; metadata: EpicRunMetadata } {
   const epicId = `${now.replace(/[-:.TZ]/g, '').slice(0, 14)}-${randomUUID().slice(0, 8)}`
   return {
@@ -30,7 +30,7 @@ export function createEpicState(
       currentTaskIndex: 0,
       taskApproved: false,
       implementationAttempt: 0,
-      maxTaskRepairs: configuration.maxTaskRepairs,
+      maxRepairsPerItem: configuration.maxRepairsPerItem,
       maxAcceptancePlanRepairs: configuration.maxAcceptancePlanRepairs,
       maxTaskInfrastructureRetries: configuration.maxTaskInfrastructureRetries,
       taskVerificationTimeoutMs: configuration.taskVerificationTimeoutMs,

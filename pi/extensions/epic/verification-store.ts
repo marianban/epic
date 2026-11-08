@@ -1,4 +1,5 @@
 import { validateFindingHistory } from './finding-reconciliation.ts'
+import { canRepairItem, repairItemUsage } from './repair-allowance.ts'
 import { assertConclusionReview } from './browser-conclusion-review.ts'
 import { validateManualReviews } from './manual-review.ts'
 import { validateFailureDecisions } from './failure-review.ts'
@@ -36,8 +37,8 @@ export class VerificationStore {
     const value = JSON.parse(
       await fs.readFile(this.file, 'utf8')
     ) as TaskVerificationRecord
-    if (value?.formatVersion !== 3)
-      throw new Error(`Incompatible task verification ledger format: ${String(value?.formatVersion)}; required 3. No migration was applied.`)
+    if (value?.formatVersion !== 4)
+      throw new Error(`Incompatible task verification ledger format: ${String(value?.formatVersion)}; required 4. No migration was applied.`)
     if (!value.schedule || !['initial_full', 'targeted', 'final_full', 'done'].includes(value.schedule.phase) ||
         !Array.isArray(value.schedule.queue) || !Array.isArray(value.schedule.deferred) ||
         typeof value.schedule.finalRequired !== 'boolean')
@@ -96,7 +97,7 @@ export class VerificationStore {
       }
     }
     for (const n of [
-      value.repairsLimit,
+      value.repairsPerItemLimit,
       value.infrastructureLimit,
       value.timeAllowanceMs,
       value.criterionVersion,
@@ -122,11 +123,14 @@ export class VerificationStore {
         typeof invocation.reason !== 'string'
       )
         throw new Error('Invalid persisted allowance invocation.')
+      if (invocation.kind === 'repair'
+        ? typeof invocation.repairItemId !== 'string' || !invocation.repairItemId.trim()
+        : invocation.repairItemId !== undefined)
+        throw new Error('Invalid persisted repair item identity.')
       ids.add(invocation.id)
     }
     if (
-      value.invocations.filter((i) => i.kind === 'repair').length >
-        value.repairsLimit ||
+      repairItemUsage(value).some(item => item.used > item.limit) ||
       value.invocations.filter((i) => i.kind === 'infrastructure').length >
         value.infrastructureLimit
     )
@@ -152,7 +156,7 @@ export class VerificationStore {
     const task = state.tasks?.[state.currentTaskIndex]
     if (!task) throw new Error('Cannot freeze criteria without a task.')
     const record: TaskVerificationRecord = {
-      formatVersion: 3,
+      formatVersion: 4,
       findings: [],
       findingReviews: [],
       schedule: { phase: 'initial_full', queue: [], deferred: [], finalRequired: false },
@@ -162,7 +166,7 @@ export class VerificationStore {
         text,
       })),
       criterionVersion: 1,
-      repairsLimit: state.maxTaskRepairs,
+      repairsPerItemLimit: state.maxRepairsPerItem,
       infrastructureLimit: state.maxTaskInfrastructureRetries,
       timeAllowanceMs: state.taskVerificationTimeoutMs,
       invocations: [],
@@ -197,12 +201,18 @@ export class VerificationStore {
     record: TaskVerificationRecord,
     kind: 'repair' | 'infrastructure',
     reason: string,
+    repairItemId: string | undefined,
     humanRequest?: HumanRepairRequest
   ): Promise<string> {
-    const limit =
-      kind === 'repair' ? record.repairsLimit : record.infrastructureLimit
-    if (record.invocations.filter((i) => i.kind === kind).length >= limit)
-      throw new Error(`${kind} allowance exhausted.`)
+    if (kind === 'repair') {
+      if (!repairItemId?.trim()) throw new Error('Repair requires a work item identity.')
+      if (!canRepairItem(record, repairItemId))
+        throw new Error(`Repair allowance exhausted for ${repairItemId}.`)
+    } else {
+      if (repairItemId !== undefined) throw new Error('Infrastructure retries cannot charge a repair item.')
+      if (record.invocations.filter(i => i.kind === kind).length >= record.infrastructureLimit)
+        throw new Error('infrastructure allowance exhausted.')
+    }
     if (this.remaining(record) <= 0)
       throw new Error('Verification deadline exhausted.')
     const id = randomUUID()
@@ -212,6 +222,7 @@ export class VerificationStore {
       reason,
       at: this.clock.nowMs(),
       completed: false,
+      repairItemId,
     })
     if (humanRequest) humanRequest.invocationId = id
     await this.write(record)
@@ -238,7 +249,7 @@ export class VerificationStore {
       )
     grant.afterInvocationId = record.invocations.at(-1)?.id
     record.grants.push(grant)
-    record.repairsLimit += grant.repairs
+    record.repairsPerItemLimit += grant.repairs
     record.timeAllowanceMs += grant.timeMs
     if (record.deadline !== undefined)
       record.deadline =

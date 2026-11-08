@@ -1,4 +1,5 @@
 import { reportVerificationCycle } from './verification-report-cycle.ts'
+import { repairItemUsage } from './repair-allowance.ts'
 import { createManualReview } from './manual-review.ts'
 import { canRepairTask } from './task-review-policy.ts'
 import { hasLikelyFailure } from './evidence-outcome.ts'
@@ -113,7 +114,8 @@ export function constructReviewReport(
       r.identity === entry.identity && r.obligationIds.includes(entry.obligationId) && !r.limitations.length)
     if (!fullReview && !focusedReview) unresolved.push(`review:evidence:${entry.obligationId}`)
   }
-  const pendingRepair = record.schedule.queue.some(item => item.action === 'repair')
+  const pendingItems = [...record.schedule.queue, ...record.schedule.deferred.filter(item => item.action === 'repair')]
+  const pendingRepair = pendingItems.some(item => item.action === 'repair')
   const fullPending = record.schedule.finalRequired
   if (fullPending) unresolved.push('verification:final_full')
   const productFailure =
@@ -128,7 +130,7 @@ export function constructReviewReport(
   const problems = [...(cycle?.problems.map(p => p.message) ?? [
     'No current verification cycle.',
     ...(record.cycles.at(-1)?.problems.map(p => p.message) ?? []),
-  ]), ...record.schedule.queue.filter(item => item.kind !== 'semantic').map(item => `Pending ${item.action}: ${item.id}. ${item.feedback}`), ...(fullPending ? ['Final full verification remains incomplete.'] : [])]
+  ]), ...pendingItems.filter(item => item.kind !== 'semantic').map(item => `Pending ${item.action}: ${item.id}. ${item.feedback}`), ...(fullPending ? ['Final full verification remains incomplete.'] : [])]
   for (const [i] of problems.entries()) unresolved.push(`problem:${i + 1}`)
   if (cycle?.fast && !cycle.fast.passed) unresolved.push('check:fast')
   if (cycle?.full && !cycle.full.passed) unresolved.push('check:full')
@@ -158,7 +160,8 @@ export function constructReviewReport(
       infrastructure: record.invocations.filter(
         (i) => i.kind === 'infrastructure'
       ).length,
-      repairsLimit: record.repairsLimit,
+      repairsPerItemLimit: record.repairsPerItemLimit,
+      repairItems: repairItemUsage(record),
       infrastructureLimit: record.infrastructureLimit,
       remainingMs,
       consumedMs: Math.max(0, record.timeAllowanceMs - remainingMs),
@@ -242,7 +245,8 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
     '',
     '## Allowances',
     '',
-    `Repairs: ${report.usage.repairs}/${report.usage.repairsLimit}. Infrastructure retries: ${report.usage.infrastructure}/${report.usage.infrastructureLimit}. Time consumed: ${report.usage.consumedMs}ms; remaining: ${report.usage.remainingMs}ms.`,
+    `Repairs: ${report.usage.repairs} total; limit ${report.usage.repairsPerItemLimit} per item. Infrastructure retries: ${report.usage.infrastructure}/${report.usage.infrastructureLimit}. Time consumed: ${report.usage.consumedMs}ms; remaining: ${report.usage.remainingMs}ms.`,
+    ...report.usage.repairItems.map(item => `- ${item.id}: ${item.used}/${item.limit} repair attempts${item.used >= item.limit ? ' (exhausted)' : ''}.`),
     ...report.grants.map(
       (g) => `- Grant: ${g.repairs} repairs, ${g.timeMs}ms: ${g.reason}`
     ),

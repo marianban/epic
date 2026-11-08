@@ -8,9 +8,9 @@ The language used to verify approved task requirements and hand the results to a
 A requirement whose expected behavior the user has approved. Refining how it is checked does not authorize changing its meaning.
 _Avoid_: Agent-adjustable requirement
 
-**Task repair allowance**:
-The bounded number of code repair invocations permitted for a task after initial implementation, shared across all failure categories. An invocation addressing several categories counts as one repair.
-_Avoid_: Acceptance repair budget, per-phase repair budget
+**Repair item allowance**:
+The bounded number of repair attempts for one acceptance criterion, required check, smoke failure, or canonical review finding. Attempts for one item do not reduce another item’s allowance.
+_Avoid_: Task-wide repair budget, per-phase repair budget
 
 **Infrastructure retry allowance**:
 A separate bounded allowance for retrying verification infrastructure operations. It does not grant additional code repairs.

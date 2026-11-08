@@ -28,7 +28,7 @@ test('dashboard reads stage from the persisted actor snapshot', async () => {
     currentTaskIndex: 0,
     taskApproved: false,
     implementationAttempt: 0,
-    maxTaskRepairs: 1,
+    maxRepairsPerItem: 1,
     maxAcceptancePlanRepairs: 2,
     maxTaskInfrastructureRetries: 1,
     taskVerificationTimeoutMs: 1,
@@ -67,7 +67,7 @@ test('dashboard reads stage from the persisted actor snapshot', async () => {
   })
   actor.start()
   await saveState(domain, {
-    schemaVersion: 12,
+    schemaVersion: 13,
     machineVersion: 14,
     epicId: 'run',
     createdAt: '2026-01-01T00:00:00.000Z',

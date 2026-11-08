@@ -98,11 +98,11 @@ Proposed sequence:
 
 A failed check must not short-circuit creation of the human-facing report. Conversely, generating the report must not mark the task completed or its failed checks successful.
 
-Define `maxTaskRepairs` as one task-wide allowance for all automatic code repair invocations after initial implementation, regardless of whether fast checks, full checks, smoke, acceptance verification, or semantic review exposed the failure. One invocation addressing several failure categories consumes one attempt. The configurable default is 6 repair invocations; 0 means verify and report without automatic repair. Validate it as a non-negative integer and resolve it at composition time; inject limits, clocks, and timeouts explicitly.
+Define `maxRepairsPerItem` as an independent allowance for each acceptance criterion, required check, smoke failure, and canonical review finding after initial implementation. All obligations belonging to one criterion share its allowance. The configurable default is 3 repair invocations per item; 0 means verify and report without automatic repair. Exhausted items remain unresolved while other eligible items continue. Validate it as a non-negative integer and resolve it at composition time; inject limits, clocks, and timeouts explicitly.
 
-Use this single allowance from the first release, replacing phase-specific repair allowances rather than adding `maxAcceptanceRepairs`. A build failure may consume the allowance before behavioral verification; disclose the resulting blockers in the report. Infrastructure retries have a separate bounded allowance and never silently increase the code repair allowance.
+Use the same per-item accounting across all failure categories, replacing phase-specific and task-wide repair budgets. A build failure consumes only its check item’s allowance; if it prevents behavioral verification, disclose the remaining blockers in the report. Infrastructure retries have a separate bounded allowance and never silently increase the code repair allowance.
 
-Current counters are initialized anew when a task actor is replaced, and human review/resume paths can invoke implementation without charging those counters. Persist allowance usage across resume, actor replacement, and revalidation of the same task. Changing failure category must not reset usage. A human-requested extra repair cycle must explicitly grant an additional bounded allowance; ordinary resume grants none. Persist consumption before launching each repair; interrupted invocations count. Keep the allowance ledger at task scope rather than within a replaceable execution actor. Additional grants specify a numeric allowance and preserve all previous usage.
+Current counters are initialized anew when a task actor is replaced, and human review/resume paths can invoke implementation without charging those counters. Persist allowance usage across resume, actor replacement, and revalidation of the same task. Rechecking the same item, including a regression in a later full pass, must not reset its usage. A human-requested extra repair cycle must explicitly grant an additional bounded allowance; ordinary resume grants none. Persist consumption before launching each repair; interrupted invocations count. Keep the allowance ledger at task scope rather than within a replaceable execution actor. Additional grants specify a numeric allowance and preserve all previous usage.
 
 A verification-tool failure uses the separate task-wide infrastructure retry allowance when eligible. It should not provoke speculative application changes. Use one configurable task-wide time allowance, defaulting to 30 minutes, starting with the first verification after initial implementation. It covers required checks, browser work, semantic review, infrastructure retries, and repairs. Each operation receives the remaining time rather than a separate scenario or cycle timeout setting. Persist the deadline across restart; downtime counts, while time at an explicit human checkpoint is excluded. Additional repair grants specify additional time. A stalled operation may consume the remaining allowance; record later checks as unattempted rather than claiming coverage.
 
@@ -146,7 +146,7 @@ The saved run and current extension both use schema version 6 and machine versio
 ## Suggested rollout and validation
 
 1. Add evidence classification and a complete report at the existing human checkpoint. Clarify that semantic pass does not mean acceptance verified.
-2. Add bounded browser acceptance verification and the single `maxTaskRepairs` allowance. Pilot it on objective scenarios such as the Arkanoid brick collision. Steps 1 and 2 are both required for the first release.
+2. Add bounded browser acceptance verification and the per-item `maxRepairsPerItem` allowances. Pilot it on objective scenarios such as the Arkanoid brick collision. Steps 1 and 2 are both required for the first release.
 3. Promote useful scenarios to repeatable tests based on operational experience.
 
 The first release is complete only after the behavioral pilot and workflow validation below pass. Reporting-only delivery is insufficient.
@@ -178,7 +178,7 @@ The user accepted the hardening interview decisions Q1–Q22, including Q18 afte
 - Approved criteria remain frozen; separately authored scenarios and independently reviewed assertions establish evidence without redefining requirements.
 - Combined criteria retain their identity and aggregate obligation evidence using the status rules above.
 - Candidate changes do not invalidate advisory verification evidence; current results and user decisions are bound to the verification attempt and report.
-- Configurable defaults are 6 task repairs, 1 task-wide infrastructure retry, and one 30-minute verification/repair time allowance. No separate scenario or cycle timeout settings are added.
+- Configurable defaults are 3 repairs per verification item, 1 task-wide infrastructure retry, and one 30-minute verification/repair time allowance. No separate scenario or cycle timeout settings are added.
 - Repair/retry usage survives actor replacement and resume; interrupted repairs count. Additional allowances require explicit recorded grants.
 - Runtime owns one browser/server scope per verification cycle and isolated contexts per scenario; repairs receive fresh execution resources.
 - Invalid output cannot establish success, but independently valid evidence survives. The shared infrastructure retry may correct verifier output; otherwise the report exposes the gaps.
@@ -186,6 +186,6 @@ The user accepted the hardening interview decisions Q1–Q22, including Q18 afte
 - Cancellation, timeout, exhausted allowances, and exceptions retain results and lead to local reporting. Finalization can finish after the deadline without new agent work.
 - The release gate includes the Arkanoid defect/repair pilot and the workflow cases above. Incompatible persisted changes require explicit version diagnosis without migration.
 
-Supporting terminology is in [GLOSSARY.md](GLOSSARY.md). Architectural trade-offs are recorded in [the task-wide allowance ADR](docs/adr/0001-task-wide-repair-allowance.md) and [the unresolved-results acceptance ADR](docs/adr/0002-acceptance-with-unresolved-results.md).
+Supporting terminology is in [GLOSSARY.md](GLOSSARY.md). Architectural trade-offs are recorded in [the per-item allowance ADR](docs/adr/0003-per-item-repair-allowance.md) and [the unresolved-results acceptance ADR](docs/adr/0002-acceptance-with-unresolved-results.md).
 
 No policy questions from the interview remain open. Final confirmation of shared understanding is pending; implementation is a separate task.

@@ -76,7 +76,7 @@ async function fixture(t: TestContext, repairs = 3, clock = realClock) {
     currentTaskIndex: 0,
     taskApproved: true,
     implementationAttempt: 1,
-    maxTaskRepairs: repairs,
+    maxRepairsPerItem: repairs,
     maxAcceptancePlanRepairs: 2,
     maxTaskInfrastructureRetries: 1,
     taskVerificationTimeoutMs: 30_000,
@@ -337,7 +337,7 @@ test('latest-report repair grant resumes an exhausted task and repairs its obser
   ), realClock)
   await runTaskVerification(granted, new AbortController().signal, f.dependencies)
   const after = await f.store.read()
-  assert.equal(after.repairsLimit, 1)
+  assert.equal(after.repairsPerItemLimit, 1)
   assert.equal(after.invocations.filter(i => i.kind === 'repair').length, 1)
   assert.equal(after.grants.length, 1)
   assert.equal(after.timeAllowanceMs, before.timeAllowanceMs + 300_000)
@@ -437,7 +437,7 @@ test('ledger pauses exclude human waiting, active downtime counts, and grants pr
   const f = await fixture(t, 3, clock)
   const r = await f.store.read()
   await f.store.start(r)
-  await f.store.charge(r, 'repair', 'Concrete defect')
+  await f.store.charge(r, 'repair', 'Concrete defect', 'T1:AC1')
   now = 1100
   assert.equal(f.store.remaining(r), 29_000)
   await f.store.pause(r)
@@ -455,7 +455,7 @@ test('ledger pauses exclude human waiting, active downtime counts, and grants pr
     reason: 'User grant',
     at: now,
   })
-  assert.equal(r.repairsLimit, 5)
+  assert.equal(r.repairsPerItemLimit, 5)
   assert.equal(r.invocations.length, 1)
 })
 
@@ -662,11 +662,17 @@ test('configuration allows zero repairs/retries and rejects obsolete settings', 
   const file = path.join(f.root, '.pi/epic.config.json')
   await fs.writeFile(
     file,
-    JSON.stringify({ maxTaskRepairs: 0, maxTaskInfrastructureRetries: 0 })
+    JSON.stringify({ maxRepairsPerItem: 0, maxTaskInfrastructureRetries: 0 })
   )
   const config = await resolveEpicConfiguration(f.root)
-  assert.equal(config.maxTaskRepairs, 0)
+  assert.equal(config.maxRepairsPerItem, 0)
   assert.equal(config.maxTaskInfrastructureRetries, 0)
+  await fs.writeFile(file, JSON.stringify({ maxTaskRepairs: 6 }))
+  await assert.rejects(resolveEpicConfiguration(f.root), /Obsolete.*maxTaskRepairs.*maxRepairsPerItem.*No compatibility migration/)
+  await fs.writeFile(file, JSON.stringify({ maxRepairsPerItem: -1 }))
+  await assert.rejects(resolveEpicConfiguration(f.root), /maxRepairsPerItem/)
+  await fs.writeFile(file, JSON.stringify({ maxRepairsPerItem: 1.5 }))
+  await assert.rejects(resolveEpicConfiguration(f.root), /maxRepairsPerItem/)
   await fs.writeFile(file, JSON.stringify({ maxFastRepairs: 2 }))
   await assert.rejects(
     resolveEpicConfiguration(f.root),
@@ -904,7 +910,7 @@ test('dependency verification checks installed packages without reinstalling can
 test('reopening an active native snapshot finalizes locally and persists the interrupted checkpoint', async (t) => {
   const f = await fixture(t)
   await f.store.start(f.record)
-  await f.store.charge(f.record, 'repair', 'Interrupted invocation')
+  await f.store.charge(f.record, 'repair', 'Interrupted invocation', 'T1:AC1')
   f.record.state = f.state
   await f.store.write(f.record)
   const unavailable = async (): Promise<never> => {
@@ -2361,11 +2367,11 @@ for (const outcome of ['pass', 'unavailable', 'uninspected', 'unsupported', 'def
   })
 }
 
-test('format 3 scoped ledger rejects malformed diagnostics and inspection coverage', async t => {
+test('format 4 scoped ledger rejects malformed diagnostics and inspection coverage', async t => {
   const f = await fixture(t)
   await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
   const record = await f.store.read()
-  assert.equal(record.formatVersion, 3)
+  assert.equal(record.formatVersion, 4)
   assert.ok(record.cycles[0].review)
   record.cycles[0].problems = [{ stage: 'obligation', obligationIds: ['unknown'], message: 'Invalid scope' }]
   await f.store.write(record)
@@ -2510,7 +2516,7 @@ test('format 2 ledgers are incompatible and remain unchanged', async t => {
   const f = await fixture(t)
   const serialized = JSON.stringify({ ...f.record, formatVersion: 2 })
   await fs.writeFile(f.store.file, serialized)
-  await assert.rejects(f.store.read(), /format: 2; required 3.*No migration/)
+  await assert.rejects(f.store.read(), /format: 2; required 4.*No migration/)
   assert.equal(await fs.readFile(f.store.file, 'utf8'), serialized)
 })
 
@@ -2518,16 +2524,15 @@ test('exhausted reports show canonical open findings individually without duplic
   const f = await fixture(t, 1)
   let id = 0
   f.dependencies.createFindingId = () => `issue-${++id}`
-  f.dependencies.review = async (state, cycle) => ({ state, result: cycle.kind === 'initial_full' ? {
+  f.dependencies.review = async (state, cycle, _operation, context) => ({ state, result: cycle.kind === 'initial_full' ? {
     passed: false, summary: 'Two defects with one duplicate', acceptanceCriteria: [], reconciliation: [],
     findings: [layoutFinding('new:1', 'Sizing'), layoutFinding('new:2', 'Same sizing defect'), layoutFinding('new:3', 'Independent offset')],
   } : {
     passed: false, summary: 'Merged duplicate; both defects remain', acceptanceCriteria: [],
-    findings: [layoutFinding('issue-1', 'Updated sizing feedback')], reconciliation: [
-      { id: 'issue-1', disposition: 'open', reason: 'Override still present' },
-      { id: 'issue-2', disposition: 'superseded', canonicalId: 'issue-1', reason: 'Same override' },
-      { id: 'issue-3', disposition: 'not_assessed', reason: 'Independent offset outside scope' },
-    ],
+    findings: [layoutFinding('issue-1', 'Updated sizing feedback'), layoutFinding('issue-3', 'Independent offset')],
+    reconciliation: context.findings.map(f => f.id === 'issue-2'
+      ? { id: f.id, disposition: 'superseded' as const, canonicalId: 'issue-1', reason: 'Same override' }
+      : { id: f.id, disposition: 'open' as const, reason: 'Defect remains in current code' }),
   } })
   await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
   const record = await f.store.read()
@@ -2537,7 +2542,154 @@ test('exhausted reports show canonical open findings individually without duplic
     ['review:issue-1', 'Updated sizing feedback'], ['review:issue-3', 'Independent offset'],
   ])
   assert.ok(!record.report?.unresolved.includes('review:issue-2'))
-  assert.deepEqual(record.schedule.queue.map(i => i.id), ['review:issue-1', 'review:issue-3'])
-  assert.equal(record.schedule.finalRequired, true)
-  assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.deepEqual(record.schedule.queue, [])
+  assert.deepEqual(record.schedule.deferred.map(i => i.id), ['review:issue-1', 'review:issue-3'])
+  assert.equal(record.schedule.finalRequired, false)
+  assert.deepEqual(record.invocations.filter(i => i.kind === 'repair').map(i => i.repairItemId), ['review:issue-1', 'review:issue-3'])
+})
+
+test('each criterion has three durable repair attempts and exhaustion does not block other criteria', async t => {
+  const f = await fixture(t, 3)
+  f.record.criteria.push({ id: 'T1:AC2', text: 'Second behavior works' })
+  f.plan.criteria = f.record.criteria
+  f.plan.obligations[0].command = 'node -e "process.exit(1)"'
+  f.plan.obligations.push({ id: 'second', criterionId: 'T1:AC2', expected: 'Second behavior works',
+    method: 'automated', command: 'node -e "if(!require(\'fs\').existsSync(\'second.txt\')) process.exit(1)"' })
+  f.record.plan = f.plan
+  await f.store.write(f.record)
+  f.dependencies.repair = async (state, feedback) => {
+    if (feedback.startsWith('Repair only this work item: T1:AC2 '))
+      await fs.writeFile(path.join(f.root, 'second.txt'), 'fixed')
+    return state
+  }
+  const state = await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.deepEqual(record.report?.usage.repairItems, [
+    { id: 'T1:AC1', used: 3, limit: 3 }, { id: 'T1:AC2', used: 1, limit: 3 },
+  ])
+  assert.equal(record.report?.usage.repairs, 4)
+  assert.equal(record.report?.readiness, 'issues_remaining')
+  assert.equal(record.report?.criteria[1].status, 'met')
+  assert.equal(record.cycles.at(-1)?.kind, 'final_full')
+  assert.equal(record.schedule.finalRequired, false)
+  assert.deepEqual(record.schedule.deferred.filter(i => i.action === 'repair').map(i => i.id), ['T1:AC1'])
+  assert.ok(record.report)
+  assert.match(reviewReportMarkdown(record.report, path.join(f.root, 'report.md')), /T1:AC1: 3\/3 repair attempts \(exhausted\)/)
+  await runTaskVerification(state, new AbortController().signal, f.dependencies)
+  const resumed = await new VerificationStore(f.store.file, realClock).read()
+  assert.equal(resumed.invocations.filter(i => i.kind === 'repair').length, 4)
+  await assert.rejects(f.store.charge(resumed, 'repair', 'Still broken', 'T1:AC1'), /exhausted for T1:AC1/)
+})
+
+test('check repairs and criterion repairs use separate allowances', async t => {
+  const f = await fixture(t, 1)
+  await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
+  const checks = f.dependencies.checks
+  let checkFixed = false
+  f.dependencies.checks = async (...args) => {
+    const checked = await checks(...args)
+    if (args[1] === 'fast' && !checkFixed) {
+      checked.result.passed = false
+      checked.result.checks.push({ name: 'lint', command: 'lint', required: true, passed: false, exitCode: 1,
+        durationMs: 1, stdoutPreview: '', stderrPreview: 'Lint defect', findings: [], outputTruncated: false })
+    }
+    return checked
+  }
+  const repair = f.dependencies.repair
+  f.dependencies.repair = async (state, feedback, operation) => {
+    if (feedback.startsWith('Repair only this work item: check:lint ')) {
+      checkFixed = true
+      return state
+    }
+    return repair(state, feedback, operation)
+  }
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.equal(record.report?.readiness, 'verified')
+  assert.deepEqual(record.invocations.filter(i => i.kind === 'repair').map(i => i.repairItemId), ['check:lint', 'T1:AC1'])
+})
+
+for (const failedSuite of ['fast', 'full'] as const) {
+  test(`exhausted ${failedSuite} check defers blocked criterion verification and completes the final pass`, async t => {
+    let now = 1_000
+    const clock: EpicClock = { now: () => new Date(now).toISOString(), nowMs: () => now }
+    const f = await fixture(t, 1, clock)
+    await fs.writeFile(path.join(f.root, 'candidate.txt'), 'bad')
+    const checks = f.dependencies.checks
+    const repair = f.dependencies.repair
+    let checkBroken = false
+    let failedCheckCalls = 0
+    f.dependencies.checks = async (...args) => {
+      // A fake clock bounds the regression without waiting for the real deadline.
+      now += 1_000
+      const checked = await checks(...args)
+      if (args[1] === failedSuite && checkBroken) {
+        failedCheckCalls++
+        checked.result.passed = false
+        checked.result.checks.push({ name: 'lint', command: 'lint', required: true, passed: false, exitCode: 1,
+          durationMs: 1, stdoutPreview: '', stderrPreview: 'Lint defect', findings: [], outputTruncated: false })
+      }
+      return checked
+    }
+    f.dependencies.repair = async (state, feedback, operation) => {
+      if (feedback.startsWith('Repair only this work item: T1:AC1 ')) {
+        checkBroken = true
+        return repair(state, feedback, operation)
+      }
+      return state
+    }
+    const state = await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+    const record = await f.store.read()
+    assert.deepEqual(record.invocations.map(i => i.repairItemId), ['T1:AC1', 'check:lint'])
+    assert.equal(failedCheckCalls, 3)
+    assert.deepEqual(record.cycles.map(c => [c.kind, c.target?.id]), [
+      ['initial_full', undefined], ['targeted', 'T1:AC1'], ['targeted', 'check:lint'], ['final_full', undefined],
+    ])
+    assert.equal(record.schedule.phase, 'done')
+    assert.equal(record.schedule.finalRequired, false)
+    assert.deepEqual(record.schedule.deferred.map(i => i.id), ['check:lint'])
+    assert.equal(record.report?.readiness, 'issues_remaining')
+    assert.equal(record.report?.criteria[0].status, 'manual_review_pending')
+    assert.equal(record.report?.criteria[0].evidence[0].gap, 'not_attempted')
+    assert.ok((record.report?.usage.remainingMs ?? 0) > 0)
+
+    // A later explicit resume can verify the existing criterion fix once checks recover.
+    checkBroken = false
+    await runTaskVerification(state, new AbortController().signal, f.dependencies)
+    const resumed = await f.store.read()
+    assert.equal(resumed.report?.readiness, 'verified')
+    assert.equal(resumed.invocations.length, 2)
+    assert.deepEqual(resumed.schedule.deferred, [])
+  })
+}
+
+test('per-item ledger rejects old format and unscoped or over-budget repair usage', async t => {
+  const f = await fixture(t, 1)
+  const old = JSON.stringify({ ...f.record, formatVersion: 3 })
+  await fs.writeFile(f.store.file, old)
+  await assert.rejects(f.store.read(), /format: 3; required 4.*No migration/)
+  assert.equal(await fs.readFile(f.store.file, 'utf8'), old)
+  await f.store.write(f.record)
+  await f.store.charge(f.record, 'repair', 'Defect', 'T1:AC1')
+  const invalid = structuredClone(f.record)
+  delete invalid.invocations[0].repairItemId
+  await f.store.write(invalid)
+  await assert.rejects(f.store.read(), /repair item identity/)
+  invalid.invocations[0].repairItemId = 'T1:AC1'
+  invalid.invocations.push({ ...invalid.invocations[0], id: 'extra' })
+  await f.store.write(invalid)
+  await assert.rejects(f.store.read(), /usage exceeds/)
+})
+
+test('multiple failed obligations in one AC share its three attempts', async t => {
+  const f = await fixture(t, 3)
+  f.plan.obligations[0].command = 'node -e "process.exit(1)"'
+  f.plan.obligations.push({ ...f.plan.obligations[0], id: 'another-obligation' })
+  await f.store.write(f.record)
+  f.dependencies.repair = async state => state
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 3)
+  assert.deepEqual(record.report?.usage.repairItems, [{ id: 'T1:AC1', used: 3, limit: 3 }])
+  assert.equal(record.report?.criteria[0].status, 'not_met')
 })

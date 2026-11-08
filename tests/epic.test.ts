@@ -37,7 +37,7 @@ function domain(root = '/repo'): EpicDomainState {
     currentTaskIndex: 0,
     taskApproved: false,
     implementationAttempt: 0,
-    maxTaskRepairs: 1,
+    maxRepairsPerItem: 1,
     maxAcceptancePlanRepairs: 2,
     maxTaskInfrastructureRetries: 1,
     taskVerificationTimeoutMs: 1,
@@ -641,13 +641,13 @@ test('injected timer rejects unsettled dispatches and is cleaned up', async () =
   actor.stop()
 })
 
-test('schema-12 envelope is the sole persisted state and older machine versions are rejected', async () => {
+test('schema-13 envelope is the sole persisted state and older machine versions are rejected', async () => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'epic-refactor-'))
   const machine = createEpicMachine(services())
   const actor = createActor(machine, { input: { state: domain(root) } })
   actor.start()
   const envelope = {
-    schemaVersion: 12 as const,
+    schemaVersion: 13 as const,
     machineVersion: 14 as const,
     epicId: 'run-1',
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -670,13 +670,13 @@ test('schema-12 envelope is the sole persisted state and older machine versions 
     'updatedAt',
   ])
   const loaded = await loadActiveEpic(root)
-  assert.equal(loaded.schemaVersion, 12)
+  assert.equal(loaded.schemaVersion, 13)
   assert.equal(loaded.machineVersion, 14)
   assert.equal(loaded.epicId, envelope.epicId)
-  const legacy = JSON.stringify({ ...stored, schemaVersion: 11, machineVersion: 14 })
+  const legacy = JSON.stringify({ ...stored, schemaVersion: 12, machineVersion: 14 })
   const stateFile = path.join(root, '.pi/epics/runs/run-1/state.json')
   await fs.writeFile(stateFile, legacy)
-  await assert.rejects(loadActiveEpic(root), /found schema\/machine version 11\/14.*Required schema\/machine version 12\/14; no compatibility migration was applied/)
+  await assert.rejects(loadActiveEpic(root), /found schema\/machine version 12\/14.*Required schema\/machine version 13\/14; no compatibility migration was applied/)
   assert.equal(await fs.readFile(stateFile, 'utf8'), legacy)
   stored.schemaVersion = 5
   stored.machineVersion = 9
@@ -686,7 +686,7 @@ test('schema-12 envelope is the sole persisted state and older machine versions 
   )
   await assert.rejects(
     loadActiveEpic(root),
-    /found schema\/machine version 5\/9.*Required schema\/machine version 12\/14/
+    /found schema\/machine version 5\/9.*Required schema\/machine version 13\/14/
   )
   await fs.writeFile(
     path.join(root, '.pi/epics/runs/run-1/state.json'),
@@ -705,7 +705,7 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   })
   actor.start()
   const envelope = {
-    schemaVersion: 12 as const,
+    schemaVersion: 13 as const,
     machineVersion: 14 as const,
     epicId: current.epicId,
     createdAt: '2026-01-01T00:00:00.000Z',
@@ -741,8 +741,8 @@ test('journal records use explicitly supplied projected stage and timestamp', as
   await fs.rm(root, { recursive: true, force: true })
 })
 
-test('machine version constants accept only schema 12/machine 14', () => {
-  assert.equal(EPIC_SCHEMA_VERSION, 12)
+test('machine version constants accept only schema 13/machine 14', () => {
+  assert.equal(EPIC_SCHEMA_VERSION, 13)
   assert.equal(EPIC_MACHINE_VERSION, 14)
 })
 

@@ -14,7 +14,7 @@ test('configuration resolves documented defaults once at the composition boundar
       commandTimeoutMs: 120_000,
       maxOutputBytes: 20_000,
       maxScoutRounds: 3,
-      maxTaskRepairs: 6,
+      maxRepairsPerItem: 3,
       maxAcceptancePlanRepairs: 2,
       maxTaskInfrastructureRetries: 1,
       taskVerificationTimeoutMs: 1_800_000,

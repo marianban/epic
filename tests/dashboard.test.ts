@@ -26,7 +26,7 @@ function domain(): EpicDomainState {
     currentTaskIndex: 0,
     taskApproved: false,
     implementationAttempt: 0,
-    maxTaskRepairs: 1,
+    maxRepairsPerItem: 1,
     maxAcceptancePlanRepairs: 2,
     maxTaskInfrastructureRetries: 1,
     taskVerificationTimeoutMs: 1,

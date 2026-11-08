@@ -131,6 +131,7 @@ export interface AllowanceInvocation {
   reason: string
   at: number
   completed: boolean
+  repairItemId?: string
 }
 export type FailureDisposition = 'request_fix' | 'false_positive' | 'accepted_noncritical'
 export interface HumanDecision {
@@ -167,7 +168,7 @@ export interface HumanRepairRequest {
   completed: boolean
 }
 export interface TaskVerificationRecord {
-  formatVersion: 3
+  formatVersion: 4
   findings: RegisteredFinding[]
   findingReviews: FindingReviewRecord[]
   schedule: VerificationSchedule
@@ -178,7 +179,7 @@ export interface TaskVerificationRecord {
   criterionVersion: number
   plan?: VerificationPlan
   plans: { plan: VerificationPlan; artifact: string }[]
-  repairsLimit: number
+  repairsPerItemLimit: number
   infrastructureLimit: number
   timeAllowanceMs: number
   startedAt?: number
@@ -213,7 +214,8 @@ export interface HumanReviewReport {
   usage: {
     repairs: number
     infrastructure: number
-    repairsLimit: number
+    repairsPerItemLimit: number
+    repairItems: { id: string; used: number; limit: number }[]
     infrastructureLimit: number
     remainingMs: number
     consumedMs: number

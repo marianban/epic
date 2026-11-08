@@ -94,6 +94,21 @@ export function selectedPlan(
   }
 }
 
+export function deferExhaustedRepair(record: TaskVerificationRecord, target: VerificationWorkItem): void {
+  const schedule = record.schedule
+  if (schedule.queue[0]?.id !== target.id || target.action !== 'repair')
+    throw new Error('Exhausted repair does not match the persisted queue.')
+  schedule.queue.shift()
+  const blocked = target.kind === 'check'
+    ? schedule.queue.filter(item => item.kind === 'criterion' && item.action === 'verify')
+    : []
+  const deferred = new Map([target, ...blocked].map(item => [item.id, item]))
+  schedule.queue = schedule.queue.filter(item => !deferred.has(item.id))
+  schedule.deferred = schedule.deferred.filter(item => !deferred.has(item.id))
+  schedule.deferred.push(...deferred.values())
+  schedule.phase = schedule.queue.length ? 'targeted' : schedule.finalRequired ? 'final_full' : 'done'
+}
+
 export function processVerificationCycle(
   record: TaskVerificationRecord,
   cycle: VerificationCycle

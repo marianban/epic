@@ -96,13 +96,13 @@ export async function resolveEpicConfiguration(root: string): Promise<ResolvedEp
     }
   }
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('Invalid epic configuration: expected an object.')
-  for (const key of ['maxFastRepairs', 'maxFullRepairs', 'maxSemanticRepairs'])
-    if (key in config) throw new Error(`Obsolete epic configuration ${key}; use maxTaskRepairs. No compatibility migration was applied.`)
+  for (const key of ['maxTaskRepairs', 'maxFastRepairs', 'maxFullRepairs', 'maxSemanticRepairs'])
+    if (key in config) throw new Error(`Obsolete epic configuration ${key}; use maxRepairsPerItem. No compatibility migration was applied.`)
   const inspector = config.inspector === undefined ? {} : object(config.inspector, 'inspector')
   const inspectorPort = positiveInteger(inspector.port, 'inspector.port', 8080)
   if (inspectorPort > 65535) throw new Error('Invalid epic configuration inspector.port: expected a TCP port.')
   return {
     inspector: { enabled: optionalBoolean(inspector.enabled, 'inspector.enabled', false), port: inspectorPort, autoOpen: optionalBoolean(inspector.autoOpen, 'inspector.autoOpen', true) },
-    agentTimeoutMs: positiveInteger(config.agentTimeoutMs, 'agentTimeoutMs', 300_000), commandTimeoutMs: positiveInteger(config.commandTimeoutMs, 'commandTimeoutMs', 120_000), maxOutputBytes: positiveInteger(config.maxOutputBytes, 'maxOutputBytes', 20_000), maxScoutRounds: positiveInteger(config.maxScoutRounds, 'maxScoutRounds', 3), maxAcceptancePlanRepairs: nonNegativeInteger(config.maxAcceptancePlanRepairs, 'maxAcceptancePlanRepairs', 2), maxTaskRepairs: nonNegativeInteger(config.maxTaskRepairs, 'maxTaskRepairs', 6), maxTaskInfrastructureRetries: nonNegativeInteger(config.maxTaskInfrastructureRetries, 'maxTaskInfrastructureRetries', 1), taskVerificationTimeoutMs: positiveInteger(config.taskVerificationTimeoutMs, 'taskVerificationTimeoutMs', 1_800_000), maxTaskPlanRepairs: positiveInteger(config.maxTaskPlanRepairs, 'maxTaskPlanRepairs', 2), checks: { ...checks(config.checks), browserSmoke: browserSmoke(config.checks?.browserSmoke) }, agents: agents(config.agents),
+    agentTimeoutMs: positiveInteger(config.agentTimeoutMs, 'agentTimeoutMs', 300_000), commandTimeoutMs: positiveInteger(config.commandTimeoutMs, 'commandTimeoutMs', 120_000), maxOutputBytes: positiveInteger(config.maxOutputBytes, 'maxOutputBytes', 20_000), maxScoutRounds: positiveInteger(config.maxScoutRounds, 'maxScoutRounds', 3), maxAcceptancePlanRepairs: nonNegativeInteger(config.maxAcceptancePlanRepairs, 'maxAcceptancePlanRepairs', 2), maxRepairsPerItem: nonNegativeInteger(config.maxRepairsPerItem, 'maxRepairsPerItem', 3), maxTaskInfrastructureRetries: nonNegativeInteger(config.maxTaskInfrastructureRetries, 'maxTaskInfrastructureRetries', 1), taskVerificationTimeoutMs: positiveInteger(config.taskVerificationTimeoutMs, 'taskVerificationTimeoutMs', 1_800_000), maxTaskPlanRepairs: positiveInteger(config.maxTaskPlanRepairs, 'maxTaskPlanRepairs', 2), checks: { ...checks(config.checks), browserSmoke: browserSmoke(config.checks?.browserSmoke) }, agents: agents(config.agents),
   }
 }

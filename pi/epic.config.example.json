@@ -8,7 +8,7 @@
   "commandTimeoutMs": 120000,
   "agentTimeoutMs": 300000,
   "maxOutputBytes": 20000,
-  "maxTaskRepairs": 6,
+  "maxRepairsPerItem": 3,
   "maxAcceptancePlanRepairs": 2,
   "maxTaskInfrastructureRetries": 1,
   "taskVerificationTimeoutMs": 1800000,

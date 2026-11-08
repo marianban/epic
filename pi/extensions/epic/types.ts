@@ -77,7 +77,7 @@ export interface EpicDomainState {
   prerequisites?: Prerequisite[]
   prerequisitesApprovedAt?: string
   implementationAttempt: number
-  maxTaskRepairs: number
+  maxRepairsPerItem: number
   maxAcceptancePlanRepairs: number
   maxTaskInfrastructureRetries: number
   taskVerificationTimeoutMs: number
@@ -173,7 +173,7 @@ export interface EpicTimer {
 }
 
 export interface PersistedEpicEnvelope extends EpicRunMetadata {
-  schemaVersion: 12
+  schemaVersion: 13
   machineVersion: 14
   snapshot: unknown
 }
@@ -412,7 +412,7 @@ export interface EpicConfig {
   commandTimeoutMs?: number
   agentTimeoutMs?: number
   maxOutputBytes?: number
-  maxTaskRepairs?: number
+  maxRepairsPerItem?: number
   maxAcceptancePlanRepairs?: number
   maxTaskInfrastructureRetries?: number
   taskVerificationTimeoutMs?: number
@@ -440,7 +440,7 @@ export interface ResolvedEpicConfiguration {
   commandTimeoutMs: number
   maxOutputBytes: number
   maxScoutRounds: number
-  maxTaskRepairs: number
+  maxRepairsPerItem: number
   maxAcceptancePlanRepairs: number
   maxTaskInfrastructureRetries: number
   taskVerificationTimeoutMs: number
