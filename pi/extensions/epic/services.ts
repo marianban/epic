@@ -1,3 +1,5 @@
+import { findingReviewInstructions } from './finding-reconciliation.ts'
+import type { FindingReviewContext } from './verification-types.ts'
 import {
   summarizeCheckSuite,
   summarizeSmoke,
@@ -155,6 +157,7 @@ export interface EpicServices {
     state: EpicDomainState,
     checks: { full: CheckSuiteResult; browserSmoke?: BrowserSmokeResult },
     semanticAttempt: number,
+    findingContext: FindingReviewContext,
     operation?: VerificationOperation,
     cycle?: VerificationCycle
   ): Promise<{ state: EpicDomainState; result: ReviewResult }>
@@ -760,13 +763,14 @@ export function createEpicServices(
         ctx.signal ? AbortSignal.any([signal, ctx.signal]) : signal,
         {
           clock,
+          createFindingId: randomUUID,
           timer: dependencies.timer,
           executablePath: configuration.checks.browserSmoke.executablePath,
           browserProbeLimits: { maxFrames: 12, maxCaptureDurationMs: 10_000 },
           maxOutputBytes: configuration.maxOutputBytes,
           checks: (current, suite, operation) =>
             this.checks(current, suite, operation),
-          review: (current, cycle, operation) =>
+          review: (current, cycle, operation, context) =>
             this.review(
               current,
               {
@@ -781,10 +785,11 @@ export function createEpicServices(
                 browserSmoke: cycle.smoke,
               },
               cycle.attempt,
+              context,
               operation,
               cycle
             ),
-          reviewEvidence: async (current, cycle, operation) => {
+          reviewEvidence: async (current, cycle, operation, context) => {
             if (!current.taskBaselineSha) throw new Error('Cannot review evidence without a task baseline.')
             const plan = await readApprovedPlan(current)
             const diff = await getTaskDiff(current.repositoryRoot, current.taskBaselineSha)
@@ -792,7 +797,7 @@ export function createEpicServices(
             const artifact = await fs.readFile(currentTaskArtifactPath(current), 'utf8')
             const prompt = reviewerTask(current, plan, diff,
               JSON.stringify({ acceptanceVerification: summarizeVerificationCycle(cycle) }),
-              artifact, changes.changes.map(change => change.path)) + '\n\n' + browserEvidenceReviewInstructions(cycle)
+              artifact, changes.changes.map(change => change.path)) + '\n\n' + browserEvidenceReviewInstructions(cycle) + '\n\n' + findingReviewInstructions(context)
             const run = await runRole(current, 'reviewer', prompt,
               'browser evidence review', current.tasks?.[current.currentTaskIndex]?.id, operation)
             if (run.exitCode !== 0) throw new Error(`Evidence reviewer failed: ${agentFailure(run)}`)
@@ -1037,7 +1042,7 @@ export function createEpicServices(
       notify(`${suite} checks ${result.passed ? 'passed' : 'failed'}.`)
       return { state: next, result }
     },
-    async review(state, checks, semanticAttempt, operation, cycle) {
+    async review(state, checks, semanticAttempt, findingContext, operation, cycle) {
       const plan = await readApprovedPlan(state)
       if (!state.taskBaselineSha)
         throw new Error('Cannot review without a task baseline.')
@@ -1072,7 +1077,7 @@ export function createEpicServices(
           }),
           artifact,
           changedPaths
-        ),
+        ) + '\n\n' + findingReviewInstructions(findingContext),
         'semantic review',
         state.tasks?.[state.currentTaskIndex]?.id,
         operation

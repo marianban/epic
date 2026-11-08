@@ -162,6 +162,7 @@ function dependencies(calls: string[]): EpicServiceDependencies {
               passed: true,
               summary: 'Recovered implementation is valid.',
               acceptanceCriteria: [],
+              reconciliation: [],
               findings: [],
             })
           : JSON.stringify({

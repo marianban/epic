@@ -19,6 +19,7 @@ import type {
   VerificationOperation,
   VerificationCycle,
   VerificationPlan,
+  FindingReviewContext,
 } from './verification-types.ts'
 import {
   VerificationStore,
@@ -27,6 +28,7 @@ import {
 import { finalizeReviewReport } from './verification-report.ts'
 
 export interface VerificationDependencies {
+  createFindingId(): string
   clock: EpicClock
   timer: EpicTimer
   executablePath: string | undefined
@@ -40,12 +42,14 @@ export interface VerificationDependencies {
   review(
     state: EpicDomainState,
     cycle: VerificationCycle,
-    operation: VerificationOperation
+    operation: VerificationOperation,
+    context: FindingReviewContext
   ): Promise<{ state: EpicDomainState; result: ReviewResult }>
   reviewEvidence(
     state: EpicDomainState,
     cycle: VerificationCycle,
-    operation: VerificationOperation
+    operation: VerificationOperation,
+    context: FindingReviewContext
   ): Promise<{ state: EpicDomainState; result: ReviewResult; inspectedObligationIds: string[]; limitations: string[] }>
   repair(
     state: EpicDomainState,

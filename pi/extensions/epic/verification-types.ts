@@ -167,7 +167,9 @@ export interface HumanRepairRequest {
   completed: boolean
 }
 export interface TaskVerificationRecord {
-  formatVersion: 2
+  formatVersion: 3
+  findings: RegisteredFinding[]
+  findingReviews: FindingReviewRecord[]
   schedule: VerificationSchedule
   manualReviews: ManualReview[]
   humanRepairRequests: HumanRepairRequest[]
@@ -197,6 +199,7 @@ export interface HumanReviewReport {
   criterionVersion: number
   scenarioVersion?: number
   readiness: 'verified' | 'issues_remaining' | 'needs_manual_confirmation'
+  findings: RegisteredFinding[]
   criteria: {
     id: string
     text: string
@@ -258,3 +261,23 @@ export type TaskDecisionRequest =
       criteria: string[]
       reason: string
     }
+
+export interface RegisteredFinding {
+  id: string
+  feedback: ReviewResult['findings'][number]
+  status: 'open' | 'resolved' | 'superseded'
+  canonicalId?: string
+  originatingReviewId: string
+  latestReviewId: string
+}
+export interface FindingReviewContext {
+  findings: RegisteredFinding[]
+  targetId?: string
+}
+export interface FindingReviewRecord {
+  id: string
+  cycleId: string
+  kind: 'semantic' | 'evidence'
+  context: FindingReviewContext
+  result: ReviewResult
+}

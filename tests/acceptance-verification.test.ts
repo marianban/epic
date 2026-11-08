@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { reviewFailures, canRepairReviewedTask } from '../pi/extensions/epic/failure-review.ts'
 import { editFailureReview } from '../pi/extensions/epic/dashboard/failure-review-editor.ts'
 import { manualReviewSubmission } from '../pi/extensions/epic/dashboard/manual-review-submission.ts'
@@ -117,6 +118,7 @@ async function fixture(t: TestContext, repairs = 3, clock = realClock) {
   const calls: string[] = []
   const dependencies: VerificationDependencies = {
     clock,
+    createFindingId: randomUUID,
     timer,
     executablePath: undefined,
     maxOutputBytes: 5000,
@@ -136,7 +138,7 @@ async function fixture(t: TestContext, repairs = 3, clock = realClock) {
         },
       }
     },
-    review: async (current) => {
+    review: async (current, _cycle, _operation, context) => {
       calls.push('review')
       return {
         state: current,
@@ -144,12 +146,13 @@ async function fixture(t: TestContext, repairs = 3, clock = realClock) {
           passed: true,
           summary: 'No defects',
           acceptanceCriteria: [],
+          reconciliation: context.findings.map(f => ({ id: f.id, disposition: 'resolved' as const, reason: 'Fixture repair completed', evidence: 'Current fixture implementation inspected' })),
           findings: [],
         },
       }
     },
     reviewEvidence: async (current, cycle) => ({
-      state: current, result: { passed: true, summary: 'Evidence independently inspected', acceptanceCriteria: [], findings: [] },
+      state: current, result: { passed: true, summary: 'Evidence independently inspected', acceptanceCriteria: [], reconciliation: [], findings: [] },
       inspectedObligationIds: cycle.evidence.filter(e => e.method === 'agent_browser' && e.conclusion).map(e => e.obligationId), limitations: [],
     }),
     repair: async (current) => {
@@ -743,7 +746,7 @@ test('failed scheduled smoke blocks verified approval even when acceptance evide
 test('source and generated dependency changes preserve advisory verification results', async (t) => {
   const f = await fixture(t)
   const review = f.dependencies.review
-  f.dependencies.review = async (state, cycle, operation) => {
+  f.dependencies.review = async (state, cycle, operation, context) => {
     await fs.writeFile(path.join(f.root, 'candidate.txt'), 'changed')
     await fs.mkdir(path.join(f.root, 'node_modules/generated-cache'), {
       recursive: true,
@@ -752,7 +755,7 @@ test('source and generated dependency changes preserve advisory verification res
       path.join(f.root, 'node_modules/generated-cache/metadata.json'),
       '{}'
     )
-    return review(state, cycle, operation)
+    return review(state, cycle, operation, context)
   }
   const state = await runTaskVerification(
     f.state,
@@ -1851,8 +1854,8 @@ for (const persistent of [false, true]) {
     const reproduction = JSON.stringify([{ action: 'hold', keys: ['ArrowLeft'], durationMs: 300 }])
     const artifact = '/run/artifacts/paddle-before-after.png'
     const review = f.dependencies.review
-    f.dependencies.review = async (state, cycle, operation) => {
-      const result = await review(state, cycle, operation)
+    f.dependencies.review = async (state, cycle, operation, context) => {
+      const result = await review(state, cycle, operation, context)
       if (persistent || cycle.kind === 'initial_full') {
         const evidence = cycle.evidence[0]
         evidence.outcome = 'likely-fail'
@@ -2121,13 +2124,13 @@ for (const gap of ['missing', 'inconclusive'] as const) {
   test(`${gap} evidence is rechecked without a repair or redundant full pass`, async t => {
     const f = await fixture(t)
     const fixtureReview = f.dependencies.review
-    f.dependencies.review = async (state, cycle, operation) => {
+    f.dependencies.review = async (state, cycle, operation, context) => {
       if (gap === 'missing') cycle.evidence = []
       else {
         cycle.evidence[0].outcome = 'inconclusive'
         cycle.evidence[0].gap = 'inconclusive'
       }
-      return fixtureReview(state, cycle, operation)
+      return fixtureReview(state, cycle, operation, context)
     }
     await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
     const record = await f.store.read()
@@ -2326,7 +2329,7 @@ for (const outcome of ['pass', 'unavailable', 'uninspected', 'unsupported', 'def
       if (outcome === 'uninspected') return { ...assessed, inspectedObligationIds: [], limitations: ['Cannot open cited image'] }
       if (outcome === 'unsupported') return { ...assessed, limitations: ['The cited observation does not establish the claim'] }
       if (outcome === 'defect') return { ...assessed, result: { ...assessed.result, passed: false, findings: [{
-        severity: 'major', category: 'correctness', file: 'counter.html', affectedPaths: ['counter.html'], repairPaths: ['counter.html'],
+        id: 'new:1', severity: 'major', category: 'correctness', file: 'counter.html', affectedPaths: ['counter.html'], repairPaths: ['counter.html'],
         message: 'Related code defect', failureScenario: 'Independent inspection found a defect', requiredFix: 'Fix related markup',
       }] } }
       return assessed
@@ -2343,6 +2346,14 @@ for (const outcome of ['pass', 'unavailable', 'uninspected', 'unsupported', 'def
       assert.equal(record.report?.cycle?.evidenceReviews.length, 1)
     }
     if (outcome === 'defect') {
+      const evidenceReview = record.findingReviews.find(r => r.kind === 'evidence')
+      const focusedReview = record.findingReviews.find(r => r.context.targetId)
+      assert.ok(evidenceReview)
+      assert.ok(focusedReview)
+      assert.equal(evidenceReview.context.findings.length, 0)
+      assert.equal(focusedReview.context.findings[0].id, evidenceReview.result.findings[0].id)
+      assert.equal(focusedReview.result.reconciliation[0].disposition, 'resolved')
+      assert.equal(record.findings[0].status, 'resolved')
       assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 1)
       assert.equal(record.cycles[2].target?.kind, 'semantic')
       assert.equal(record.cycles.at(-1)?.kind, 'final_full')
@@ -2350,11 +2361,11 @@ for (const outcome of ['pass', 'unavailable', 'uninspected', 'unsupported', 'def
   })
 }
 
-test('format 2 scoped ledger rejects malformed diagnostics and inspection coverage', async t => {
+test('format 3 scoped ledger rejects malformed diagnostics and inspection coverage', async t => {
   const f = await fixture(t)
   await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
   const record = await f.store.read()
-  assert.equal(record.formatVersion, 2)
+  assert.equal(record.formatVersion, 3)
   assert.ok(record.cycles[0].review)
   record.cycles[0].problems = [{ stage: 'obligation', obligationIds: ['unknown'], message: 'Invalid scope' }]
   await f.store.write(record)
@@ -2368,9 +2379,9 @@ test('format 2 scoped ledger rejects malformed diagnostics and inspection covera
 test('resuming a blocked evidence-only retry still composes the unchanged full baseline', async t => {
   const f = await fixture(t, 0)
   const review = f.dependencies.review
-  f.dependencies.review = async (state, cycle, operation) => {
+  f.dependencies.review = async (state, cycle, operation, context) => {
     cycle.evidence = []
-    return review(state, cycle, operation)
+    return review(state, cycle, operation, context)
   }
   const checks = f.dependencies.checks
   f.dependencies.checks = async (...args) => {
@@ -2411,4 +2422,122 @@ test('evidence-review gaps do not become duplicate failure steps', async t => {
   assert.deepEqual(dashboard?.failureReviewItems?.map(i => i.text), ['Holding Left moves the paddle left.'])
   assert.doesNotMatch(dashboard?.message ?? '', /contradiction|suspicion/)
   assert.deepEqual(report, original)
+})
+
+const layoutFinding = (id: string, message: string) => ({
+  id, severity: 'major' as const, category: 'layout', file: 'src/styles.css', message,
+  failureScenario: 'Canvas is distorted after resize', requiredFix: 'Preserve FIT geometry',
+  affectedPaths: ['src/styles.css'], repairPaths: ['src/styles.css'],
+})
+
+test('stable findings reconcile rewording, duplicates and shared fixes before the final full pass', async t => {
+  const f = await fixture(t, 3)
+  let id = 0
+  f.dependencies.createFindingId = () => `layout-${++id}`
+  const contexts: string[][] = []
+  let focused = 0
+  f.dependencies.review = async (state, cycle, _operation, context) => {
+    contexts.push(context.findings.map(f => f.id))
+    if (cycle.kind === 'initial_full') return { state, result: {
+      passed: false, summary: 'Three findings', acceptanceCriteria: [], reconciliation: [], findings: [
+        layoutFinding('new:1', 'Sizing override'), layoutFinding('new:2', 'Duplicate sizing override'), layoutFinding('new:3', 'Independent issue'),
+      ],
+    } }
+    if (cycle.kind === 'targeted' && focused++ === 0) return { state, result: {
+      passed: false, summary: 'Sizing still broken; duplicate merged', acceptanceCriteria: [],
+      findings: [layoutFinding('layout-1', 'Reworded sizing issue')], reconciliation: [
+        { id: 'layout-1', disposition: 'open', reason: 'Current CSS still overrides dimensions' },
+        { id: 'layout-2', disposition: 'superseded', reason: 'Same override and repair', canonicalId: 'layout-1' },
+        { id: 'layout-3', disposition: 'not_assessed', reason: 'Outside focused scope' },
+      ],
+    } }
+    return { state, result: {
+      passed: true, summary: 'Current implementation fixes both issues', acceptanceCriteria: [], findings: [],
+      reconciliation: context.findings.map(f => ({ id: f.id, disposition: 'resolved', reason: 'Current code inspected', evidence: 'Current stylesheet and bootstrap preserve FIT sizing' })),
+    } }
+  }
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.deepEqual(contexts, [[], ['layout-1', 'layout-2', 'layout-3'], ['layout-1', 'layout-3'], []])
+  assert.deepEqual(record.cycles.map(c => [c.kind, c.target?.id]), [
+    ['initial_full', undefined], ['targeted', 'review:layout-1'], ['targeted', 'review:layout-1'], ['final_full', undefined],
+  ])
+  assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 2)
+  assert.equal(record.findings[1].status, 'superseded')
+  assert.equal(record.findings[1].canonicalId, 'layout-1')
+  assert.equal(record.findingReviews[0].result.findings[0].message, 'Sizing override')
+  assert.equal(record.findingReviews[1].result.findings[0].message, 'Reworded sizing issue')
+  assert.equal(record.report?.readiness, 'verified')
+  assert.equal(record.schedule.finalRequired, false)
+  assert.deepEqual(reviewFailures(record), [])
+  assert.ok(record.report)
+  const markdown = reviewReportMarkdown(record.report, path.join(f.root, 'report.md'))
+  assert.match(markdown, /Historical finding layout-2: superseded/)
+})
+
+test('invalid focused reconciliation preserves work and resume verifies the charged repair without repeating it', async t => {
+  const f = await fixture(t, 1)
+  f.dependencies.createFindingId = () => 'layout'
+  let invalid = true
+  f.dependencies.review = async (state, cycle, _operation, context) => {
+    if (cycle.kind === 'initial_full') return { state, result: {
+      passed: false, summary: 'Found layout issue', acceptanceCriteria: [], reconciliation: [], findings: [layoutFinding('new:1', 'Sizing issue')],
+    } }
+    return { state, result: {
+      passed: true, summary: 'Fixed', acceptanceCriteria: [], findings: [],
+      reconciliation: invalid ? [] : context.findings.map(f => ({ id: f.id, disposition: 'resolved', reason: 'Inspected fix', evidence: 'Current CSS delegates scaling to Phaser' })),
+    } }
+  }
+  const state = await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const blocked = await f.store.read()
+  assert.equal(blocked.findings[0].status, 'open')
+  assert.equal(blocked.findingReviews.length, 1)
+  assert.equal(blocked.schedule.queue[0].id, 'review:layout')
+  assert.equal(blocked.cycles.at(-1)?.completed, false)
+  assert.match(blocked.cycles.at(-1)?.problems.find(p => p.stage === 'semantic_review')?.message ?? '', /exactly one disposition/)
+  assert.equal(blocked.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.equal(reviewFailures(blocked).filter(f => f.id === 'review:layout').length, 1)
+  assert.ok(!reviewFailures(blocked).some(f => f.id === 'review:findings'))
+  invalid = false
+  await runTaskVerification(state, new AbortController().signal, f.dependencies)
+  const resumed = await f.store.read()
+  assert.equal(resumed.report?.readiness, 'verified')
+  assert.equal(resumed.invocations.filter(i => i.kind === 'repair').length, 1)
+  assert.equal(resumed.findings[0].status, 'resolved')
+})
+
+test('format 2 ledgers are incompatible and remain unchanged', async t => {
+  const f = await fixture(t)
+  const serialized = JSON.stringify({ ...f.record, formatVersion: 2 })
+  await fs.writeFile(f.store.file, serialized)
+  await assert.rejects(f.store.read(), /format: 2; required 3.*No migration/)
+  assert.equal(await fs.readFile(f.store.file, 'utf8'), serialized)
+})
+
+test('exhausted reports show canonical open findings individually without duplicate historical failures', async t => {
+  const f = await fixture(t, 1)
+  let id = 0
+  f.dependencies.createFindingId = () => `issue-${++id}`
+  f.dependencies.review = async (state, cycle) => ({ state, result: cycle.kind === 'initial_full' ? {
+    passed: false, summary: 'Two defects with one duplicate', acceptanceCriteria: [], reconciliation: [],
+    findings: [layoutFinding('new:1', 'Sizing'), layoutFinding('new:2', 'Same sizing defect'), layoutFinding('new:3', 'Independent offset')],
+  } : {
+    passed: false, summary: 'Merged duplicate; both defects remain', acceptanceCriteria: [],
+    findings: [layoutFinding('issue-1', 'Updated sizing feedback')], reconciliation: [
+      { id: 'issue-1', disposition: 'open', reason: 'Override still present' },
+      { id: 'issue-2', disposition: 'superseded', canonicalId: 'issue-1', reason: 'Same override' },
+      { id: 'issue-3', disposition: 'not_assessed', reason: 'Independent offset outside scope' },
+    ],
+  } })
+  await runTaskVerification(f.state, new AbortController().signal, f.dependencies)
+  const record = await f.store.read()
+  assert.equal(record.report?.readiness, 'issues_remaining')
+  const semanticFailures = reviewFailures(record).filter(f => f.id.startsWith('review:'))
+  assert.deepEqual(semanticFailures.map(f => [f.id, f.actual.split('\n')[0]]), [
+    ['review:issue-1', 'Updated sizing feedback'], ['review:issue-3', 'Independent offset'],
+  ])
+  assert.ok(!record.report?.unresolved.includes('review:issue-2'))
+  assert.deepEqual(record.schedule.queue.map(i => i.id), ['review:issue-1', 'review:issue-3'])
+  assert.equal(record.schedule.finalRequired, true)
+  assert.equal(record.invocations.filter(i => i.kind === 'repair').length, 1)
 })

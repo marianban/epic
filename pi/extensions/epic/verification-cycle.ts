@@ -1,11 +1,13 @@
+import { findingReviewContext, reconcileFindings } from './finding-reconciliation.ts'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import type { EpicDomainState } from './types.ts'
+import type { ReviewResult, EpicDomainState } from './types.ts'
 import type {
   AcceptanceEvidence,
   VerificationCycle,
   VerificationOperation,
   TaskVerificationRecord,
+  FindingReviewContext,
 } from './verification-types.ts'
 import type { VerificationDependencies } from './verification-runner.ts'
 import type { VerificationStore } from './verification-store.ts'
@@ -33,6 +35,16 @@ export async function executeVerificationCycle(
   const { signal } = operation
   const errorText = (error: unknown) =>
     error instanceof Error ? error.message : String(error)
+  async function acceptReview(result: ReviewResult, context: FindingReviewContext, kind: 'semantic' | 'evidence') {
+    const id = randomUUID()
+    const reconciled = reconcileFindings(record.findings, context, result, id, dependencies.createFindingId, true)
+    const artifact = await persistImmutableJsonArtifact(state, `reviews/${id}-reconciled.json`, reconciled.result)
+    if (state.lastReviewResultPath) cycle.artifacts.push(state.lastReviewResultPath)
+    record.findings = reconciled.findings
+    record.findingReviews.push({ id, cycleId: cycle.id, kind, context, result: reconciled.result })
+    state = { ...state, lastReviewResultPath: artifact }
+    return reconciled.result
+  }
   verificationStages: try {
     for (const suite of ['fast', 'full'] as const) {
       try {
@@ -312,14 +324,16 @@ export async function executeVerificationCycle(
         .filter((e) => e.method === 'agent_browser' && e.conclusion)
         .map((e) => e.obligationId)
       try {
+        const context = findingReviewContext(record.findings, undefined)
         const reviewed = await retry(() =>
-          dependencies.reviewEvidence(state, cycle, operation)
+          dependencies.reviewEvidence(state, cycle, operation, context)
         )
         state = reviewed.state
+        const accepted = await acceptReview(reviewed.result, context, 'evidence')
         cycle.evidenceReviews.push({
           identity,
           obligationIds: reviewed.inspectedObligationIds,
-          result: reviewed.result,
+          result: accepted,
           limitations: reviewed.limitations,
         })
         const missing = obligationIds.filter(
@@ -344,11 +358,12 @@ export async function executeVerificationCycle(
     if (cycle.kind !== 'targeted' || cycle.target?.kind === 'semantic')
       try {
         operation.remainingMs()
+        const context = findingReviewContext(record.findings, cycle.target?.kind === 'semantic' ? cycle.target.id.slice('review:'.length) : undefined)
         const reviewed = await retry(() =>
-          dependencies.review(state, cycle, operation)
+          dependencies.review(state, cycle, operation, context)
         )
         state = reviewed.state
-        cycle.review = reviewed.result
+        cycle.review = await acceptReview(reviewed.result, context, 'semantic')
         if (state.lastReviewResultPath)
           cycle.artifacts.push(state.lastReviewResultPath)
       } catch (error) {
@@ -364,6 +379,7 @@ export async function executeVerificationCycle(
   }
   cycle.completed =
     !hasBlockedPrerequisites(cycle) &&
+    !cycle.problems.some(p => p.stage === 'semantic_review' || (p.stage === 'evidence_review' && p.message.startsWith('Browser evidence review: '))) &&
     !signal.aborted &&
     store.remaining(record) > 0
   await store.write(record)

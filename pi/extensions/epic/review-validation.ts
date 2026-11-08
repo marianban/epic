@@ -35,6 +35,7 @@ export function validateReviewResult(value: unknown): ReviewResult {
     typeof result.passed !== 'boolean' ||
     typeof result.summary !== 'string' ||
     !Array.isArray(result.findings) ||
+    !Array.isArray(result.reconciliation) ||
     !Array.isArray(result.acceptanceCriteria)
   ) {
     throw new Error('Reviewer returned invalid repair feedback.')
@@ -55,10 +56,28 @@ export function validateReviewResult(value: unknown): ReviewResult {
     }
   }
 
+  const reconciledIds = new Set<string>()
+  for (const value of result.reconciliation) {
+    const disposition = record(value)
+    if (!disposition || typeof disposition.id !== 'string' || !disposition.id.trim() ||
+        reconciledIds.has(disposition.id) ||
+        !['open', 'resolved', 'superseded', 'not_assessed'].includes(String(disposition.disposition)) ||
+        typeof disposition.reason !== 'string' || !disposition.reason.trim() ||
+        (disposition.disposition === 'resolved' && (typeof disposition.evidence !== 'string' || !disposition.evidence.trim())) ||
+        (disposition.disposition === 'superseded'
+          ? typeof disposition.canonicalId !== 'string' || !disposition.canonicalId.trim()
+          : disposition.canonicalId !== undefined))
+      throw new Error('Reviewer returned invalid finding reconciliation.')
+    reconciledIds.add(disposition.id)
+  }
+
   for (const value of result.findings) {
     const finding = record(value)
     if (
       !finding ||
+      typeof finding.id !== 'string' || !finding.id.trim() ||
+      !['blocker', 'major', 'minor', 'suggestion'].includes(String(finding.severity)) ||
+      !['category', 'message', 'failureScenario', 'requiredFix'].every(k => typeof finding[k] === 'string' && (finding[k] as string).trim()) ||
       !repositoryPaths(finding.affectedPaths, false) ||
       !Array.isArray(finding.repairPaths) ||
       finding.repairPaths.length === 0 ||
@@ -75,12 +94,15 @@ export function validateReviewResult(value: unknown): ReviewResult {
 
   if (
     result.passed === false &&
-    result.findings.length === 0
+    !result.findings.some(f => (f as { severity: string }).severity !== 'suggestion')
   ) {
     throw new Error(
       'Reviewer failed semantic review without an actionable repair.'
     )
   }
+
+  if (result.passed && result.findings.some(f => (f as { severity: string }).severity !== 'suggestion'))
+    throw new Error('Reviewer passed semantic review with actionable findings.')
 
   return value as ReviewResult
 }

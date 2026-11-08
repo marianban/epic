@@ -360,7 +360,16 @@ export interface PlannerContextRequest {
   questions: { question: string; reason: string }[]
 }
 
+export interface FindingDisposition {
+  id: string
+  disposition: 'open' | 'resolved' | 'superseded' | 'not_assessed'
+  reason: string
+  evidence?: string
+  canonicalId?: string
+}
+
 export interface ReviewResult {
+  reconciliation: FindingDisposition[]
   passed: boolean
   summary: string
   acceptanceCriteria: {
@@ -369,6 +378,7 @@ export interface ReviewResult {
     evidence: string
   }[]
   findings: {
+    id: string
     severity: 'blocker' | 'major' | 'minor' | 'suggestion'
     category: string
     file?: string

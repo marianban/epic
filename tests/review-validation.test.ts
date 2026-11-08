@@ -24,6 +24,7 @@ const task: EpicTask = {
 
 function review(overrides: Record<string, unknown> = {}) {
   return {
+    reconciliation: [],
     passed: true,
     summary: 'Automated semantic review passed.',
     acceptanceCriteria: [
@@ -40,6 +41,7 @@ function review(overrides: Record<string, unknown> = {}) {
 
 function finding(overrides: Record<string, unknown> = {}) {
   return {
+    id: 'new:1',
     severity: 'major',
     category: 'correctness',
     file: 'src/main.ts',

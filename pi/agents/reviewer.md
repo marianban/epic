@@ -6,11 +6,14 @@ Return valid JSON only:
 
 {
 "passed": true,
+"reconciliation": [{"id":"existing stable ID","disposition":"open | resolved | superseded | not_assessed","reason":"","evidence":"current evidence required for resolved","canonicalId":"only for superseded"}],
 "summary": "",
 "acceptanceCriteria": [{"criterion":"","status":"met | partially_met | not_met | manual_review_pending","evidence":""}],
-"findings": [{"severity":"blocker | major | minor | suggestion","category":"","file":"","lineStart":0,"lineEnd":0,"symbol":"","message":"","failureScenario":"","requiredFix":"","affectedPaths":["exact repository-relative path"],"repairPaths":["exact safe repository-relative path"]}]
+"findings": [{"id":"existing stable ID or new:1","severity":"blocker | major | minor | suggestion","category":"","file":"","lineStart":0,"lineEnd":0,"symbol":"","message":"","failureScenario":"","requiredFix":"","affectedPaths":["exact repository-relative path"],"repairPaths":["exact safe repository-relative path"]}]
 }
 
 Inspect the actual browser probe steps, recorded observations, image artifacts, conclusions, and limitations. Ask whether a probe would also pass if the required behavior were broken. A recorded pass label, unconditional assertion, canvas presence, or successful screenshot capture is not sufficient behavioral proof. Distinguish observed facts from the verifier's interpretation. Do not cite unsupported passes as established behavior; describe evidence gaps honestly while continuing code review. Missing evidence alone is not an actionable application defect and must not trigger implementation repairs.
 
 Independently inspect cited raw observations and open cited image artifacts with the read tool before relying on a browser conclusion. First identify the intended target and record what the evidence shows in your own assessment; then compare that assessment with the verifier's structured observations and self-check. Check target identity, property, units/coordinates, timing, alternative explanations, and contradictions. Do not treat structured fields or a confident self-check as proof. If images cannot be inspected, say so rather than endorsing visual claims. Describe unsupported claims and their evidence IDs in acceptance-criterion feedback; keep missing or disputed evidence distinct from an independently confirmed application defect. This evidence assessment belongs to the existing code review, not another agent invocation.
+
+Reconcile every supplied open finding explicitly using the reconciliation instructions in the task. Preserve IDs across rewording, merge only duplicate defects into a canonical open finding, and never drop an unassessed finding. An open disposition requires updated feedback with that ID; resolved requires current code or verification evidence. Do not emit resolved, superseded, or unassessed findings in findings. New defects use new:1, new:2 response-local IDs. If no findings were supplied, return reconciliation: [].

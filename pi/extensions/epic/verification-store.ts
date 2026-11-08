@@ -1,3 +1,4 @@
+import { validateFindingHistory } from './finding-reconciliation.ts'
 import { assertConclusionReview } from './browser-conclusion-review.ts'
 import { validateManualReviews } from './manual-review.ts'
 import { validateFailureDecisions } from './failure-review.ts'
@@ -35,8 +36,8 @@ export class VerificationStore {
     const value = JSON.parse(
       await fs.readFile(this.file, 'utf8')
     ) as TaskVerificationRecord
-    if (value?.formatVersion !== 2)
-      throw new Error(`Incompatible task verification ledger format: ${String(value?.formatVersion)}; required 2. No migration was applied.`)
+    if (value?.formatVersion !== 3)
+      throw new Error(`Incompatible task verification ledger format: ${String(value?.formatVersion)}; required 3. No migration was applied.`)
     if (!value.schedule || !['initial_full', 'targeted', 'final_full', 'done'].includes(value.schedule.phase) ||
         !Array.isArray(value.schedule.queue) || !Array.isArray(value.schedule.deferred) ||
         typeof value.schedule.finalRequired !== 'boolean')
@@ -52,6 +53,7 @@ export class VerificationStore {
       !Array.isArray(value.decisions)
     )
       throw new Error('Invalid task verification ledger.')
+    validateFindingHistory(value.findings, value.findingReviews)
     validateManualReviews(value)
     validateFailureDecisions(value)
     for (const item of [...value.schedule.queue, ...value.schedule.deferred]) {
@@ -61,7 +63,11 @@ export class VerificationStore {
           (item.kind === 'criterion' && !value.criteria.some(c => c.id === item.criterionId)))
         throw new Error('Invalid persisted verification work item.')
     }
+    for (const review of value.findingReviews) {
+      if (!value.cycles.some(c => c.id === review.cycleId)) throw new Error('Finding review references an unknown cycle.')
+    }
     for (const cycle of value.cycles) {
+      if (cycle.review) validateReviewResult(cycle.review)
       if (!['initial_full', 'targeted', 'final_full'].includes(cycle.kind) ||
           typeof cycle.completed !== 'boolean' || !Number.isSafeInteger(cycle.candidateRevision) || cycle.candidateRevision < 0 ||
           (cycle.kind === 'targeted' && !cycle.target))
@@ -146,7 +152,9 @@ export class VerificationStore {
     const task = state.tasks?.[state.currentTaskIndex]
     if (!task) throw new Error('Cannot freeze criteria without a task.')
     const record: TaskVerificationRecord = {
-      formatVersion: 2,
+      formatVersion: 3,
+      findings: [],
+      findingReviews: [],
       schedule: { phase: 'initial_full', queue: [], deferred: [], finalRequired: false },
       taskId: task.id,
       criteria: task.acceptanceCriteria.map((text, i) => ({

@@ -86,10 +86,7 @@ export function constructReviewReport(
     ...(cycle?.fast?.checks ?? []),
     ...(cycle?.full?.checks ?? []),
   ]
-  const reviewFindings = [
-    ...(cycle?.review?.findings ?? []),
-    ...(cycle?.evidenceReviews.flatMap(r => r.result.findings) ?? []),
-  ]
+  const reviewFindings = record.findings.filter(f => f.status === 'open' && f.feedback.severity !== 'suggestion')
   const mandatoryMissing =
     !cycle?.fast ||
     !cycle.full ||
@@ -126,13 +123,12 @@ export function constructReviewReport(
       (c) => c.required && !c.passed && ![124, 127].includes(c.exitCode)
     ) ||
     !!cycle?.smoke?.findings.some((f) => f.category !== 'infrastructure') ||
-    reviewFindings.some((f) => f.severity !== 'suggestion')
-  if (reviewFindings.some((f) => f.severity !== 'suggestion'))
-    unresolved.push('review:findings')
+    reviewFindings.length > 0
+  unresolved.push(...reviewFindings.map(f => `review:${f.id}`))
   const problems = [...(cycle?.problems.map(p => p.message) ?? [
     'No current verification cycle.',
     ...(record.cycles.at(-1)?.problems.map(p => p.message) ?? []),
-  ]), ...record.schedule.queue.map(item => `Pending ${item.action}: ${item.id}. ${item.feedback}`), ...(fullPending ? ['Final full verification remains incomplete.'] : [])]
+  ]), ...record.schedule.queue.filter(item => item.kind !== 'semantic').map(item => `Pending ${item.action}: ${item.id}. ${item.feedback}`), ...(fullPending ? ['Final full verification remains incomplete.'] : [])]
   for (const [i] of problems.entries()) unresolved.push(`problem:${i + 1}`)
   if (cycle?.fast && !cycle.fast.passed) unresolved.push('check:fast')
   if (cycle?.full && !cycle.full.passed) unresolved.push('check:full')
@@ -151,6 +147,7 @@ export function constructReviewReport(
     criterionVersion: record.criterionVersion,
     scenarioVersion: record.plan?.version,
     readiness,
+    findings: structuredClone(record.findings),
     criteria,
     unresolved: [...new Set(unresolved)],
     problems,
@@ -236,12 +233,11 @@ export function reviewReportMarkdown(report: HumanReviewReport, reportPath: stri
     ...(report.cycle?.evidenceReviews.flatMap(r => [
       `Browser evidence review (${r.identity}; ${r.obligationIds.join(', ')}): ${r.result.summary}`,
       ...r.limitations.map(message => `- Evidence review limitation: ${message}`),
-      ...r.result.findings.map(f => `- ${f.severity}: ${f.message}; fix: ${f.requiredFix}`),
     ]) ?? []),
-    ...(report.cycle?.review?.findings.map(
-      (f) =>
-        `- ${f.severity}: ${f.message}; ${f.file ?? f.affectedPaths.join(', ')}; reproduce: ${f.failureScenario}; fix: ${f.requiredFix}`
-    ) ?? []),
+    ...report.findings.filter(f => f.status === 'open').map(({ id, feedback: f }) =>
+      `- review:${id}: ${f.severity}: ${f.message}; ${f.file ?? f.affectedPaths.join(', ')}; reproduce: ${f.failureScenario}; fix: ${f.requiredFix}`),
+    ...report.findings.filter(f => f.status !== 'open').map(f =>
+      `- Historical finding ${f.id}: ${f.status}${f.canonicalId ? `; canonical ${f.canonicalId}` : ''}; latest review ${f.latestReviewId}.`),
     ...report.problems.map((p) => `- ${p}`),
     '',
     '## Allowances',

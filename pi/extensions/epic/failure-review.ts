@@ -28,33 +28,32 @@ export function reviewFailures(record: TaskVerificationRecord): ReviewFailure[] 
         })
     }
   }
+  for (const entry of report.findings) {
+    if (entry.status !== 'open' || entry.feedback.severity === 'suggestion') continue
+    const f = entry.feedback
+    failures.set(`review:${entry.id}`, {
+      id: `review:${entry.id}`, expected: f.requiredFix,
+      actual: `${f.message}\n${f.failureScenario}`, likely: false,
+    })
+  }
   // Missing evidence alone is not a failure and must not create a failure section.
   const unresolvedFailures = report.readiness === 'issues_remaining' || failures.size > 0
     ? report.unresolved : []
   // These IDs also represent failed checks, semantic findings and verifier errors.
   for (const id of unresolvedFailures) {
     if (failures.has(id) || (!id.startsWith('check:') && !id.startsWith('review:') && !id.startsWith('problem:'))) continue
-    if (id.startsWith('review:evidence:')) {
-      const obligationId = id.slice('review:evidence:'.length)
-      const reviews = report.cycle?.evidenceReviews.filter(r => r.obligationIds.includes(obligationId)) ?? []
-      if (!reviews.some(r => r.result.findings.length > 0)) continue
-    }
-    const findings = id.startsWith('review:evidence:')
-      ? (report.cycle?.evidenceReviews.filter(r => r.obligationIds.includes(id.slice('review:evidence:'.length))).flatMap(r => r.result.findings) ?? [])
-      : [...(report.cycle?.review?.findings ?? []), ...(report.cycle?.evidenceReviews.flatMap(r => r.result.findings) ?? [])]
-    const findingText = findings.map(f => f.message).join('\n')
+    // Semantic failures are represented individually by the registry above.
+    if (id.startsWith('review:')) continue
     const problem = id.startsWith('problem:') ? report.problems[Number(id.slice(8)) - 1] : undefined
     if (problem?.startsWith('Browser evidence review incomplete:')) continue
     const check = [...(report.cycle?.fast?.checks ?? []), ...(report.cycle?.full?.checks ?? [])].find(c => `check:${c.name}` === id)
     failures.set(id, {
       id, expected: check ? `Check ${check.name} must pass.`
         : id.startsWith('problem:') ? `Resolve: ${problem ?? 'Verification reported a problem; inspect the report.'}`
-        : id.startsWith('review:') ? `Resolve: ${findingText || 'Review reported a finding; inspect the report.'}`
         : id === 'check:browser-smoke' ? 'Browser smoke checks must pass.'
         : id === 'check:fast' ? 'Fast checks must pass.' : 'Full checks must pass.',
       actual: id.startsWith('problem:') ? report.problems[Number(id.slice(8)) - 1] ?? id
         : check ? check.stderrPreview || check.stdoutPreview || 'Check did not pass.'
-        : id.startsWith('review:') ? findingText || 'Review reported a finding; inspect the report.'
         : id === 'check:browser-smoke' ? report.cycle?.smoke?.findings.map(f => f.message).join('\n') ?? id
         : id === 'check:fast' || id === 'check:full' ? 'Check suite did not pass or was not completed.' : 'Review the verification report for the failed check.',
       likely: false,

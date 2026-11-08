@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto'
 import type {
   TaskVerificationRecord,
   VerificationCycle,
@@ -79,24 +78,6 @@ export function cycleWork(
         }),
       })
   }
-  for (const finding of [
-    ...(cycle.review?.findings ?? []),
-    ...cycle.evidenceReviews.flatMap((r) => r.result.findings),
-  ]) {
-    if (finding.severity === 'suggestion') continue
-    const key = createHash('sha256')
-      .update(
-        JSON.stringify([finding.file, finding.message, finding.requiredFix])
-      )
-      .digest('hex')
-      .slice(0, 16)
-    work.push({
-      id: `review:${key}`,
-      kind: 'semantic',
-      action: 'repair',
-      feedback: JSON.stringify(finding),
-    })
-  }
   return work
 }
 
@@ -139,7 +120,7 @@ export function processVerificationCycle(
       throw new Error(
         'Targeted verification does not match the persisted queue.'
       )
-    schedule.queue.shift()
+    if (target.kind !== 'semantic') schedule.queue.shift()
     if (
       (!cycle.fast?.passed || !cycle.full?.passed) &&
       target.kind === 'criterion'
@@ -161,6 +142,18 @@ export function processVerificationCycle(
       (a, b) => Number(b.kind === 'check') - Number(a.kind === 'check')
     )
   }
+  // Semantic work is authoritative in the registry, not the wording of this cycle's review.
+  const active = record.findings.filter(f => f.status === 'open' && f.feedback.severity !== 'suggestion')
+  const semantic = new Map(active.map(f => [`review:${f.id}`, {
+    id: `review:${f.id}`, kind: 'semantic' as const, action: 'repair' as const, feedback: JSON.stringify(f.feedback),
+  }]))
+  schedule.queue = schedule.queue.flatMap(item => {
+    if (item.kind !== 'semantic') return [item]
+    const updated = semantic.get(item.id)
+    semantic.delete(item.id)
+    return updated ? [updated] : []
+  })
+  schedule.queue.push(...semantic.values())
   delete schedule.repairInvocationId
   schedule.processedCycleId = cycle.id
   schedule.phase = schedule.queue.length
